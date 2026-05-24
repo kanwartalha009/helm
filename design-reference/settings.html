@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="settings" data-title="Settings">
+
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Settings</h2>
+        <p class="page-subtitle">Workspace-wide configuration.</p>
+      </div>
+    </div>
+
+    <div class="tabs" data-tab-group>
+      <a class="tab active" data-tab="general">General</a>
+      <a class="tab" data-tab="account">Account</a>
+      <a class="tab" data-tab="mfa">Two-factor</a>
+      <a class="tab" data-tab="api">API tokens</a>
+      <a class="tab" data-tab="notifications">Notifications</a>
+      <a class="tab" data-tab="danger">Danger</a>
+    </div>
+
+    <!-- General -->
+    <div data-tab-content="general" style="max-width: 640px;">
+      <h3 class="section-title">Workspace</h3>
+      <form class="card" style="padding: 24px;">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">Workspace name</label>
+            <input class="input" type="text" value="Nova Solution" />
+          </div>
+          <div class="field">
+            <label class="field-label">Primary blended currency</label>
+            <select class="input"><option>USD</option><option>EUR</option></select>
+            <span class="field-hint">Used for the dashboard&rsquo;s blended ROAS and totals row.</span>
+          </div>
+          <div class="field">
+            <label class="field-label">Daily sync time</label>
+            <input class="input" type="text" value="13:00 UTC" disabled style="background: var(--surface-subtle);" />
+            <span class="field-hint">Hardcoded to 13:00 UTC. Yesterday closes in every timezone by then.</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-8 mt-24">
+          <button type="submit" class="btn btn-primary btn-sm">Save changes</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Account -->
+    <div data-tab-content="account" style="display: none; max-width: 640px;">
+      <h3 class="section-title">Profile</h3>
+      <form class="card" style="padding: 24px;">
+        <div class="form-grid">
+          <div class="form-grid form-grid-2">
+            <div class="field">
+              <label class="field-label">Name</label>
+              <input class="input" type="text" value="Kanwar" />
+            </div>
+            <div class="field">
+              <label class="field-label">Email</label>
+              <input class="input" type="email" value="kanwartalha009@gmail.com" />
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label">Timezone</label>
+            <select class="input"><option>Europe/Madrid</option></select>
+            <span class="field-hint">Used for displaying timestamps in the UI. Brand metric dates always use the brand&rsquo;s timezone.</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-8 mt-24">
+          <button type="submit" class="btn btn-primary btn-sm">Save changes</button>
+          <a href="forgot-password.html" class="btn btn-ghost btn-sm">Change password</a>
+        </div>
+      </form>
+    </div>
+
+    <!-- MFA -->
+    <div data-tab-content="mfa" style="display: none; max-width: 640px;" id="mfa">
+      <h3 class="section-title">Two-factor authentication</h3>
+      <div class="card" style="padding: 24px;">
+        <div class="flex items-center justify-between mb-16">
+          <div>
+            <div style="font-weight: 500;">Authenticator app</div>
+            <div class="text-sm muted mt-4">Use Google Authenticator, Authy, 1Password, or Bitwarden.</div>
+          </div>
+          <span class="tag tag-warning">Not enabled</span>
+        </div>
+        <div class="banner banner-warning mb-16">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/></svg>
+          Master admin accounts must enable two-factor auth. You&rsquo;ll be required to do this on next sign-in.
+        </div>
+        <a href="mfa-setup.html" class="btn btn-primary btn-sm">Set up two-factor auth</a>
+      </div>
+    </div>
+
+    <!-- API tokens -->
+    <div data-tab-content="api" style="display: none; max-width: 640px;">
+      <h3 class="section-title">Personal access tokens</h3>
+      <p class="text-sm muted mb-16">Used for the Helm CLI and direct API access. Tokens carry your full permissions.</p>
+      <div class="card" style="overflow: hidden;">
+        <div class="list-row">
+          <div class="list-row-main">
+            <div class="list-row-title">CLI &mdash; laptop</div>
+            <div class="list-row-sub">Last used 2 days ago &middot; Created Mar 4, 2026</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" data-confirm="Revoke this token? Any process using it will lose access immediately." style="color: var(--danger);">Revoke</button>
+        </div>
+        <div class="list-row">
+          <div class="list-row-main">
+            <div class="list-row-title">Backfill script</div>
+            <div class="list-row-sub">Last used 12 days ago &middot; Created Feb 28, 2026</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" data-confirm="Revoke this token?" style="color: var(--danger);">Revoke</button>
+        </div>
+      </div>
+      <button class="btn btn-secondary btn-sm mt-16" data-open="new-token">Create token</button>
+    </div>
+
+    <!-- Notifications -->
+    <div data-tab-content="notifications" style="display: none; max-width: 640px;">
+      <h3 class="section-title">Email alerts</h3>
+      <div class="card" style="padding: 24px;">
+        <div class="form-grid">
+          <label class="flex items-center gap-8" style="cursor: pointer;">
+            <input type="checkbox" checked />
+            <span><strong>Daily sync digest.</strong> Summary at 14:00 UTC if &gt;5% of brands failed yesterday.</span>
+          </label>
+          <label class="flex items-center gap-8" style="cursor: pointer;">
+            <input type="checkbox" checked />
+            <span><strong>Connection errored.</strong> Real-time when any platform connection moves to <em>errored</em>.</span>
+          </label>
+          <label class="flex items-center gap-8" style="cursor: pointer;">
+            <input type="checkbox" />
+            <span><strong>Ticket assigned to me.</strong> Phase 3.</span>
+          </label>
+          <label class="flex items-center gap-8" style="cursor: pointer;">
+            <input type="checkbox" />
+            <span><strong>Weekly summary.</strong> Monday morning recap of the prior week&rsquo;s totals.</span>
+          </label>
+        </div>
+        <div class="flex items-center gap-8 mt-24">
+          <button type="submit" class="btn btn-primary btn-sm">Save preferences</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Danger -->
+    <div data-tab-content="danger" style="display: none; max-width: 640px;">
+      <h3 class="section-title" style="color: var(--danger);">Danger zone</h3>
+      <div class="card" style="padding: 24px; border-color: #FCA5A5;">
+        <div class="flex items-center justify-between">
+          <div>
+            <div style="font-weight: 500;">Export workspace data</div>
+            <div class="text-sm muted mt-4">CSV of brands, daily_metrics, sync_logs, audit_logs. May take a few minutes.</div>
+          </div>
+          <button class="btn btn-secondary btn-sm">Request export</button>
+        </div>
+        <hr class="divider" style="margin: 20px 0;" />
+        <div class="flex items-center justify-between">
+          <div>
+            <div style="font-weight: 500; color: var(--danger);">Delete workspace</div>
+            <div class="text-sm muted mt-4">Permanently delete all brands, metrics, connections, and audit logs. Cannot be undone.</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" data-confirm="Delete the entire workspace? This cannot be undone. All 102 brands, 4 million metric rows, and the audit log will be permanently removed." style="color: var(--danger);">Delete workspace</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Create token modal -->
+  <div class="modal-backdrop" id="new-token">
+    <div class="modal">
+      <div class="modal-header"><span class="modal-title">Create personal access token</span><button class="modal-close" data-close>&times;</button></div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">Name</label>
+            <input class="input" type="text" placeholder="e.g. Backfill script" />
+          </div>
+          <div class="field">
+            <label class="field-label">Expires</label>
+            <select class="input"><option>30 days</option><option>90 days</option><option>1 year</option><option>Never</option></select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-close>Cancel</button>
+        <button class="btn btn-primary btn-sm" data-close>Create token</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

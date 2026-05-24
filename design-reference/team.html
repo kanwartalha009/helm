@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Team &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="team" data-title="Team" data-tag="14 members">
+
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Team</h2>
+        <p class="page-subtitle">Internal users and brand-side users with access to Helm.</p>
+      </div>
+      <a href="invite-user.html" class="btn btn-primary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+        Invite user
+      </a>
+    </div>
+
+    <div class="tabs" data-tab-group>
+      <a class="tab active" data-tab="active">Active (14)</a>
+      <a class="tab" data-tab="invited">Invited (3)</a>
+      <a class="tab" data-tab="disabled">Disabled (1)</a>
+    </div>
+
+    <div data-tab-content="active">
+      <div class="card" style="overflow: hidden;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 30%">Name</th>
+              <th>Role</th>
+              <th>Brands</th>
+              <th>MFA</th>
+              <th>Last seen</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div class="brand-cell">
+                  <span class="brand-avatar" style="background: var(--accent); color: var(--accent-fg); border-color: var(--accent); border-radius: 50%;">K</span>
+                  <div>
+                    <div style="font-weight: 500;">Kanwar <span class="tag" style="margin-left: 4px;">You</span></div>
+                    <div class="brand-meta">kanwartalha009@gmail.com</div>
+                  </div>
+                </div>
+              </td>
+              <td>Master admin</td>
+              <td class="muted">All (102)</td>
+              <td><span class="tag tag-warning"><span class="dot dot-warning"></span>Required</span></td>
+              <td class="muted text-sm">Online</td>
+              <td class="text-right"><a href="profile.html" class="btn btn-ghost btn-sm">Edit &rarr;</a></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="brand-cell">
+                  <span class="brand-avatar" style="border-radius: 50%;">JR</span>
+                  <div>
+                    <div style="font-weight: 500;">Jordan Reeves</div>
+                    <div class="brand-meta">jordan@nova-solution.io</div>
+                  </div>
+                </div>
+              </td>
+              <td>Manager</td>
+              <td class="muted">All (102)</td>
+              <td><span class="tag tag-success">Enabled</span></td>
+              <td class="muted text-sm">12 min ago</td>
+              <td class="text-right"><a href="user-detail.html" class="btn btn-ghost btn-sm">Edit &rarr;</a></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="brand-cell">
+                  <span class="brand-avatar" style="border-radius: 50%;">SM</span>
+                  <div>
+                    <div style="font-weight: 500;">Sara Mahmoud</div>
+                    <div class="brand-meta">sara@nova-solution.io</div>
+                  </div>
+                </div>
+              </td>
+              <td>Team member</td>
+              <td class="muted">14 brands &middot; GCC</td>
+              <td><span class="tag tag-success">Enabled</span></td>
+              <td class="muted text-sm">2 hr ago</td>
+              <td class="text-right"><a href="user-detail.html" class="btn btn-ghost btn-sm">Edit &rarr;</a></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="brand-cell">
+                  <span class="brand-avatar" style="border-radius: 50%;">DL</span>
+                  <div>
+                    <div style="font-weight: 500;">Diego L&oacute;pez</div>
+                    <div class="brand-meta">diego@nova-solution.io</div>
+                  </div>
+                </div>
+              </td>
+              <td>Team member</td>
+              <td class="muted">38 brands &middot; EU</td>
+              <td><span class="tag tag-success">Enabled</span></td>
+              <td class="muted text-sm">Yesterday</td>
+              <td class="text-right"><a href="user-detail.html" class="btn btn-ghost btn-sm">Edit &rarr;</a></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="brand-cell">
+                  <span class="brand-avatar" style="border-radius: 50%;">AM</span>
+                  <div>
+                    <div style="font-weight: 500;">Ana Mart&iacute;n</div>
+                    <div class="brand-meta">ana@meller.com</div>
+                  </div>
+                </div>
+              </td>
+              <td>Brand user</td>
+              <td class="muted">Meller</td>
+              <td><span class="muted">Not set</span></td>
+              <td class="muted text-sm">3 days ago</td>
+              <td class="text-right"><a href="user-detail.html" class="btn btn-ghost btn-sm">Edit &rarr;</a></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="brand-cell">
+                  <span class="brand-avatar" style="border-radius: 50%;">RK</span>
+                  <div>
+                    <div style="font-weight: 500;">Rashid Khan</div>
+                    <div class="brand-meta">rashid@ayla-co.com</div>
+                  </div>
+                </div>
+              </td>
+              <td>Brand user</td>
+              <td class="muted">Ayla &amp; Co</td>
+              <td><span class="tag tag-success">Enabled</span></td>
+              <td class="muted text-sm">5 hr ago</td>
+              <td class="text-right"><a href="user-detail.html" class="btn btn-ghost btn-sm">Edit &rarr;</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div data-tab-content="invited" style="display: none;">
+      <div class="card" style="overflow: hidden;">
+        <table class="data-table">
+          <thead><tr><th>Email</th><th>Role</th><th>Brands</th><th>Invited</th><th>Expires</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>maria@nova-solution.io</td>
+              <td>Team member</td>
+              <td class="muted">All EU</td>
+              <td class="muted text-sm">2 days ago</td>
+              <td class="muted text-sm">5 days</td>
+              <td class="text-right">
+                <button class="btn btn-ghost btn-sm">Resend</button>
+                <button class="btn btn-ghost btn-sm" data-confirm="Revoke this invitation?" style="color: var(--danger);">Revoke</button>
+              </td>
+            </tr>
+            <tr>
+              <td>tariq@kenza-beauty.com</td>
+              <td>Brand user</td>
+              <td class="muted">Kenza Beauty</td>
+              <td class="muted text-sm">4 hr ago</td>
+              <td class="muted text-sm">7 days</td>
+              <td class="text-right">
+                <button class="btn btn-ghost btn-sm">Resend</button>
+                <button class="btn btn-ghost btn-sm" data-confirm="Revoke this invitation?" style="color: var(--danger);">Revoke</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div data-tab-content="disabled" style="display: none;">
+      <div class="empty-state">
+        <h3>No disabled users right now</h3>
+        <p>Users you disable show up here. Disabling preserves their audit trail but blocks sign-in.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

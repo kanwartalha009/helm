@@ -1,0 +1,67 @@
+# =========================
+# OS / editors
+# =========================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# =========================
+# /api — Laravel
+# =========================
+/api/vendor/
+/api/node_modules/
+
+# Secrets — NEVER commit these
+/api/.env
+/api/.env.backup
+/api/.env.production
+/api/.env.local
+
+# Laravel runtime artifacts
+/api/storage/*.key
+/api/storage/app/public/
+/api/storage/framework/cache/data/
+/api/storage/framework/sessions/
+/api/storage/framework/views/
+/api/storage/framework/testing/
+/api/storage/logs/
+/api/bootstrap/cache/*.php
+/api/public/storage
+/api/public/hot
+/api/public/build/
+
+# Frontend build copied into Laravel public dir during deploy
+/api/public/app/
+
+# Test caches
+/api/.phpunit.result.cache
+/api/.phpunit.cache
+
+# Composer auth file (sometimes contains tokens)
+/api/auth.json
+
+# =========================
+# /web — Vite/React (the folder also has its own .gitignore; this is belt-and-suspenders)
+# =========================
+/web/dist/
+/web/dist-ssr/
+/web/node_modules/
+/web/.env.local
+/web/.env.*.local
+/web/.vite/
+
+# =========================
+# Local-only docker overrides
+# =========================
+docker-compose.override.yml
+
+# =========================
+# Logs
+# =========================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

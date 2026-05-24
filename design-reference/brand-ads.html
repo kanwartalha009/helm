@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meller &mdash; ad performance &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="brands" data-title="Ad performance">
+
+    <div class="breadcrumb">
+      <a href="brands.html">Brands</a>
+      <span class="sep">/</span>
+      <a href="brand-detail.html">Meller</a>
+      <span class="sep">/</span>
+      <span class="current">Ad performance</span>
+    </div>
+
+    <div class="page-header">
+      <div class="flex items-center gap-12">
+        <span class="brand-avatar" style="width: 32px; height: 32px;">ML</span>
+        <div>
+          <h2 class="page-title">Meller &mdash; ad performance</h2>
+          <p class="page-subtitle">Campaign &rarr; ad set &rarr; ad. Last 7 days.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-bar mb-16">
+      <span class="chip">Yesterday</span>
+      <span class="chip active">Last 7 days</span>
+      <span class="chip">Last 14 days</span>
+      <span class="chip">Last 30 days</span>
+      <span style="flex: 1"></span>
+      <div class="segmented">
+        <button class="active">Meta</button>
+        <button>Google</button>
+        <button>TikTok</button>
+        <button>All</button>
+      </div>
+    </div>
+
+    <div class="banner banner-warning mb-16">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/></svg>
+      <strong>3 underperformers</strong> &middot; spend &gt; &euro;500 with ROAS &lt; 1.0 over the trailing 14 days. <a href="#" style="color: inherit; text-decoration: underline; margin-left: 6px;">Review</a>
+    </div>
+
+    <div class="card" style="overflow: hidden;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th style="width: 30%">Name</th>
+            <th class="num">Spend</th>
+            <th class="num">Revenue</th>
+            <th class="num">ROAS</th>
+            <th class="num">CTR</th>
+            <th class="num">CPC</th>
+            <th class="num">Freq</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></td>
+            <td>
+              <div style="font-weight: 500;">Summer Launch &mdash; Prospecting</div>
+              <div class="brand-meta">CAMPAIGN &middot; 6 ad sets &middot; 24 ads</div>
+            </td>
+            <td class="num"><span class="num">$5,820</span></td>
+            <td class="num"><span class="num">$17,140</span></td>
+            <td class="num">
+              <span class="metric-primary num">2.94&times;</span>
+              <span class="tag tag-success" style="margin-left: 4px;">Scale</span>
+            </td>
+            <td class="num"><span class="num">1.82%</span></td>
+            <td class="num"><span class="num">$0.47</span></td>
+            <td class="num"><span class="num">1.4</span></td>
+            <td class="text-right"><button class="btn btn-ghost btn-sm">Open &rarr;</button></td>
+          </tr>
+          <tr>
+            <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></td>
+            <td>
+              <div style="font-weight: 500;">Retargeting &mdash; ATC 7d</div>
+              <div class="brand-meta">CAMPAIGN &middot; 3 ad sets &middot; 11 ads</div>
+            </td>
+            <td class="num"><span class="num">$2,140</span></td>
+            <td class="num"><span class="num">$8,920</span></td>
+            <td class="num"><span class="metric-primary num">4.17&times;</span></td>
+            <td class="num"><span class="num">2.41%</span></td>
+            <td class="num"><span class="num">$0.31</span></td>
+            <td class="num"><span class="num">3.2</span></td>
+            <td class="text-right"><button class="btn btn-ghost btn-sm">Open &rarr;</button></td>
+          </tr>
+          <tr>
+            <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></td>
+            <td>
+              <div style="font-weight: 500;">Brand awareness &mdash; broad</div>
+              <div class="brand-meta">CAMPAIGN &middot; 2 ad sets &middot; 6 ads</div>
+            </td>
+            <td class="num"><span class="num">$1,420</span></td>
+            <td class="num"><span class="num">$1,180</span></td>
+            <td class="num">
+              <span class="metric-primary num">0.83&times;</span>
+              <span class="tag tag-warning" style="margin-left: 4px;">Underperformer</span>
+            </td>
+            <td class="num"><span class="num">0.94%</span></td>
+            <td class="num"><span class="num">$0.62</span></td>
+            <td class="num"><span class="num">2.1</span></td>
+            <td class="text-right"><button class="btn btn-ghost btn-sm">Open &rarr;</button></td>
+          </tr>
+          <tr>
+            <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></td>
+            <td>
+              <div style="font-weight: 500;">Lookalikes &mdash; 1% LAL</div>
+              <div class="brand-meta">CAMPAIGN &middot; 4 ad sets &middot; 15 ads</div>
+            </td>
+            <td class="num"><span class="num">$830</span></td>
+            <td class="num"><span class="num">$1,400</span></td>
+            <td class="num"><span class="metric-primary num">1.69&times;</span></td>
+            <td class="num"><span class="num">1.21%</span></td>
+            <td class="num"><span class="num">$0.51</span></td>
+            <td class="num"><span class="num">1.8</span></td>
+            <td class="text-right"><button class="btn btn-ghost btn-sm">Open &rarr;</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="banner banner-info mt-24">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      Attribution: 7-day click only. Flags refresh nightly with the daily sync.
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

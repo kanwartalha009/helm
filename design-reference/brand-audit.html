@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meller &mdash; store audit &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="brands" data-title="Store audit">
+
+    <div class="breadcrumb">
+      <a href="brands.html">Brands</a>
+      <span class="sep">/</span>
+      <a href="brand-detail.html">Meller</a>
+      <span class="sep">/</span>
+      <span class="current">Store audit</span>
+    </div>
+
+    <div class="page-header">
+      <div class="flex items-center gap-12">
+        <span class="brand-avatar" style="width: 32px; height: 32px;">ML</span>
+        <div>
+          <h2 class="page-title">Meller &mdash; store audit</h2>
+          <p class="page-subtitle">Refreshed weekly. Last run: 2 days ago at 04:00 UTC.</p>
+        </div>
+      </div>
+      <button class="btn btn-secondary btn-sm">Re-run audit</button>
+    </div>
+
+    <div class="stat-grid stat-grid-3 mb-24">
+      <div class="stat">
+        <div class="stat-label">Page speed (LCP)</div>
+        <div class="stat-value num">2.4s</div>
+        <div class="stat-sub" style="color: var(--success);">Within target (&lt; 2.5s)</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Checkout drop-off</div>
+        <div class="stat-value num">61.4%</div>
+        <div class="stat-sub" style="color: var(--warning);">+4.2 pts vs prior week</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Broken events</div>
+        <div class="stat-value num">2</div>
+        <div class="stat-sub" style="color: var(--warning);">Meta Pixel: Purchase, AddToCart</div>
+      </div>
+    </div>
+
+    <h3 class="section-title">Findings</h3>
+    <div class="card" style="overflow: hidden;">
+      <div class="list-row">
+        <span class="dot dot-warning"></span>
+        <div class="list-row-main">
+          <div class="list-row-title">Meta Pixel &mdash; Purchase event missing on /thank-you</div>
+          <div class="list-row-sub">page_speed &middot; severity: warn &middot; detected 2 days ago</div>
+        </div>
+        <button class="btn btn-secondary btn-sm">View detail</button>
+        <button class="btn btn-ghost btn-sm" data-confirm="Mark this finding resolved?">Mark resolved</button>
+      </div>
+      <div class="list-row">
+        <span class="dot" style="background: var(--danger);"></span>
+        <div class="list-row-main">
+          <div class="list-row-title">Checkout step 2 drop-off increased to 38%</div>
+          <div class="list-row-sub">checkout_drop &middot; severity: critical &middot; detected 2 days ago</div>
+        </div>
+        <button class="btn btn-secondary btn-sm">View detail</button>
+        <button class="btn btn-ghost btn-sm" data-confirm="Mark this finding resolved?">Mark resolved</button>
+      </div>
+      <div class="list-row">
+        <span class="dot dot-warning"></span>
+        <div class="list-row-main">
+          <div class="list-row-title">LCP regression on /products on mobile (3.1s)</div>
+          <div class="list-row-sub">page_speed &middot; severity: warn &middot; detected 9 days ago</div>
+        </div>
+        <button class="btn btn-secondary btn-sm">View detail</button>
+        <button class="btn btn-ghost btn-sm" data-confirm="Mark this finding resolved?">Mark resolved</button>
+      </div>
+      <div class="list-row">
+        <span class="dot" style="background: var(--text-muted);"></span>
+        <div class="list-row-main">
+          <div class="list-row-title">Cart abandonment email opt-in below 12%</div>
+          <div class="list-row-sub">info &middot; detected 16 days ago</div>
+        </div>
+        <button class="btn btn-secondary btn-sm">View detail</button>
+        <button class="btn btn-ghost btn-sm" data-confirm="Mark this finding resolved?">Mark resolved</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

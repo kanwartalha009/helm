@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>#1148 &mdash; Meta Pixel Purchase firing twice &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="tickets" data-title="#1148">
+
+    <div class="breadcrumb">
+      <a href="tickets.html">Tickets</a>
+      <span class="sep">/</span>
+      <span class="current">#1148</span>
+    </div>
+
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Meta Pixel Purchase event firing twice on Meller</h2>
+        <p class="page-subtitle">Raised by Ana Mart&iacute;n on May 15, 2026 at 10:14 &middot; <a href="brand-detail.html">Meller</a></p>
+      </div>
+      <div class="flex items-center gap-8">
+        <select class="input" style="width: auto;">
+          <option>Open</option>
+          <option>Triaged</option>
+          <option selected>In progress</option>
+          <option>Blocked</option>
+          <option>Done</option>
+          <option>Won&rsquo;t do</option>
+        </select>
+        <div class="dropdown">
+          <button class="btn btn-secondary btn-sm" onclick="this.parentElement.classList.toggle('open')">Actions &darr;</button>
+          <div class="dropdown-menu right down">
+            <a href="#" class="dropdown-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Link to ClickUp task
+            </a>
+            <a href="#" class="dropdown-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8"/></svg>Subscribe</a>
+            <div class="dropdown-divider"></div>
+            <a href="#" class="dropdown-item danger" data-confirm="Delete this ticket? This cannot be undone.">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14H7L5 6"/></svg>
+              Delete ticket
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="two-col">
+
+      <div class="two-col-stack">
+
+        <!-- Original message -->
+        <div class="card" style="padding: 20px;">
+          <div class="flex items-center gap-8 mb-12">
+            <span class="brand-avatar" style="border-radius: 50%; width: 28px; height: 28px;">AM</span>
+            <strong style="font-size: 14px;">Ana Mart&iacute;n</strong>
+            <span class="text-xs muted">&middot; brand_user &middot; May 15, 10:14</span>
+          </div>
+          <p style="font-size: 14px; line-height: 1.6;">We&rsquo;re seeing double-counted purchases on Meta Ads Manager. Our Shopify reports show 812 orders yesterday but Meta is reporting 1,624 purchases.</p>
+          <p style="font-size: 14px; line-height: 1.6; margin-top: 8px;">Steps:</p>
+          <ol style="font-size: 14px; line-height: 1.8; padding-left: 20px;">
+            <li>Place a test order</li>
+            <li>Inspect network &mdash; Purchase event fires on /thank-you and on /checkout/success</li>
+          </ol>
+        </div>
+
+        <!-- Internal note -->
+        <div class="card" style="padding: 20px; background: #FFFBEB; border-color: var(--warning-border);">
+          <div class="flex items-center gap-8 mb-12">
+            <span class="brand-avatar" style="border-radius: 50%; width: 28px; height: 28px;">JR</span>
+            <strong style="font-size: 14px;">Jordan Reeves</strong>
+            <span class="text-xs muted">&middot; manager &middot; May 15, 10:42</span>
+            <span class="tag tag-warning" style="margin-left: auto;">Internal note</span>
+          </div>
+          <p style="font-size: 14px; line-height: 1.6;">Confirmed. Looks like the theme has both <code style="font-family: var(--font-mono); font-size: 12px; background: var(--surface-subtle); padding: 1px 4px; border-radius: 3px;">fbq('track', 'Purchase')</code> in theme.liquid AND in the additional scripts on checkout.liquid. We just need to remove one. Picking this up.</p>
+        </div>
+
+        <!-- Public reply -->
+        <div class="card" style="padding: 20px;">
+          <div class="flex items-center gap-8 mb-12">
+            <span class="brand-avatar" style="border-radius: 50%; width: 28px; height: 28px;">JR</span>
+            <strong style="font-size: 14px;">Jordan Reeves</strong>
+            <span class="text-xs muted">&middot; May 15, 11:08</span>
+          </div>
+          <p style="font-size: 14px; line-height: 1.6;">Hi Ana &mdash; confirmed on our side. The Pixel snippet is installed in two places and both fire on checkout. We&rsquo;ll push a theme update to remove the duplicate later today. I&rsquo;ll mark this in progress.</p>
+        </div>
+
+        <!-- Reply box -->
+        <div class="card" style="padding: 20px;">
+          <div class="tabs" data-tab-group style="margin-bottom: 16px;">
+            <a class="tab active" data-tab="public-reply">Reply to brand</a>
+            <a class="tab" data-tab="internal-reply">Internal note</a>
+          </div>
+          <div data-tab-content="public-reply">
+            <textarea class="input" rows="4" placeholder="Reply visible to the brand user&hellip;" style="resize: vertical; font-family: inherit;"></textarea>
+            <div class="flex items-center justify-between mt-12">
+              <span class="text-xs muted">Markdown supported. Attachments accepted.</span>
+              <button class="btn btn-primary btn-sm">Send reply</button>
+            </div>
+          </div>
+          <div data-tab-content="internal-reply" style="display: none;">
+            <textarea class="input" rows="4" placeholder="Internal-only note. Brand users never see this.&hellip;" style="resize: vertical; font-family: inherit;"></textarea>
+            <div class="flex items-center justify-between mt-12">
+              <span class="text-xs muted">Visible to managers and team members only.</span>
+              <button class="btn btn-primary btn-sm">Post note</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <aside>
+        <div class="card" style="padding: 16px;">
+          <h3 class="section-title">Details</h3>
+          <div class="form-grid" style="gap: 12px;">
+            <div>
+              <div class="text-xs muted">Brand</div>
+              <a href="brand-detail.html" style="font-weight: 500;">Meller</a>
+            </div>
+            <div>
+              <div class="text-xs muted">Category</div>
+              <div>Bug</div>
+            </div>
+            <div>
+              <div class="text-xs muted">Priority</div>
+              <div><span class="tag tag-warning">Urgent</span></div>
+            </div>
+            <div>
+              <div class="text-xs muted">Assignee</div>
+              <div class="flex items-center gap-8 mt-4">
+                <span class="brand-avatar" style="border-radius: 50%; width: 22px; height: 22px; font-size: 10px;">JR</span>
+                Jordan Reeves
+              </div>
+            </div>
+            <div>
+              <div class="text-xs muted">External task</div>
+              <div class="muted text-sm">Not linked</div>
+            </div>
+            <div>
+              <div class="text-xs muted">Raised</div>
+              <div class="text-sm">May 15, 10:14</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mt-16" style="padding: 16px;">
+          <h3 class="section-title">Activity</h3>
+          <div class="text-sm" style="line-height: 1.7;">
+            <div><strong>Ana Mart&iacute;n</strong> raised this ticket <span class="muted">&middot; 2 hr ago</span></div>
+            <div class="mt-8"><strong>Jordan Reeves</strong> changed status to <em>triaged</em> <span class="muted">&middot; 2 hr ago</span></div>
+            <div class="mt-8"><strong>Jordan Reeves</strong> assigned themselves <span class="muted">&middot; 1 hr ago</span></div>
+            <div class="mt-8"><strong>Jordan Reeves</strong> moved to <em>in progress</em> <span class="muted">&middot; 1 hr ago</span></div>
+          </div>
+        </div>
+      </aside>
+
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

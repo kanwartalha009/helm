@@ -1,0 +1,38 @@
+# Local dev services for Helm.
+# Run with: docker compose up -d
+# PHP and Node still run natively on the host.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: helm-postgres
+    environment:
+      POSTGRES_DB: helm
+      POSTGRES_USER: helm
+      POSTGRES_PASSWORD: helm
+    ports:
+      - "5432:5432"
+    volumes:
+      - helm-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U helm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: helm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - helm-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  helm-pg-data:
+  helm-redis-data:

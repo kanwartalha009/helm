@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Add a brand &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="brands" data-title="Add a brand">
+
+    <div class="breadcrumb">
+      <a href="brands.html">Brands</a>
+      <span class="sep">/</span>
+      <span class="current">Add a brand</span>
+    </div>
+
+    <div style="max-width: 720px;">
+
+      <div class="stepper">
+        <div class="step active">
+          <span class="step-num">1</span>
+          <span class="step-label">Brand details</span>
+        </div>
+        <span class="step-line"></span>
+        <div class="step">
+          <span class="step-num">2</span>
+          <span class="step-label">Connect platforms</span>
+        </div>
+        <span class="step-line"></span>
+        <div class="step">
+          <span class="step-num">3</span>
+          <span class="step-label">Initial sync</span>
+        </div>
+      </div>
+
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Tell us about the brand</h2>
+          <p class="page-subtitle">All fields can be edited later from the brand&rsquo;s settings tab.</p>
+        </div>
+      </div>
+
+      <form class="card" style="padding: 24px;" onsubmit="event.preventDefault(); window.location.href='add-brand-step-2.html';">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label" for="name">Brand name</label>
+            <input class="input" id="name" type="text" placeholder="Meller" required />
+          </div>
+          <div class="field">
+            <label class="field-label" for="slug">Slug</label>
+            <input class="input" id="slug" type="text" placeholder="meller" required />
+            <span class="field-hint">URL identifier. Lowercase, hyphens only. Auto-generated from name.</span>
+          </div>
+          <div class="form-grid form-grid-2">
+            <div class="field">
+              <label class="field-label" for="timezone">Timezone</label>
+              <select class="input" id="timezone" required>
+                <option>Europe/Madrid</option>
+                <option>Europe/Stockholm</option>
+                <option>Europe/Berlin</option>
+                <option>America/New_York</option>
+                <option>America/Los_Angeles</option>
+                <option>Asia/Dubai</option>
+                <option>Asia/Riyadh</option>
+                <option>UTC</option>
+              </select>
+              <span class="field-hint">IANA timezone. Every metric date is in this timezone.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="currency">Base currency</label>
+              <select class="input" id="currency" required>
+                <option>USD</option>
+                <option>EUR</option>
+                <option>GBP</option>
+                <option>AED</option>
+                <option>SAR</option>
+                <option>SEK</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="group">Group tag <span class="muted" style="font-weight: 400;">(optional)</span></label>
+            <input class="input" id="group" type="text" placeholder="EU, GCC, fashion&hellip;" list="group-options" />
+            <datalist id="group-options">
+              <option value="EU"></option>
+              <option value="GCC"></option>
+              <option value="US"></option>
+              <option value="fashion"></option>
+              <option value="beauty"></option>
+            </datalist>
+            <span class="field-hint">Used for grouping brands in the dashboard. Free text or pick an existing one.</span>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between mt-24">
+          <a href="brands.html" class="btn btn-ghost btn-sm">Cancel</a>
+          <button type="submit" class="btn btn-primary btn-sm">Continue &rarr;</button>
+        </div>
+      </form>
+
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meller &mdash; product performance &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="brands" data-title="Product performance">
+
+    <div class="breadcrumb">
+      <a href="brands.html">Brands</a>
+      <span class="sep">/</span>
+      <a href="brand-detail.html">Meller</a>
+      <span class="sep">/</span>
+      <span class="current">Products</span>
+    </div>
+
+    <div class="page-header">
+      <div class="flex items-center gap-12">
+        <span class="brand-avatar" style="width: 32px; height: 32px;">ML</span>
+        <div>
+          <h2 class="page-title">Meller &mdash; products</h2>
+          <p class="page-subtitle">Revenue and refunds by SKU. Refunds attribute to original order date.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-bar mb-16">
+      <span class="chip">Yesterday</span>
+      <span class="chip active">Last 7 days</span>
+      <span class="chip">MTD</span>
+      <span class="chip">Last 30 days</span>
+      <span style="flex: 1"></span>
+      <input class="input" type="text" placeholder="Search SKU or title&hellip;" style="max-width: 280px;" />
+    </div>
+
+    <div class="card" style="overflow: hidden;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width: 40%">Product</th>
+            <th class="num">Units sold</th>
+            <th class="num">Revenue</th>
+            <th class="num">Refunds</th>
+            <th class="num">Refund rate</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <div style="font-weight: 500;">Banks watch &mdash; Black</div>
+              <div class="brand-meta mono">SKU MLR-BNK-BLK</div>
+            </td>
+            <td class="num"><span class="num">214</span></td>
+            <td class="num"><span class="metric-primary num">$18,290</span></td>
+            <td class="num"><span class="num">$420</span> <span class="muted text-xs">5 units</span></td>
+            <td class="num"><span class="num">2.3%</span></td>
+            <td class="text-right"><button class="btn btn-ghost btn-sm">View &rarr;</button></td>
+          </tr>
+          <tr>
+            <td>
+              <div style="font-weight: 500;">Banks watch &mdash; Rose gold</div>
+              <div class="brand-meta mono">SKU MLR-BNK-RGD</div>
+            </td>
+            <td class="num"><span class="num">182</span></td>
+            <td class="num"><span class="metric-primary num">$15,470</span></td>
+            <td class="num"><span class="num">$340</span> <span class="muted text-xs">4 units</span></td>
+            <td class="num"><span class="num">2.2%</span></td>
+            <td class="text-right"><button class="btn btn-ghost btn-sm">View &rarr;</button></td>
+          </tr>
+          <tr>
+            <td>
+              <div style="font-weight: 500;">Maker sunglasses &mdash; Tortoise</div>
+              <div class="brand-meta mono">SKU MLR-MKR-TRT</div>
+            </td>
+            <td class="num"><span class="num">96</span></td>
+            <td class="num"><span class="metric-primary num">$5,760</span></td>
+            <td class="num"><span class="num">$680</span> <span class="muted text-xs">11 units</span></td>
+            <td class="num" style="color: var(--warning);"><span class="num">11.5%</span></td>
+            <td class="text-right"><button class="btn btn-ghost btn-sm">View &rarr;</button></td>
+          </tr>
+          <tr>
+            <td>
+              <div style="font-weight: 500;">Nayar bag &mdash; Camel</div>
+              <div class="brand-meta mono">SKU MLR-NYR-CML</div>
+            </td>
+            <td class="num"><span class="num">74</span></td>
+            <td class="num"><span class="metric-primary num">$4,810</span></td>
+            <td class="num"><span class="num">$130</span> <span class="muted text-xs">2 units</span></td>
+            <td class="num"><span class="num">2.7%</span></td>
+            <td class="text-right"><button class="btn btn-ghost btn-sm">View &rarr;</button></td>
+          </tr>
+          <tr>
+            <td>
+              <div style="font-weight: 500;">Calder rings &mdash; Silver</div>
+              <div class="brand-meta mono">SKU MLR-CLD-SLV</div>
+            </td>
+            <td class="num"><span class="num">52</span></td>
+            <td class="num"><span class="metric-primary num">$2,340</span></td>
+            <td class="num"><span class="num">$45</span> <span class="muted text-xs">1 unit</span></td>
+            <td class="num"><span class="num">1.9%</span></td>
+            <td class="text-right"><button class="btn btn-ghost btn-sm">View &rarr;</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex items-center justify-between mt-24">
+      <div class="text-xs muted">Showing 5 of 218 products</div>
+      <div class="flex items-center gap-8">
+        <button class="btn btn-secondary btn-sm">Previous</button>
+        <button class="btn btn-secondary btn-sm">Next</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

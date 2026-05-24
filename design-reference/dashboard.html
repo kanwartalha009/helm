@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="dashboard" data-title="All brands" data-tag="102 active">
+
+    <!-- Filter row 1 — primary period -->
+    <div class="filter-bar" style="margin-bottom: 10px;" data-chip-group>
+      <span class="chip active" data-chip>Yesterday</span>
+      <span class="chip" data-chip>Last 7 days</span>
+      <span class="chip" data-chip>Last week</span>
+      <span class="chip" data-chip>MTD</span>
+      <span class="chip" data-chip>Last month</span>
+      <span class="chip" data-chip>QTD</span>
+      <span class="chip" data-chip>Last quarter</span>
+      <span class="chip" data-chip>Last 30 days</span>
+      <span class="chip" data-chip>Last 90 days</span>
+      <span class="chip" data-chip>YTD</span>
+      <span class="chip" data-chip data-open="custom-range">Custom&hellip;</span>
+    </div>
+
+    <!-- Filter row 2 — comparison, columns, brand filter, currency / returns -->
+    <div class="filter-bar mb-12">
+
+      <!-- Compare with -->
+      <div class="popover">
+        <button class="filter-btn" data-popover>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M3 6h13M3 12h13M3 18h13M21 6l-3 3m3-3l-3-3M21 18l-3-3m3 3l-3 3"/></svg>
+          Compare with: <strong style="font-weight: 500;">prior period</strong>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="popover-panel" style="min-width: 260px;">
+          <div class="popover-label">Comparison baseline</div>
+          <button class="popover-item active">
+            Prior period
+            <span class="meta">May 14 (day before)</span>
+          </button>
+          <button class="popover-item">
+            Same period last year
+            <span class="meta">May 15, 2025</span>
+          </button>
+          <button class="popover-item">
+            Same period last month
+            <span class="meta">Apr 15, 2026</span>
+          </button>
+          <div class="popover-divider"></div>
+          <button class="popover-item">No comparison</button>
+        </div>
+      </div>
+
+      <!-- Columns -->
+      <button class="filter-btn" data-open="column-picker">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+        Columns
+        <span class="count">7</span>
+      </button>
+
+      <!-- Brand filter -->
+      <div class="popover">
+        <button class="filter-btn" data-popover>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          Brands: <strong style="font-weight: 500;">All 102</strong>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="popover-panel wide">
+          <div class="popover-label">Group</div>
+          <button class="popover-item active">All groups <span class="meta">102</span></button>
+          <button class="popover-item">EU <span class="meta">38</span></button>
+          <button class="popover-item">GCC <span class="meta">26</span></button>
+          <button class="popover-item">US <span class="meta">21</span></button>
+          <button class="popover-item">Nordics <span class="meta">9</span></button>
+          <button class="popover-item">Other <span class="meta">8</span></button>
+          <div class="popover-divider"></div>
+          <div class="popover-label">Status</div>
+          <button class="popover-item active">Active only <span class="meta">98</span></button>
+          <button class="popover-item">Include paused</button>
+          <button class="popover-item">Include archived</button>
+          <div class="popover-divider"></div>
+          <div class="popover-label">Currency</div>
+          <button class="popover-item active">All currencies</button>
+          <button class="popover-item">EUR <span class="meta">38</span></button>
+          <button class="popover-item">USD <span class="meta">21</span></button>
+          <button class="popover-item">AED <span class="meta">14</span></button>
+          <button class="popover-item">SAR <span class="meta">12</span></button>
+          <button class="popover-item">GBP <span class="meta">9</span></button>
+          <button class="popover-item">SEK <span class="meta">8</span></button>
+        </div>
+      </div>
+
+      <span style="flex: 1"></span>
+
+      <div class="segmented">
+        <button>Native</button>
+        <button class="active">USD</button>
+      </div>
+      <div class="segmented">
+        <button>Gross</button>
+        <button class="active">Net</button>
+      </div>
+    </div>
+
+    <!-- Comparison context line -->
+    <div class="compare-context">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      Showing <span class="mono">2026-05-15</span> (yesterday) vs <span class="mono">2026-05-14</span> (day before). Last 7 days column compares <span class="mono">May 9&ndash;15</span> vs <span class="mono">May 2&ndash;8</span>.
+    </div>
+
+    <!-- Summary -->
+    <div class="stat-grid stat-grid-4 mb-24">
+      <div class="stat">
+        <div class="stat-label">Revenue, net &middot; yesterday</div>
+        <div class="stat-value num">$418,402</div>
+        <div class="stat-sub num" style="color: var(--success);">+8.2% vs day before</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Ad spend &middot; yesterday</div>
+        <div class="stat-value num">$112,840</div>
+        <div class="stat-sub num" style="color: var(--success);">+3.1%</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Blended ROAS &middot; yesterday</div>
+        <div class="stat-value num">3.71&times;</div>
+        <div class="stat-sub num" style="color: var(--success);">+0.17 vs day before</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Sync health</div>
+        <div class="stat-value">
+          <span class="num">98</span>
+          <span class="text-sm muted" style="font-size: 14px;">of 102</span>
+        </div>
+        <div class="stat-sub" style="color: var(--warning);">
+          <a href="sync-health.html" style="color: inherit;">4 brands need attention &rarr;</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="banner banner-info mb-16">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Last 7 days block on the right is independent of the date filter.
+    </div>
+
+    <!-- Table -->
+    <div class="card" style="overflow-x: auto;">
+      <table class="data-table dashboard-table">
+        <thead>
+          <tr>
+            <th style="width: 220px;">Brand</th>
+            <th class="num">Revenue</th>
+            <th class="num">Meta</th>
+            <th class="num">Google</th>
+            <th class="num">TikTok</th>
+            <th class="num">Total spend</th>
+            <th class="num">ROAS</th>
+            <th class="num col-group-start">Revenue (last 7d)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+
+          <!-- Meller -->
+          <tr>
+            <td class="sticky-col">
+              <a href="brand-detail.html" style="display: flex; align-items: center; gap: 10px;">
+                <span class="brand-avatar">ML</span>
+                <div>
+                  <div style="font-weight: 500;">Meller</div>
+                  <div class="brand-meta">Spain &middot; EUR</div>
+                </div>
+              </a>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$8,420</div>
+                <div class="m-prior">$7,489 <span class="m-delta up">+12.4%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$1,520</div>
+                <div class="m-prior">$1,460 <span class="m-delta up">+4.1%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$680</div>
+                <div class="m-prior">$680 <span class="m-delta flat">&plusmn;0.0%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$330</div>
+                <div class="m-prior">$278 <span class="m-delta up">+18.7%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$2,530</div>
+                <div class="m-prior">$2,418 <span class="m-delta up">+4.6%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">3.33&times;</div>
+                <div class="m-prior">3.10&times; <span class="m-delta up">+0.23</span></div>
+              </div>
+            </td>
+            <td class="num col-group-start">
+              <div class="m">
+                <div class="m-cur">$52,860</div>
+                <div class="m-prior">$47,012 <span class="m-delta up">+12.4%</span></div>
+              </div>
+            </td>
+            <td><a href="brand-detail.html" class="btn btn-ghost btn-sm">Open &rarr;</a></td>
+          </tr>
+
+          <!-- Ayla & Co -->
+          <tr>
+            <td class="sticky-col">
+              <a href="brand-detail.html" style="display: flex; align-items: center; gap: 10px;">
+                <span class="brand-avatar">AY</span>
+                <div>
+                  <div style="font-weight: 500;">Ayla &amp; Co</div>
+                  <div class="brand-meta">UAE &middot; AED</div>
+                </div>
+              </a>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$5,210</div>
+                <div class="m-prior">$5,376 <span class="m-delta down">&minus;3.1%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$890</div>
+                <div class="m-prior">$901 <span class="m-delta down">&minus;1.2%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$380</div>
+                <div class="m-prior">$383 <span class="m-delta down">&minus;0.8%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$140</div>
+                <div class="m-prior">$140 <span class="m-delta flat">&plusmn;0.0%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$1,410</div>
+                <div class="m-prior">$1,424 <span class="m-delta down">&minus;1.0%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">3.70&times;</div>
+                <div class="m-prior">3.78&times; <span class="m-delta down">&minus;0.08</span></div>
+              </div>
+            </td>
+            <td class="num col-group-start">
+              <div class="m">
+                <div class="m-cur">$36,040</div>
+                <div class="m-prior">$37,196 <span class="m-delta down">&minus;3.1%</span></div>
+              </div>
+            </td>
+            <td><a href="brand-detail.html" class="btn btn-ghost btn-sm">Open &rarr;</a></td>
+          </tr>
+
+          <!-- Nova Threads — failed sync -->
+          <tr>
+            <td class="sticky-col">
+              <a href="brand-detail.html" style="display: flex; align-items: center; gap: 10px;">
+                <span class="brand-avatar">NT</span>
+                <div>
+                  <div style="font-weight: 500;">Nova Threads</div>
+                  <div class="brand-meta">US &middot; USD</div>
+                </div>
+              </a>
+            </td>
+            <td class="num">
+              <span class="tag tag-warning">
+                <span class="dot dot-warning"></span>
+                Shopify failed
+              </span>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$890</div>
+                <div class="m-prior">$842 <span class="m-delta up">+5.7%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$410</div>
+                <div class="m-prior">$398 <span class="m-delta up">+3.0%</span></div>
+              </div>
+            </td>
+            <td class="num"><span class="muted">&mdash;</span></td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$1,300</div>
+                <div class="m-prior">$1,240 <span class="m-delta up">+4.8%</span></div>
+              </div>
+            </td>
+            <td class="num"><span class="muted">&mdash;</span></td>
+            <td class="num col-group-start">
+              <span class="tag tag-warning">
+                <span class="dot dot-warning"></span>
+                Partial
+              </span>
+            </td>
+            <td><a href="brand-detail.html" class="btn btn-ghost btn-sm">Open &rarr;</a></td>
+          </tr>
+
+          <!-- Kenza Beauty -->
+          <tr>
+            <td class="sticky-col">
+              <a href="brand-detail.html" style="display: flex; align-items: center; gap: 10px;">
+                <span class="brand-avatar">KE</span>
+                <div>
+                  <div style="font-weight: 500;">Kenza Beauty</div>
+                  <div class="brand-meta">Saudi Arabia &middot; SAR</div>
+                </div>
+              </a>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$4,050</div>
+                <div class="m-prior">$3,794 <span class="m-delta up">+6.8%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$770</div>
+                <div class="m-prior">$691 <span class="m-delta up">+11.4%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$280</div>
+                <div class="m-prior">$280 <span class="m-delta flat">&plusmn;0.0%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$360</div>
+                <div class="m-prior">$295 <span class="m-delta up">+22.1%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$1,410</div>
+                <div class="m-prior">$1,266 <span class="m-delta up">+11.4%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">2.87&times;</div>
+                <div class="m-prior">3.00&times; <span class="m-delta down">&minus;0.13</span></div>
+              </div>
+            </td>
+            <td class="num col-group-start">
+              <div class="m">
+                <div class="m-cur">$28,400</div>
+                <div class="m-prior">$26,592 <span class="m-delta up">+6.8%</span></div>
+              </div>
+            </td>
+            <td><a href="brand-detail.html" class="btn btn-ghost btn-sm">Open &rarr;</a></td>
+          </tr>
+
+          <!-- Olea Skincare -->
+          <tr>
+            <td class="sticky-col">
+              <a href="brand-detail.html" style="display: flex; align-items: center; gap: 10px;">
+                <span class="brand-avatar">OL</span>
+                <div>
+                  <div style="font-weight: 500;">Olea Skincare</div>
+                  <div class="brand-meta">Italy &middot; EUR</div>
+                </div>
+              </a>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$2,810</div>
+                <div class="m-prior">$2,850 <span class="m-delta down">&minus;1.4%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$590</div>
+                <div class="m-prior">$603 <span class="m-delta down">&minus;2.1%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$210</div>
+                <div class="m-prior">$211 <span class="m-delta down">&minus;0.6%</span></div>
+              </div>
+            </td>
+            <td class="num"><span class="muted">Not connected</span></td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$800</div>
+                <div class="m-prior">$814 <span class="m-delta down">&minus;1.7%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">3.51&times;</div>
+                <div class="m-prior">3.50&times; <span class="m-delta flat">+0.01</span></div>
+              </div>
+            </td>
+            <td class="num col-group-start">
+              <div class="m">
+                <div class="m-cur">$19,720</div>
+                <div class="m-prior">$19,996 <span class="m-delta down">&minus;1.4%</span></div>
+              </div>
+            </td>
+            <td><a href="brand-detail.html" class="btn btn-ghost btn-sm">Open &rarr;</a></td>
+          </tr>
+
+          <!-- Ren Coffee -->
+          <tr>
+            <td class="sticky-col">
+              <a href="brand-detail.html" style="display: flex; align-items: center; gap: 10px;">
+                <span class="brand-avatar">RN</span>
+                <div>
+                  <div style="font-weight: 500;">Ren Coffee</div>
+                  <div class="brand-meta">Sweden &middot; SEK</div>
+                </div>
+              </a>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$2,030</div>
+                <div class="m-prior">$1,948 <span class="m-delta up">+4.2%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$410</div>
+                <div class="m-prior">$402 <span class="m-delta up">+1.9%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$160</div>
+                <div class="m-prior">$159 <span class="m-delta up">+0.4%</span></div>
+              </div>
+            </td>
+            <td class="num"><span class="muted">Not connected</span></td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">$570</div>
+                <div class="m-prior">$562 <span class="m-delta up">+1.5%</span></div>
+              </div>
+            </td>
+            <td class="num">
+              <div class="m">
+                <div class="m-cur">3.56&times;</div>
+                <div class="m-prior">3.47&times; <span class="m-delta up">+0.09</span></div>
+              </div>
+            </td>
+            <td class="num col-group-start">
+              <div class="m">
+                <div class="m-cur">$14,210</div>
+                <div class="m-prior">$13,637 <span class="m-delta up">+4.2%</span></div>
+              </div>
+            </td>
+            <td><a href="brand-detail.html" class="btn btn-ghost btn-sm">Open &rarr;</a></td>
+          </tr>
+
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex items-center justify-between mt-24">
+      <div class="text-xs muted">Showing 6 of 102 brands &middot; Yesterday = May 15 &middot; Synced at 13:04 UTC</div>
+      <div class="flex items-center gap-8">
+        <button class="btn btn-secondary btn-sm">Previous</button>
+        <button class="btn btn-secondary btn-sm">Next</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Custom date range modal -->
+  <div class="modal-backdrop" id="custom-range">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Custom date selection</span>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <div class="modal-body">
+
+        <div class="tabs" data-tab-group>
+          <a class="tab active" data-tab="range">Date range</a>
+          <a class="tab" data-tab="single">Single date</a>
+          <a class="tab" data-tab="last-n">Last N days</a>
+        </div>
+
+        <div data-tab-content="range">
+          <div class="form-grid form-grid-2">
+            <div class="field">
+              <label class="field-label">From</label>
+              <input class="input" type="date" value="2026-05-01" />
+            </div>
+            <div class="field">
+              <label class="field-label">To</label>
+              <input class="input" type="date" value="2026-05-15" />
+            </div>
+          </div>
+          <p class="text-xs muted mt-12">Comparison: the same number of days immediately before this range.</p>
+        </div>
+
+        <div data-tab-content="single" style="display: none;">
+          <div class="field">
+            <label class="field-label">Date</label>
+            <input class="input" type="date" value="2026-05-15" />
+            <span class="field-hint">Comparison: the day before.</span>
+          </div>
+        </div>
+
+        <div data-tab-content="last-n" style="display: none;">
+          <div class="field">
+            <label class="field-label">Number of days</label>
+            <input class="input" type="number" min="1" max="365" value="14" />
+            <span class="field-hint">Last 14 days = May 2&ndash;15. Comparison: prior 14 days, Apr 18&ndash;May 1.</span>
+          </div>
+        </div>
+
+        <p class="text-xs muted mt-16">All ranges resolve per-brand using each brand&rsquo;s timezone. Dates in <em>brand</em> tz, never UTC.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-close>Cancel</button>
+        <button class="btn btn-primary btn-sm" data-close>Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Column picker modal -->
+  <div class="modal-backdrop" id="column-picker">
+    <div class="modal modal-lg" style="max-width: 760px;">
+      <div class="modal-header">
+        <span class="modal-title">Choose columns</span>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <div class="picker-grid">
+
+        <aside class="picker-presets">
+          <div class="popover-label" style="padding: 4px 10px;">Preset views</div>
+          <a class="picker-preset active" href="#">
+            Standard
+            <div class="picker-preset-sub">Revenue, per-platform spend, ROAS</div>
+          </a>
+          <a class="picker-preset" href="#">
+            Efficiency
+            <div class="picker-preset-sub">ROAS, CPA, CPC, CTR, refund rate</div>
+          </a>
+          <a class="picker-preset" href="#">
+            Growth
+            <div class="picker-preset-sub">Revenue, orders, AOV, impressions</div>
+          </a>
+          <a class="picker-preset" href="#">
+            Cost
+            <div class="picker-preset-sub">All spend, CPM, CPC, frequency</div>
+          </a>
+          <a class="picker-preset" href="#">
+            Quality
+            <div class="picker-preset-sub">AOV, refund rate, CVR, CPA</div>
+          </a>
+          <div class="popover-divider"></div>
+          <a class="picker-preset" href="#" style="color: var(--text-muted);">
+            + Save current as preset
+          </a>
+        </aside>
+
+        <div class="picker-columns">
+
+          <div class="picker-group">
+            <div class="picker-group-title">Revenue (Shopify)</div>
+            <label class="picker-row"><input type="checkbox" checked /> Revenue, net <span class="picker-row-hint">After refunds</span></label>
+            <label class="picker-row"><input type="checkbox" /> Revenue, gross <span class="picker-row-hint">Before refunds</span></label>
+            <label class="picker-row"><input type="checkbox" /> Orders</label>
+            <label class="picker-row"><input type="checkbox" /> AOV <span class="picker-row-hint">Revenue / orders</span></label>
+            <label class="picker-row"><input type="checkbox" /> Refunded orders</label>
+            <label class="picker-row"><input type="checkbox" /> Refund rate <span class="picker-row-hint">Refunds / revenue</span></label>
+          </div>
+
+          <div class="picker-group">
+            <div class="picker-group-title">Ad spend</div>
+            <label class="picker-row"><input type="checkbox" checked /> Meta spend</label>
+            <label class="picker-row"><input type="checkbox" checked /> Google spend</label>
+            <label class="picker-row"><input type="checkbox" checked /> TikTok spend</label>
+            <label class="picker-row"><input type="checkbox" checked /> Total spend</label>
+          </div>
+
+          <div class="picker-group">
+            <div class="picker-group-title">Reach &amp; engagement</div>
+            <label class="picker-row"><input type="checkbox" /> Impressions, blended</label>
+            <label class="picker-row"><input type="checkbox" /> Clicks, blended</label>
+            <label class="picker-row"><input type="checkbox" /> CTR, blended <span class="picker-row-hint">Clicks / impressions</span></label>
+            <label class="picker-row"><input type="checkbox" /> CPC, blended <span class="picker-row-hint">Spend / clicks</span></label>
+            <label class="picker-row"><input type="checkbox" /> CPM, blended <span class="picker-row-hint">Spend / 1k impressions</span></label>
+          </div>
+
+          <div class="picker-group">
+            <div class="picker-group-title">Efficiency</div>
+            <label class="picker-row"><input type="checkbox" checked /> Blended ROAS <span class="picker-row-hint">Net revenue / total spend</span></label>
+            <label class="picker-row"><input type="checkbox" /> Meta ROAS <span class="picker-row-hint">Platform-attributed</span></label>
+            <label class="picker-row"><input type="checkbox" /> Google ROAS</label>
+            <label class="picker-row"><input type="checkbox" /> TikTok ROAS</label>
+            <label class="picker-row"><input type="checkbox" /> CPA, blended <span class="picker-row-hint">Spend / orders</span></label>
+            <label class="picker-row"><input type="checkbox" /> Conversions tracked <span class="picker-row-hint">Per-platform reported</span></label>
+            <label class="picker-row"><input type="checkbox" /> CVR <span class="picker-row-hint">Conversions / clicks</span></label>
+          </div>
+
+          <div class="picker-group">
+            <div class="picker-group-title">Trend context</div>
+            <label class="picker-row"><input type="checkbox" checked /> Revenue, last 7 days <span class="picker-row-hint">Always vs prior 7</span></label>
+            <label class="picker-row"><input type="checkbox" /> Revenue, last 30 days</label>
+            <label class="picker-row"><input type="checkbox" /> Sparkline <span class="picker-row-hint">14-day revenue trend</span></label>
+          </div>
+
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span class="text-xs muted">7 of 27 columns selected. Drag to reorder after applying.</span>
+        <button class="btn btn-secondary btn-sm" data-close>Cancel</button>
+        <button class="btn btn-primary btn-sm" data-close>Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sync health &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="sync-health" data-title="Sync health">
+
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Sync health</h2>
+        <p class="page-subtitle">Last 24 hours across all brands and platforms.</p>
+      </div>
+      <div class="flex items-center gap-8">
+        <button class="btn btn-secondary btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><polyline points="21 3 21 8 16 8"/></svg>
+          Retry failed
+        </button>
+      </div>
+    </div>
+
+    <div class="stat-grid stat-grid-4 mb-24">
+      <div class="stat"><div class="stat-label">Successful</div><div class="stat-value num">386</div><div class="stat-sub" style="color: var(--success);">95% of total</div></div>
+      <div class="stat"><div class="stat-label">Failed</div><div class="stat-value num">18</div><div class="stat-sub" style="color: var(--warning);">Across 4 brands</div></div>
+      <div class="stat"><div class="stat-label">In progress</div><div class="stat-value num">2</div><div class="stat-sub muted">Running now</div></div>
+      <div class="stat"><div class="stat-label">Queued</div><div class="stat-value num">0</div><div class="stat-sub muted">Healthy queue</div></div>
+    </div>
+
+    <div class="tabs" data-tab-group>
+      <a class="tab active" data-tab="failed">Failed (18)</a>
+      <a class="tab" data-tab="recent">Recent (50)</a>
+      <a class="tab" data-tab="all">All</a>
+    </div>
+
+    <div data-tab-content="failed">
+      <div class="card" style="overflow: hidden;">
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th>Brand</th>
+              <th>Platform</th>
+              <th>Date</th>
+              <th>Status</th>
+              <th>Error</th>
+              <th>Last attempt</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="brand-detail.html"><strong>Nova Threads</strong></a></td>
+              <td>Shopify</td>
+              <td class="mono">2026-05-15</td>
+              <td><span class="status-pill failed">Failed</span></td>
+              <td><span class="mono" style="color: var(--danger);">401 access_token revoked</span></td>
+              <td class="muted">12 min ago</td>
+              <td class="text-right"><button class="btn btn-secondary btn-sm">Retry</button></td>
+            </tr>
+            <tr>
+              <td><a href="brand-detail.html"><strong>Olea Skincare</strong></a></td>
+              <td>TikTok</td>
+              <td class="mono">2026-05-15</td>
+              <td><span class="status-pill failed">Failed</span></td>
+              <td><span class="mono" style="color: var(--danger);">40100 advertiser_not_visible</span></td>
+              <td class="muted">34 min ago</td>
+              <td class="text-right"><button class="btn btn-secondary btn-sm">Retry</button></td>
+            </tr>
+            <tr>
+              <td><a href="brand-detail.html"><strong>Hale &amp; Frame</strong></a></td>
+              <td>Meta</td>
+              <td class="mono">2026-05-15</td>
+              <td><span class="status-pill failed">Failed</span></td>
+              <td><span class="mono" style="color: var(--danger);">17 user_request_limit_reached</span></td>
+              <td class="muted">1 hr ago</td>
+              <td class="text-right"><button class="btn btn-secondary btn-sm">Retry</button></td>
+            </tr>
+            <tr>
+              <td><a href="brand-detail.html"><strong>Marlow &amp; Sons</strong></a></td>
+              <td>Google</td>
+              <td class="mono">2026-05-15</td>
+              <td><span class="status-pill failed">Failed</span></td>
+              <td><span class="mono" style="color: var(--danger);">USER_PERMISSION_DENIED</span></td>
+              <td class="muted">2 hr ago</td>
+              <td class="text-right"><button class="btn btn-secondary btn-sm">Retry</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div data-tab-content="recent" style="display: none;">
+      <div class="card" style="overflow: hidden;">
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th>Brand</th>
+              <th>Platform</th>
+              <th>Date</th>
+              <th>Status</th>
+              <th>Duration</th>
+              <th>Completed</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><a href="brand-detail.html">Meller</a></td><td>Shopify</td><td class="mono">2026-05-15</td><td><span class="status-pill success">Success</span></td><td class="mono">4.2s</td><td class="muted">3 min ago</td></tr>
+            <tr><td><a href="brand-detail.html">Meller</a></td><td>Meta</td><td class="mono">2026-05-15</td><td><span class="status-pill success">Success</span></td><td class="mono">2.1s</td><td class="muted">3 min ago</td></tr>
+            <tr><td><a href="brand-detail.html">Ayla &amp; Co</a></td><td>Shopify</td><td class="mono">2026-05-15</td><td><span class="status-pill success">Success</span></td><td class="mono">6.8s</td><td class="muted">4 min ago</td></tr>
+            <tr><td><a href="brand-detail.html">Kenza Beauty</a></td><td>TikTok</td><td class="mono">2026-05-15</td><td><span class="status-pill success">Success</span></td><td class="mono">3.4s</td><td class="muted">5 min ago</td></tr>
+            <tr><td><a href="brand-detail.html">Ren Coffee</a></td><td>Google</td><td class="mono">2026-05-15</td><td><span class="status-pill running">Running</span></td><td class="muted">&mdash;</td><td class="muted">started 12s ago</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div data-tab-content="all" style="display: none;">
+      <div class="empty-state">
+        <h3>Full log</h3>
+        <p>The full 90-day sync log lives here. Filterable by brand, platform, status, and date range.</p>
+        <button class="btn btn-secondary btn-sm">Export CSV</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

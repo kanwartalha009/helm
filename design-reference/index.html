@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header class="top-nav">
+    <div class="container top-nav-inner">
+      <a href="index.html" class="wordmark">
+        <span class="wordmark-dot"></span>
+        Helm
+      </a>
+      <nav class="flex items-center gap-12">
+        <a href="#features" class="text-sm muted">Features</a>
+        <a href="#how" class="text-sm muted">How it works</a>
+        <a href="login.html" class="btn btn-secondary btn-sm">Sign in</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="container hero">
+      <span class="hero-eyebrow">
+        <span class="dot dot-success"></span>
+        Now syncing 100+ brands
+      </span>
+      <h1>One dashboard for every brand you run.</h1>
+      <p class="lede">
+        Helm pulls revenue from Shopify, spend from Meta, Google, and TikTok, and shows you blended ROAS across every store you manage &mdash; in the currency you choose, on the day you choose.
+      </p>
+      <div class="hero-cta">
+        <a href="login.html" class="btn btn-primary btn-lg">Sign in to Helm</a>
+        <a href="#features" class="btn btn-ghost btn-lg">See what it does &rarr;</a>
+      </div>
+    </section>
+
+    <section class="container" id="features">
+      <div class="feature-grid">
+        <div class="feature">
+          <div class="feature-label">Unified revenue</div>
+          <h3>Shopify, net of refunds.</h3>
+          <p>Gross and net revenue per brand, recomputed daily with a rolling 7-day backfill so late refunds restate the right day.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-label">Ad spend</div>
+          <h3>Meta, Google, TikTok.</h3>
+          <p>One manager-level token per platform covers every brand. New stores connect through an in-app picker, not a developer ticket.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-label">Trust signals</div>
+          <h3>No silent zeroes.</h3>
+          <p>Failed syncs render amber, never as &euro;0. Currency and timezone are stored per brand, never inferred at read time.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="container" id="how" style="margin-top: 96px;">
+      <div style="max-width: 580px;">
+        <h2>Built like a control tower, not a slideshow.</h2>
+        <p class="lede mt-16">
+          Helm is an internal tool for one agency. No SaaS marketing, no upsell. It loads in under a second across a hundred stores, and every number has a date, a timezone, and an FX rate behind it.
+        </p>
+      </div>
+
+      <div class="preview-frame">
+        <div class="preview-bar">
+          <span class="preview-dot"></span>
+          <span class="preview-dot"></span>
+          <span class="preview-dot"></span>
+          <span style="margin-left: 12px; font-size: 12px; color: var(--text-muted);">app.helm.internal &mdash; dashboard</span>
+        </div>
+        <div style="padding: 24px;">
+          <div class="filter-bar" style="margin-bottom: 20px;">
+            <span class="chip active">Yesterday</span>
+            <span class="chip">Last 7 days</span>
+            <span class="chip">MTD</span>
+            <span class="chip">QTD</span>
+            <span class="chip">Custom</span>
+            <span style="flex: 1"></span>
+            <span class="chip">USD</span>
+            <span class="chip">Net of refunds</span>
+          </div>
+          <table class="data-table dashboard-table">
+            <thead>
+              <tr>
+                <th>Brand</th>
+                <th class="num">Revenue</th>
+                <th class="num">Meta</th>
+                <th class="num">Google</th>
+                <th class="num">TikTok</th>
+                <th class="num">ROAS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div class="brand-cell">
+                    <span class="brand-avatar">ML</span>
+                    <div>
+                      <div style="font-weight: 500;">Meller</div>
+                      <div class="brand-meta">Spain &middot; EUR</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">$8,420</div><div class="m-prior">$7,489 <span class="m-delta up">+12.4%</span></div></div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">$1,520</div><div class="m-prior">$1,460 <span class="m-delta up">+4.1%</span></div></div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">$680</div><div class="m-prior">$680 <span class="m-delta flat">&plusmn;0.0%</span></div></div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">$330</div><div class="m-prior">$278 <span class="m-delta up">+18.7%</span></div></div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">3.33&times;</div><div class="m-prior">3.10&times; <span class="m-delta up">+0.23</span></div></div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="brand-cell">
+                    <span class="brand-avatar">AY</span>
+                    <div>
+                      <div style="font-weight: 500;">Ayla &amp; Co</div>
+                      <div class="brand-meta">UAE &middot; AED</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">$5,210</div><div class="m-prior">$5,376 <span class="m-delta down">&minus;3.1%</span></div></div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">$890</div><div class="m-prior">$901 <span class="m-delta down">&minus;1.2%</span></div></div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">$380</div><div class="m-prior">$383 <span class="m-delta down">&minus;0.8%</span></div></div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">$140</div><div class="m-prior">$140 <span class="m-delta flat">&plusmn;0.0%</span></div></div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">3.70&times;</div><div class="m-prior">3.78&times; <span class="m-delta down">&minus;0.08</span></div></div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="brand-cell">
+                    <span class="brand-avatar">NV</span>
+                    <div>
+                      <div style="font-weight: 500;">Nova Threads</div>
+                      <div class="brand-meta">US &middot; USD</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="num">
+                  <span class="tag tag-warning"><span class="dot dot-warning"></span>No data</span>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">$890</div><div class="m-prior">$842 <span class="m-delta up">+5.7%</span></div></div>
+                </td>
+                <td class="num">
+                  <div class="m"><div class="m-cur">$410</div><div class="m-prior">$398 <span class="m-delta up">+3.0%</span></div></div>
+                </td>
+                <td class="num"><span class="muted">&mdash;</span></td>
+                <td class="num"><span class="muted">&mdash;</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div>&copy; 2026 Nova Solution</div>
+      <div class="flex gap-12">
+        <span>Helm v1.0</span>
+        <span>&middot;</span>
+        <a href="sitemap.html" class="muted">Site map</a>
+        <span>&middot;</span>
+        <a href="login.html" class="muted">Sign in</a>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connect platforms &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="brands" data-title="Connect platforms">
+
+    <div class="breadcrumb">
+      <a href="brands.html">Brands</a>
+      <span class="sep">/</span>
+      <a href="add-brand.html">Add a brand</a>
+      <span class="sep">/</span>
+      <span class="current">Connect platforms</span>
+    </div>
+
+    <div style="max-width: 900px;">
+
+      <div class="stepper">
+        <div class="step done">
+          <span class="step-num">&check;</span>
+          <span class="step-label">Brand details</span>
+        </div>
+        <span class="step-line"></span>
+        <div class="step active">
+          <span class="step-num">2</span>
+          <span class="step-label">Connect platforms</span>
+        </div>
+        <span class="step-line"></span>
+        <div class="step">
+          <span class="step-num">3</span>
+          <span class="step-label">Initial sync</span>
+        </div>
+      </div>
+
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Connect at least one platform</h2>
+          <p class="page-subtitle">You can connect more later. Data starts flowing once any platform is attached.</p>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
+
+        <div class="platform-card">
+          <div class="platform-card-head">
+            <span class="platform-logo">S</span>
+            <div>
+              <div style="font-weight: 500;">Shopify</div>
+              <div class="text-xs muted">Revenue, orders, refunds</div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label">Shop domain</label>
+            <input class="input" type="text" placeholder="brand.myshopify.com" />
+            <span class="field-hint">Opens the install URL in a new tab. The store owner approves the install.</span>
+          </div>
+          <button class="btn btn-primary btn-sm" data-open="shopify-install">Connect Shopify</button>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-card-head">
+            <span class="platform-logo">M</span>
+            <div>
+              <div style="font-weight: 500;">Meta Ads</div>
+              <div class="text-xs muted">Spend, impressions, ROAS</div>
+            </div>
+          </div>
+          <div class="platform-card-status">No OAuth needed &mdash; the agency token is already configured. Just pick the ad account.</div>
+          <button class="btn btn-primary btn-sm" data-open="meta-picker">Pick ad account</button>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-card-head">
+            <span class="platform-logo">G</span>
+            <div>
+              <div style="font-weight: 500;">Google Ads</div>
+              <div class="text-xs muted">Spend and conversions</div>
+            </div>
+          </div>
+          <div class="platform-card-status">Pick the customer ID from your MCC.</div>
+          <button class="btn btn-primary btn-sm" data-open="google-picker">Pick customer</button>
+        </div>
+
+        <div class="platform-card">
+          <div class="platform-card-head">
+            <span class="platform-logo">T</span>
+            <div>
+              <div style="font-weight: 500;">TikTok Ads</div>
+              <div class="text-xs muted">Spend and conversions</div>
+            </div>
+          </div>
+          <div class="platform-card-status">Pick the advertiser from your Business Center.</div>
+          <button class="btn btn-primary btn-sm" data-open="tiktok-picker">Pick advertiser</button>
+        </div>
+
+      </div>
+
+      <div class="flex items-center justify-between mt-32">
+        <a href="add-brand.html" class="btn btn-ghost btn-sm">&larr; Back</a>
+        <a href="add-brand-step-3.html" class="btn btn-primary btn-sm">Continue &rarr;</a>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Shopify install confirmation modal -->
+  <div class="modal-backdrop" id="shopify-install">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Install Helm on Shopify</span>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="text-sm mb-16">A new tab will open to <span class="mono" style="font-family: var(--font-mono);">brand.myshopify.com/admin/oauth/&hellip;</span></p>
+        <p class="text-sm mb-16">The store owner needs to approve these scopes:</p>
+        <ul style="font-size: 13px; padding-left: 18px; color: var(--text-secondary); line-height: 1.7;">
+          <li>read_orders</li>
+          <li>read_products</li>
+          <li>read_customers</li>
+          <li>read_reports</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-close>Cancel</button>
+        <button class="btn btn-primary btn-sm" data-close>Open install URL</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Meta picker -->
+  <div class="modal-backdrop" id="meta-picker">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Pick a Meta ad account</span>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <input class="palette-input" type="text" placeholder="Search by name, ID, or currency&hellip;" />
+      <div class="palette-list">
+        <a href="#" class="palette-item" data-close><span class="brand-avatar" style="width: 22px; height: 22px; font-size: 10px;">ML</span>Meller Spain<span class="meta mono">act_2847291038 &middot; EUR</span></a>
+        <a href="#" class="palette-item" data-close><span class="brand-avatar" style="width: 22px; height: 22px; font-size: 10px;">AY</span>Ayla &amp; Co<span class="meta mono">act_5829473829 &middot; AED</span></a>
+        <a href="#" class="palette-item" data-close><span class="brand-avatar" style="width: 22px; height: 22px; font-size: 10px;">NT</span>Nova Threads<span class="meta mono">act_1029384756 &middot; USD</span></a>
+      </div>
+      <div class="modal-footer"><span class="text-xs muted">214 accounts in your Business Manager.</span></div>
+    </div>
+  </div>
+
+  <!-- Google picker -->
+  <div class="modal-backdrop" id="google-picker">
+    <div class="modal">
+      <div class="modal-header"><span class="modal-title">Pick a Google Ads customer</span><button class="modal-close" data-close>&times;</button></div>
+      <input class="palette-input" type="text" placeholder="Search by name or customer ID&hellip;" />
+      <div class="palette-list">
+        <a href="#" class="palette-item" data-close><span class="brand-avatar" style="width: 22px; height: 22px; font-size: 10px;">ML</span>Meller<span class="meta mono">478-291-3847 &middot; EUR</span></a>
+        <a href="#" class="palette-item" data-close><span class="brand-avatar" style="width: 22px; height: 22px; font-size: 10px;">AY</span>Ayla &amp; Co<span class="meta mono">592-839-1827 &middot; AED</span></a>
+      </div>
+      <div class="modal-footer"><span class="text-xs muted">186 customers in your MCC.</span></div>
+    </div>
+  </div>
+
+  <!-- TikTok picker -->
+  <div class="modal-backdrop" id="tiktok-picker">
+    <div class="modal">
+      <div class="modal-header"><span class="modal-title">Pick a TikTok advertiser</span><button class="modal-close" data-close>&times;</button></div>
+      <input class="palette-input" type="text" placeholder="Search by name or advertiser ID&hellip;" />
+      <div class="palette-list">
+        <a href="#" class="palette-item" data-close><span class="brand-avatar" style="width: 22px; height: 22px; font-size: 10px;">ML</span>Meller<span class="meta mono">7284937214 &middot; EUR</span></a>
+        <a href="#" class="palette-item" data-close><span class="brand-avatar" style="width: 22px; height: 22px; font-size: 10px;">KE</span>Kenza Beauty<span class="meta mono">7392847261 &middot; SAR</span></a>
+      </div>
+      <div class="modal-footer"><span class="text-xs muted">142 advertisers in your Business Center.</span></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

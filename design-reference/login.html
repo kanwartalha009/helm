@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div class="auth-shell">
+    <header class="auth-nav">
+      <a href="index.html" class="wordmark">
+        <span class="wordmark-dot"></span>
+        Helm
+      </a>
+    </header>
+
+    <main class="auth-main">
+      <div class="auth-card">
+        <div style="text-align: center; margin-bottom: 32px;">
+          <h2>Sign in to Helm</h2>
+          <p class="mt-8 text-sm">Use the email tied to your invitation.</p>
+        </div>
+
+        <form class="flex flex-col gap-12" onsubmit="event.preventDefault(); window.location.href='dashboard.html';">
+          <div class="field">
+            <label class="field-label" for="email">Email</label>
+            <input class="input" id="email" type="email" placeholder="you@agency.com" autocomplete="email" required />
+          </div>
+
+          <div class="field">
+            <div class="flex items-center justify-between">
+              <label class="field-label" for="password">Password</label>
+              <a href="forgot-password.html" class="text-xs muted">Forgot password?</a>
+            </div>
+            <input class="input" id="password" type="password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="current-password" required />
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-lg w-full mt-8">Sign in</button>
+        </form>
+
+        <div class="mt-32" style="text-align: center;">
+          <p class="text-xs muted">
+            Need an account?
+            <a href="#" style="color: var(--text); font-weight: 500;">Ask your admin for an invitation</a>.
+          </p>
+        </div>
+      </div>
+    </main>
+
+    <footer class="auth-footer">
+      <div class="flex items-center justify-between">
+        <span>&copy; 2026 Nova Solution</span>
+        <span>Helm v1.0</span>
+      </div>
+    </footer>
+  </div>
+
+</body>
+</html>

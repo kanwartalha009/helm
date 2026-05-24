@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jordan Reeves &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="team" data-title="User detail">
+
+    <div class="breadcrumb">
+      <a href="team.html">Team</a>
+      <span class="sep">/</span>
+      <span class="current">Jordan Reeves</span>
+    </div>
+
+    <div class="page-header">
+      <div class="flex items-center gap-12">
+        <span class="brand-avatar" style="width: 44px; height: 44px; font-size: 15px; border-radius: 50%;">JR</span>
+        <div>
+          <h2 class="page-title">Jordan Reeves</h2>
+          <p class="page-subtitle">jordan@nova-solution.io &middot; Manager &middot; Joined Feb 12, 2026</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-8">
+        <button class="btn btn-secondary btn-sm">Impersonate</button>
+        <button class="btn btn-secondary btn-sm" data-confirm="Disable this user? They lose sign-in access immediately. Their audit trail is preserved." style="color: var(--danger);">Disable</button>
+      </div>
+    </div>
+
+    <div style="max-width: 720px;">
+
+      <h3 class="section-title">Role &amp; access</h3>
+      <form class="card" style="padding: 24px;">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">Role</label>
+            <select class="input"><option>Manager</option><option>Team member</option><option>Brand user</option></select>
+          </div>
+          <div class="field">
+            <label class="field-label">Accessible brands</label>
+            <div class="banner banner-info">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Managers see all brands automatically. Lower the role to scope access.
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-8 mt-24">
+          <button type="submit" class="btn btn-primary btn-sm">Save changes</button>
+        </div>
+      </form>
+
+      <h3 class="section-title mt-32">Security</h3>
+      <div class="card" style="overflow: hidden;">
+        <div class="list-row">
+          <div class="list-row-main">
+            <div class="list-row-title">Two-factor auth</div>
+            <div class="list-row-sub">Enabled via authenticator app</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" data-confirm="Reset two-factor for this user? They will be prompted to set it up on next sign-in." style="color: var(--danger);">Reset</button>
+        </div>
+        <div class="list-row">
+          <div class="list-row-main">
+            <div class="list-row-title">Active sessions</div>
+            <div class="list-row-sub">2 devices</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" data-confirm="Sign this user out of all devices?" style="color: var(--danger);">Sign out all</button>
+        </div>
+      </div>
+
+      <h3 class="section-title mt-32">Recent activity</h3>
+      <div class="card" style="overflow: hidden;">
+        <table class="log-table">
+          <thead><tr><th>Event</th><th>IP</th><th>When</th></tr></thead>
+          <tbody>
+            <tr><td>Signed in</td><td class="mono">94.21.&hellip;</td><td class="muted">12 min ago</td></tr>
+            <tr><td>Ticket assigned &middot; #1148</td><td class="mono">94.21.&hellip;</td><td class="muted">2 hr ago</td></tr>
+            <tr><td>Connection resync &middot; Meta &middot; Ayla &amp; Co</td><td class="mono">94.21.&hellip;</td><td class="muted">Yesterday</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

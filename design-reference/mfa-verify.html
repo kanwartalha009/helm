@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Verify identity &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div class="auth-shell">
+    <header class="auth-nav">
+      <a href="index.html" class="wordmark">
+        <span class="wordmark-dot"></span>
+        Helm
+      </a>
+    </header>
+
+    <main class="auth-main">
+      <div class="auth-card">
+        <div style="text-align: center; margin-bottom: 32px;">
+          <h2>Verify it&rsquo;s you</h2>
+          <p class="mt-8 text-sm">Enter the 6-digit code from your authenticator app.</p>
+        </div>
+
+        <form class="flex flex-col gap-12" onsubmit="event.preventDefault(); window.location.href='dashboard.html';">
+          <div class="field">
+            <label class="field-label" for="code">Authentication code</label>
+            <input class="input" id="code" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code" autofocus style="font-family: var(--font-mono); letter-spacing: 0.2em; text-align: center; font-size: 18px;" required />
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg w-full mt-8">Verify and continue</button>
+        </form>
+
+        <div class="mt-32" style="text-align: center;">
+          <p class="text-xs muted">
+            Lost access to your authenticator?
+            <a href="#" style="color: var(--text); font-weight: 500;">Use a recovery code</a>
+          </p>
+          <p class="text-xs muted mt-8">
+            <a href="login.html" style="color: var(--text-muted);">Sign in with a different account</a>
+          </p>
+        </div>
+      </div>
+    </main>
+
+    <footer class="auth-footer">
+      <div class="flex items-center justify-between">
+        <span>&copy; 2026 Nova Solution</span>
+        <span>Helm v1.0</span>
+      </div>
+    </footer>
+  </div>
+
+</body>
+</html>

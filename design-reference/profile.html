@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Profile &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="" data-title="Profile">
+
+    <div class="page-header">
+      <div class="flex items-center gap-12">
+        <span class="brand-avatar" style="width: 56px; height: 56px; font-size: 20px; background: var(--accent); color: var(--accent-fg); border-color: var(--accent); border-radius: 50%;">K</span>
+        <div>
+          <h2 class="page-title">Kanwar</h2>
+          <p class="page-subtitle">Master admin &middot; kanwartalha009@gmail.com</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="max-width: 640px;">
+
+      <h3 class="section-title">Profile</h3>
+      <form class="card" style="padding: 24px;">
+        <div class="form-grid">
+          <div class="form-grid form-grid-2">
+            <div class="field">
+              <label class="field-label">Name</label>
+              <input class="input" type="text" value="Kanwar" />
+            </div>
+            <div class="field">
+              <label class="field-label">Display initials</label>
+              <input class="input" type="text" value="K" maxlength="2" />
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label">Email</label>
+            <input class="input" type="email" value="kanwartalha009@gmail.com" />
+            <span class="field-hint">Used for sign-in and notifications.</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-8 mt-24">
+          <button type="submit" class="btn btn-primary btn-sm">Save changes</button>
+        </div>
+      </form>
+
+      <h3 class="section-title mt-32">Sign-in security</h3>
+      <div class="card" style="overflow: hidden;">
+        <div class="list-row">
+          <div class="list-row-main">
+            <div class="list-row-title">Password</div>
+            <div class="list-row-sub">Last changed 41 days ago</div>
+          </div>
+          <a href="forgot-password.html" class="btn btn-secondary btn-sm">Change password</a>
+        </div>
+        <div class="list-row">
+          <div class="list-row-main">
+            <div class="list-row-title">Two-factor authentication</div>
+            <div class="list-row-sub" style="color: var(--warning);">Not enabled &middot; Required for master admin</div>
+          </div>
+          <a href="mfa-setup.html" class="btn btn-primary btn-sm">Set up</a>
+        </div>
+        <div class="list-row">
+          <div class="list-row-main">
+            <div class="list-row-title">Active sessions</div>
+            <div class="list-row-sub">1 device &middot; This browser, Madrid, ES</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" data-confirm="Sign out of all other devices?" style="color: var(--danger);">Sign out elsewhere</button>
+        </div>
+      </div>
+
+      <h3 class="section-title mt-32">Activity</h3>
+      <div class="card" style="overflow: hidden;">
+        <table class="log-table">
+          <thead><tr><th>Event</th><th>IP</th><th>When</th></tr></thead>
+          <tbody>
+            <tr><td>Signed in</td><td class="mono">82.143.&hellip;</td><td class="muted">Today, 09:14</td></tr>
+            <tr><td>Connection attached &middot; TikTok &middot; Meller</td><td class="mono">82.143.&hellip;</td><td class="muted">Yesterday, 16:32</td></tr>
+            <tr><td>Brand created &middot; Olea Skincare</td><td class="mono">82.143.&hellip;</td><td class="muted">2 days ago</td></tr>
+          </tbody>
+        </table>
+        <div style="padding: 12px 16px; text-align: center;">
+          <a href="audit-log.html" class="text-sm">See full audit log &rarr;</a>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

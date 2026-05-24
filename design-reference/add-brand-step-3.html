@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Initial sync &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="brands" data-title="Initial sync">
+
+    <div class="breadcrumb">
+      <a href="brands.html">Brands</a>
+      <span class="sep">/</span>
+      <a href="add-brand.html">Add a brand</a>
+      <span class="sep">/</span>
+      <span class="current">Initial sync</span>
+    </div>
+
+    <div style="max-width: 720px;">
+
+      <div class="stepper">
+        <div class="step done"><span class="step-num">&check;</span><span class="step-label">Brand details</span></div>
+        <span class="step-line"></span>
+        <div class="step done"><span class="step-num">&check;</span><span class="step-label">Connect platforms</span></div>
+        <span class="step-line"></span>
+        <div class="step active"><span class="step-num">3</span><span class="step-label">Initial sync</span></div>
+      </div>
+
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Pulling the last 30 days</h2>
+          <p class="page-subtitle">Real numbers usually arrive in 2&ndash;5 minutes. You can leave this page &mdash; we&rsquo;ll keep working.</p>
+        </div>
+      </div>
+
+      <div class="card" style="padding: 22px;">
+
+        <div class="list-row" style="border-bottom: 1px solid var(--border); padding: 14px 0;">
+          <span class="platform-logo">S</span>
+          <div class="list-row-main">
+            <div class="list-row-title">Shopify</div>
+            <div class="list-row-sub">812 orders pulled &middot; 4 refunds</div>
+          </div>
+          <span class="status-pill success">Done</span>
+        </div>
+
+        <div class="list-row" style="border-bottom: 1px solid var(--border); padding: 14px 0;">
+          <span class="platform-logo">M</span>
+          <div class="list-row-main">
+            <div class="list-row-title">Meta Ads</div>
+            <div class="list-row-sub">Pulling day 24 of 30&hellip;</div>
+          </div>
+          <span class="status-pill running">Running</span>
+        </div>
+
+        <div class="list-row" style="border-bottom: 1px solid var(--border); padding: 14px 0;">
+          <span class="platform-logo">G</span>
+          <div class="list-row-main">
+            <div class="list-row-title">Google Ads</div>
+            <div class="list-row-sub">Queued behind Meta</div>
+          </div>
+          <span class="status-pill queued">Queued</span>
+        </div>
+
+        <div class="list-row" style="padding: 14px 0;">
+          <span class="platform-logo">T</span>
+          <div class="list-row-main">
+            <div class="list-row-title">TikTok Ads</div>
+            <div class="list-row-sub">Queued</div>
+          </div>
+          <span class="status-pill queued">Queued</span>
+        </div>
+
+      </div>
+
+      <div class="banner banner-info mt-24">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Refunds attribute to the original order date. Yesterday&rsquo;s net number may still change for up to 7 days as refunds settle.
+      </div>
+
+      <div class="flex items-center justify-between mt-32">
+        <a href="add-brand-step-2.html" class="btn btn-ghost btn-sm">&larr; Back</a>
+        <a href="brand-detail.html" class="btn btn-primary btn-sm">Open brand &rarr;</a>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

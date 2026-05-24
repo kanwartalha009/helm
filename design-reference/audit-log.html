@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Audit log &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="audit-log" data-title="Audit log">
+
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Audit log</h2>
+        <p class="page-subtitle">Append-only ledger of sensitive actions. Never deleted.</p>
+      </div>
+      <button class="btn btn-secondary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export CSV
+      </button>
+    </div>
+
+    <div class="filter-bar mb-16">
+      <input class="input" type="text" placeholder="Filter by user, action, or target&hellip;" style="max-width: 320px;" />
+      <span class="chip active">All actions</span>
+      <span class="chip">Auth</span>
+      <span class="chip">Users</span>
+      <span class="chip">Brands</span>
+      <span class="chip">Connections</span>
+      <span class="chip">Impersonation</span>
+      <span style="flex: 1"></span>
+      <span class="chip">Last 7 days</span>
+    </div>
+
+    <div class="card" style="overflow: hidden;">
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th style="width: 16%">Actor</th>
+            <th style="width: 22%">Action</th>
+            <th>Target</th>
+            <th>IP</th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="brand-cell"><span class="avatar-sm">K</span>Kanwar</div></td>
+            <td><span class="mono">connection.attached</span></td>
+            <td>TikTok &middot; <a href="brand-detail.html">Meller</a></td>
+            <td class="mono">82.143.&hellip;</td>
+            <td class="muted">12 min ago</td>
+          </tr>
+          <tr>
+            <td><div class="brand-cell"><span class="avatar-sm">JR</span>Jordan Reeves</div></td>
+            <td><span class="mono">user.role_changed</span></td>
+            <td>Diego L&oacute;pez (team_member &rarr; manager)</td>
+            <td class="mono">94.21.&hellip;</td>
+            <td class="muted">2 hr ago</td>
+          </tr>
+          <tr>
+            <td><div class="brand-cell"><span class="avatar-sm">K</span>Kanwar</div></td>
+            <td><span class="mono">user.invited</span></td>
+            <td>maria@nova-solution.io (team_member)</td>
+            <td class="mono">82.143.&hellip;</td>
+            <td class="muted">2 days ago</td>
+          </tr>
+          <tr>
+            <td><div class="brand-cell"><span class="avatar-sm">JR</span>Jordan Reeves</div></td>
+            <td><span class="mono">brand_access.granted</span></td>
+            <td>Sara Mahmoud &mdash; Ayla &amp; Co</td>
+            <td class="mono">94.21.&hellip;</td>
+            <td class="muted">3 days ago</td>
+          </tr>
+          <tr>
+            <td><div class="brand-cell"><span class="avatar-sm">K</span>Kanwar</div></td>
+            <td><span class="mono">impersonation.started</span></td>
+            <td>Ana Mart&iacute;n (brand_user)</td>
+            <td class="mono">82.143.&hellip;</td>
+            <td class="muted">3 days ago</td>
+          </tr>
+          <tr>
+            <td><div class="brand-cell"><span class="avatar-sm">K</span>Kanwar</div></td>
+            <td><span class="mono">impersonation.ended</span></td>
+            <td>Ana Mart&iacute;n</td>
+            <td class="mono">82.143.&hellip;</td>
+            <td class="muted">3 days ago</td>
+          </tr>
+          <tr>
+            <td><div class="brand-cell"><span class="avatar-sm">SM</span>Sara Mahmoud</div></td>
+            <td><span class="mono">mfa.enabled</span></td>
+            <td>(self)</td>
+            <td class="mono">37.46.&hellip;</td>
+            <td class="muted">5 days ago</td>
+          </tr>
+          <tr>
+            <td><div class="brand-cell"><span class="avatar-sm">K</span>Kanwar</div></td>
+            <td><span class="mono">connection.deleted</span></td>
+            <td>TikTok &middot; Marlow &amp; Sons</td>
+            <td class="mono">82.143.&hellip;</td>
+            <td class="muted">6 days ago</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex items-center justify-between mt-24">
+      <div class="text-xs muted">Showing 8 of 4,210 events</div>
+      <div class="flex items-center gap-8">
+        <button class="btn btn-secondary btn-sm">Previous</button>
+        <button class="btn btn-secondary btn-sm">Next</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

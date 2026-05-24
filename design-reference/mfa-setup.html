@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Set up two-factor &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div class="auth-shell">
+    <header class="auth-nav">
+      <a href="dashboard.html" class="wordmark">
+        <span class="wordmark-dot"></span>
+        Helm
+      </a>
+    </header>
+
+    <main class="auth-main">
+      <div class="auth-card" style="max-width: 460px;">
+        <div style="text-align: center; margin-bottom: 32px;">
+          <span class="tag" style="margin-bottom: 16px;">Two-factor auth</span>
+          <h2>Set up your authenticator</h2>
+          <p class="mt-8 text-sm">Scan the code below with Google Authenticator, Authy, 1Password, or Bitwarden.</p>
+        </div>
+
+        <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; margin-bottom: 16px;">
+          <!-- placeholder QR -->
+          <svg width="160" height="160" viewBox="0 0 160 160" style="background: white; padding: 8px;">
+            <rect width="160" height="160" fill="white"/>
+            <g fill="black">
+              <rect x="10" y="10" width="40" height="40"/>
+              <rect x="20" y="20" width="20" height="20" fill="white"/>
+              <rect x="110" y="10" width="40" height="40"/>
+              <rect x="120" y="20" width="20" height="20" fill="white"/>
+              <rect x="10" y="110" width="40" height="40"/>
+              <rect x="20" y="120" width="20" height="20" fill="white"/>
+              <rect x="60" y="20" width="6" height="6"/>
+              <rect x="70" y="30" width="6" height="6"/>
+              <rect x="80" y="20" width="6" height="6"/>
+              <rect x="90" y="40" width="6" height="6"/>
+              <rect x="60" y="50" width="6" height="6"/>
+              <rect x="80" y="60" width="6" height="6"/>
+              <rect x="70" y="70" width="6" height="6"/>
+              <rect x="100" y="60" width="6" height="6"/>
+              <rect x="110" y="70" width="6" height="6"/>
+              <rect x="60" y="90" width="6" height="6"/>
+              <rect x="80" y="100" width="6" height="6"/>
+              <rect x="70" y="110" width="6" height="6"/>
+              <rect x="100" y="100" width="6" height="6"/>
+              <rect x="120" y="90" width="6" height="6"/>
+              <rect x="130" y="100" width="6" height="6"/>
+              <rect x="110" y="120" width="6" height="6"/>
+              <rect x="140" y="130" width="6" height="6"/>
+              <rect x="90" y="130" width="6" height="6"/>
+              <rect x="100" y="140" width="6" height="6"/>
+            </g>
+          </svg>
+        </div>
+
+        <details style="margin-bottom: 24px;">
+          <summary style="cursor: pointer; font-size: 13px; color: var(--text-secondary); padding: 6px 0;">Can&rsquo;t scan? Enter the code manually</summary>
+          <div style="margin-top: 8px; padding: 10px 12px; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.05em; color: var(--text);">
+            JBSWY3DPEHPK3PXP
+          </div>
+        </details>
+
+        <form class="flex flex-col gap-12" onsubmit="event.preventDefault(); window.location.href='settings.html';">
+          <div class="field">
+            <label class="field-label" for="code">6-digit code from your app</label>
+            <input class="input" id="code" type="text" inputmode="numeric" maxlength="6" placeholder="000000" style="font-family: var(--font-mono); letter-spacing: 0.2em; text-align: center; font-size: 18px;" required />
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg w-full mt-8">Enable two-factor auth</button>
+        </form>
+
+        <div class="mt-32" style="text-align: center;">
+          <p class="text-xs muted">
+            <a href="settings.html" style="color: var(--text); font-weight: 500;">Cancel and go back</a>
+          </p>
+        </div>
+      </div>
+    </main>
+
+    <footer class="auth-footer">
+      <div class="flex items-center justify-between">
+        <span>&copy; 2026 Nova Solution</span>
+        <span>Helm v1.0</span>
+      </div>
+    </footer>
+  </div>
+
+</body>
+</html>

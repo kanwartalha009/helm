@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Site map &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div class="container" style="padding: 48px 24px; max-width: 920px;">
+
+    <div class="page-header">
+      <div>
+        <a href="index.html" class="wordmark" style="margin-bottom: 12px;">
+          <span class="wordmark-dot"></span>
+          Helm
+        </a>
+        <h2 class="page-title" style="margin-top: 16px;">Design preview &mdash; site map</h2>
+        <p class="page-subtitle">Every page in the current click-through. Built as static HTML before the React + Vite scaffold.</p>
+      </div>
+    </div>
+
+    <div class="banner banner-info mb-24">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Static HTML only. No real data, no real auth, no API yet. The visual language and click-paths are the deliverable here.
+    </div>
+
+    <h3 class="section-title">Marketing</h3>
+    <div class="card mb-24" style="overflow: hidden;">
+      <a href="index.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Landing</div><div class="list-row-sub">index.html &middot; product surface, sign-in CTA</div></div><span class="text-xs muted">&rarr;</span></a>
+    </div>
+
+    <h3 class="section-title">Auth</h3>
+    <div class="card mb-24" style="overflow: hidden;">
+      <a href="login.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Sign in</div><div class="list-row-sub">login.html</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="accept-invite.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Accept invitation</div><div class="list-row-sub">accept-invite.html &middot; token-based password creation</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="forgot-password.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Reset password (request)</div><div class="list-row-sub">forgot-password.html</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="reset-password.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Reset password (set)</div><div class="list-row-sub">reset-password.html</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="mfa-setup.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Two-factor setup</div><div class="list-row-sub">mfa-setup.html &middot; QR code + TOTP</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="mfa-verify.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Two-factor verify</div><div class="list-row-sub">mfa-verify.html &middot; sign-in challenge</div></div><span class="text-xs muted">&rarr;</span></a>
+    </div>
+
+    <h3 class="section-title">Phase 1 &mdash; Dashboard</h3>
+    <div class="card mb-24" style="overflow: hidden;">
+      <a href="dashboard.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Dashboard</div><div class="list-row-sub">dashboard.html &middot; brands table with deltas, sync warnings</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="sync-health.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Sync health</div><div class="list-row-sub">sync-health.html &middot; failed, recent, all syncs</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="brands.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Brands</div><div class="list-row-sub">brands.html &middot; list view of every store</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="brand-detail.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Brand detail</div><div class="list-row-sub">brand-detail.html &middot; overview, connections, sync log, settings tabs</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="add-brand.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Add brand &mdash; step 1: details</div><div class="list-row-sub">add-brand.html</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="add-brand-step-2.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Add brand &mdash; step 2: connect platforms</div><div class="list-row-sub">add-brand-step-2.html</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="add-brand-step-3.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Add brand &mdash; step 3: initial sync</div><div class="list-row-sub">add-brand-step-3.html</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="settings.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Settings</div><div class="list-row-sub">settings.html &middot; workspace, account, MFA, API tokens, notifications, danger</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="profile.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Profile</div><div class="list-row-sub">profile.html</div></div><span class="text-xs muted">&rarr;</span></a>
+    </div>
+
+    <h3 class="section-title">Phase 1.5 &mdash; RBAC</h3>
+    <div class="card mb-24" style="overflow: hidden;">
+      <a href="team.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Team</div><div class="list-row-sub">team.html &middot; active, invited, disabled tabs</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="invite-user.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Invite user</div><div class="list-row-sub">invite-user.html &middot; role, brand scope, personal note</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="user-detail.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">User detail</div><div class="list-row-sub">user-detail.html &middot; role, brand access, security, activity</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="audit-log.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Audit log</div><div class="list-row-sub">audit-log.html &middot; append-only event ledger</div></div><span class="text-xs muted">&rarr;</span></a>
+    </div>
+
+    <h3 class="section-title">Phase 2 &mdash; Deep analytics (per brand)</h3>
+    <div class="card mb-24" style="overflow: hidden;">
+      <a href="brand-ads.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Ad performance</div><div class="list-row-sub">brand-ads.html &middot; campaign / ad set / ad with scale and underperformer flags</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="brand-products.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Product performance</div><div class="list-row-sub">brand-products.html &middot; per-SKU revenue and refund rate</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="brand-audit.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Store audit</div><div class="list-row-sub">brand-audit.html &middot; page speed, broken events, checkout drop</div></div><span class="text-xs muted">&rarr;</span></a>
+    </div>
+
+    <h3 class="section-title">Phase 3 &mdash; Ticketing</h3>
+    <div class="card mb-24" style="overflow: hidden;">
+      <a href="tickets.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Tickets</div><div class="list-row-sub">tickets.html &middot; triage inbox</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="ticket-new.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">New ticket</div><div class="list-row-sub">ticket-new.html</div></div><span class="text-xs muted">&rarr;</span></a>
+      <a href="ticket-detail.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">Ticket detail</div><div class="list-row-sub">ticket-detail.html &middot; public + internal threads</div></div><span class="text-xs muted">&rarr;</span></a>
+    </div>
+
+    <h3 class="section-title">Errors</h3>
+    <div class="card mb-48" style="overflow: hidden;">
+      <a href="404.html" class="list-row" style="text-decoration: none; color: inherit;"><div class="list-row-main"><div class="list-row-title">404 &mdash; not found</div><div class="list-row-sub">404.html</div></div><span class="text-xs muted">&rarr;</span></a>
+    </div>
+
+    <div class="text-xs muted text-center" style="margin-bottom: 48px;">
+      Total pages: 26 &middot; Modals: 8 &middot; Last built 2026-05-16
+    </div>
+
+  </div>
+
+</body>
+</html>

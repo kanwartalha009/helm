@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>New ticket &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="tickets" data-title="New ticket">
+
+    <div class="breadcrumb">
+      <a href="tickets.html">Tickets</a>
+      <span class="sep">/</span>
+      <span class="current">New</span>
+    </div>
+
+    <div style="max-width: 720px;">
+
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Raise a ticket</h2>
+          <p class="page-subtitle">Describe what you need. We&rsquo;ll triage within one business day.</p>
+        </div>
+      </div>
+
+      <form class="card" style="padding: 24px;" onsubmit="event.preventDefault(); window.location.href='ticket-detail.html';">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">Brand</label>
+            <select class="input" required>
+              <option value="">Pick a brand&hellip;</option>
+              <option>Meller</option>
+              <option>Ayla &amp; Co</option>
+              <option>Nova Threads</option>
+              <option>Kenza Beauty</option>
+              <option>Olea Skincare</option>
+            </select>
+          </div>
+
+          <div class="form-grid form-grid-2">
+            <div class="field">
+              <label class="field-label">Category</label>
+              <select class="input" required>
+                <option value="">Pick a category&hellip;</option>
+                <option>Bug &mdash; something is broken</option>
+                <option>Change &mdash; new feature or update</option>
+                <option>Question &mdash; need information</option>
+                <option>Urgent &mdash; needs immediate attention</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="field-label">Priority</label>
+              <select class="input"><option>Low</option><option selected>Medium</option><option>High</option><option>Urgent</option></select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Title</label>
+            <input class="input" type="text" placeholder="Short summary of the issue or request" required />
+          </div>
+
+          <div class="field">
+            <label class="field-label">Description</label>
+            <textarea class="input" rows="8" placeholder="Steps to reproduce, what you expected, what happened. Include screenshots when helpful." style="resize: vertical; font-family: inherit;" required></textarea>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Attachments <span class="muted" style="font-weight: 400;">(optional)</span></label>
+            <div style="border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="display: block; margin: 0 auto 8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Drag files here or <a href="#" style="color: var(--text);">browse</a>. PNG, JPG, PDF up to 10 MB each.
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between mt-24">
+          <a href="tickets.html" class="btn btn-ghost btn-sm">Cancel</a>
+          <button type="submit" class="btn btn-primary btn-sm">Submit ticket</button>
+        </div>
+      </form>
+
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

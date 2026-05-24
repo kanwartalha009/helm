@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tickets &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="tickets" data-title="Tickets" data-tag="12 open">
+
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Tickets</h2>
+        <p class="page-subtitle">Brand-side requests and internal triage.</p>
+      </div>
+      <a href="ticket-new.html" class="btn btn-primary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        New ticket
+      </a>
+    </div>
+
+    <div class="tabs" data-tab-group>
+      <a class="tab active" data-tab="all">All open (12)</a>
+      <a class="tab" data-tab="mine">Assigned to me (4)</a>
+      <a class="tab" data-tab="urgent">Urgent (2)</a>
+      <a class="tab" data-tab="done">Done (38)</a>
+    </div>
+
+    <div data-tab-content="all">
+      <div class="card" style="overflow: hidden;">
+        <a href="ticket-detail.html" class="list-row" style="text-decoration: none; color: inherit;">
+          <span class="tag" style="font-family: var(--font-mono); font-size: 11px;">#1148</span>
+          <div class="list-row-main">
+            <div class="list-row-title">Meta Pixel Purchase event firing twice on Meller</div>
+            <div class="list-row-sub">Meller &middot; bug &middot; raised by Ana Mart&iacute;n &middot; 2 hr ago</div>
+          </div>
+          <span class="tag tag-warning">Urgent</span>
+          <span class="tag" style="background: #DBEAFE; color: #1D4ED8; border-color: #BFDBFE;">In progress</span>
+          <span class="avatar-sm">JR</span>
+        </a>
+        <a href="ticket-detail.html" class="list-row" style="text-decoration: none; color: inherit;">
+          <span class="tag" style="font-family: var(--font-mono); font-size: 11px;">#1147</span>
+          <div class="list-row-main">
+            <div class="list-row-title">Ayla &amp; Co revenue numbers don&rsquo;t match Shopify admin</div>
+            <div class="list-row-sub">Ayla &amp; Co &middot; question &middot; raised by Rashid Khan &middot; 5 hr ago</div>
+          </div>
+          <span class="tag">Medium</span>
+          <span class="tag tag-success">Triaged</span>
+          <span class="avatar-sm">SM</span>
+        </a>
+        <a href="ticket-detail.html" class="list-row" style="text-decoration: none; color: inherit;">
+          <span class="tag" style="font-family: var(--font-mono); font-size: 11px;">#1146</span>
+          <div class="list-row-main">
+            <div class="list-row-title">Can we add a new TikTok ad account to Kenza Beauty?</div>
+            <div class="list-row-sub">Kenza Beauty &middot; change &middot; raised by Tariq &middot; Yesterday</div>
+          </div>
+          <span class="tag">Low</span>
+          <span class="tag">Open</span>
+          <span class="muted text-xs">Unassigned</span>
+        </a>
+        <a href="ticket-detail.html" class="list-row" style="text-decoration: none; color: inherit;">
+          <span class="tag" style="font-family: var(--font-mono); font-size: 11px;">#1145</span>
+          <div class="list-row-main">
+            <div class="list-row-title">Nova Threads Shopify connection keeps failing</div>
+            <div class="list-row-sub">Nova Threads &middot; bug &middot; raised by Helm system &middot; Yesterday</div>
+          </div>
+          <span class="tag tag-warning">Urgent</span>
+          <span class="tag" style="background: #DBEAFE; color: #1D4ED8; border-color: #BFDBFE;">In progress</span>
+          <span class="avatar-sm">K</span>
+        </a>
+        <a href="ticket-detail.html" class="list-row" style="text-decoration: none; color: inherit;">
+          <span class="tag" style="font-family: var(--font-mono); font-size: 11px;">#1143</span>
+          <div class="list-row-main">
+            <div class="list-row-title">Add custom date range presets (Last 14 days, YTD)</div>
+            <div class="list-row-sub">All brands &middot; change &middot; raised by Diego L&oacute;pez &middot; 2 days ago</div>
+          </div>
+          <span class="tag">Low</span>
+          <span class="tag">Open</span>
+          <span class="muted text-xs">Unassigned</span>
+        </a>
+      </div>
+    </div>
+
+    <div data-tab-content="mine" style="display: none;">
+      <div class="empty-state">
+        <h3>4 tickets assigned to you</h3>
+        <p>Filtered view appears here.</p>
+      </div>
+    </div>
+
+    <div data-tab-content="urgent" style="display: none;">
+      <div class="empty-state">
+        <h3>2 urgent tickets</h3>
+        <p>Filtered view appears here.</p>
+      </div>
+    </div>
+
+    <div data-tab-content="done" style="display: none;">
+      <div class="empty-state">
+        <h3>38 completed tickets in the last 30 days</h3>
+        <p>Closed tickets archive lives here.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

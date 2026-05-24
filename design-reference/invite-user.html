@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invite user &mdash; Helm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div data-shell data-active="team" data-title="Invite user">
+
+    <div class="breadcrumb">
+      <a href="team.html">Team</a>
+      <span class="sep">/</span>
+      <span class="current">Invite user</span>
+    </div>
+
+    <div style="max-width: 640px;">
+
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Invite a user</h2>
+          <p class="page-subtitle">They&rsquo;ll get an email with a link to set their password. The link expires in 7 days.</p>
+        </div>
+      </div>
+
+      <form class="card" style="padding: 24px;" onsubmit="event.preventDefault(); window.location.href='team.html';">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label">Email</label>
+            <input class="input" type="email" placeholder="name@company.com" required />
+          </div>
+
+          <div class="field">
+            <label class="field-label">Role</label>
+            <select class="input" id="role-select" required onchange="document.getElementById('brand-picker').style.display = ['team_member','brand_user'].includes(this.value) ? 'block' : 'none';">
+              <option value="">Pick a role&hellip;</option>
+              <option value="manager">Manager &mdash; sees all brands, manages non-admin users</option>
+              <option value="team_member">Team member &mdash; sees assigned brands only</option>
+              <option value="brand_user">Brand user &mdash; sees one brand only, can raise tickets</option>
+            </select>
+            <span class="field-hint">You cannot invite another master admin.</span>
+          </div>
+
+          <div class="field" id="brand-picker" style="display: none;">
+            <label class="field-label">Accessible brands</label>
+            <div class="card" style="padding: 12px; max-height: 200px; overflow-y: auto;">
+              <label class="flex items-center gap-8" style="cursor: pointer; padding: 4px 0;"><input type="checkbox" /> Meller <span class="muted text-sm">&middot; Spain</span></label>
+              <label class="flex items-center gap-8" style="cursor: pointer; padding: 4px 0;"><input type="checkbox" /> Ayla &amp; Co <span class="muted text-sm">&middot; UAE</span></label>
+              <label class="flex items-center gap-8" style="cursor: pointer; padding: 4px 0;"><input type="checkbox" /> Nova Threads <span class="muted text-sm">&middot; US</span></label>
+              <label class="flex items-center gap-8" style="cursor: pointer; padding: 4px 0;"><input type="checkbox" /> Kenza Beauty <span class="muted text-sm">&middot; Saudi Arabia</span></label>
+              <label class="flex items-center gap-8" style="cursor: pointer; padding: 4px 0;"><input type="checkbox" /> Olea Skincare <span class="muted text-sm">&middot; Italy</span></label>
+              <label class="flex items-center gap-8" style="cursor: pointer; padding: 4px 0;"><input type="checkbox" /> Ren Coffee <span class="muted text-sm">&middot; Sweden</span></label>
+            </div>
+            <span class="field-hint">For brand users, pick exactly one. For team members, any number.</span>
+          </div>
+
+          <div class="field">
+            <label class="field-label">Personal note <span class="muted" style="font-weight: 400;">(optional)</span></label>
+            <textarea class="input" rows="3" placeholder="Welcome to Helm&hellip;" style="resize: vertical; font-family: inherit;"></textarea>
+            <span class="field-hint">Included in the invitation email.</span>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between mt-24">
+          <a href="team.html" class="btn btn-ghost btn-sm">Cancel</a>
+          <button type="submit" class="btn btn-primary btn-sm">Send invitation</button>
+        </div>
+      </form>
+
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+# Local infrastructure for the Helm API. Use this when you don't want to
+# install Postgres and Redis natively on macOS.
+#
+# Bring up:    docker compose up -d
+# Inspect:     docker compose ps
+# Connect to DB: psql -h 127.0.0.1 -p 5432 -U helm -d helm   (password: helm)
+# Bring down:  docker compose down
+# Wipe data:   docker compose down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: helm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: helm
+      POSTGRES_USER: helm
+      POSTGRES_PASSWORD: helm
+    ports:
+      - "5432:5432"
+    volumes:
+      - helm-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U helm -d helm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: helm-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - helm-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  helm-postgres:
+  helm-redis:
