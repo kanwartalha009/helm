@@ -17,3 +17,11 @@ Route::get('/connections/shopify/install', [OAuthCallbackController::class, 'sho
 Route::get('/connections/{platform}/callback', [OAuthCallbackController::class, 'callback'])
     ->name('connections.callback')
     ->where('platform', 'shopify|meta|google|tiktok');
+
+Route::fallback(function () {
+    $indexPath = public_path('app/index.html');
+    if (! file_exists($indexPath)) {
+        abort(404, 'Frontend build missing. Run `npm run build` and copy /web/dist to /api/public/app.');
+    }
+    return response()->file($indexPath);
+});

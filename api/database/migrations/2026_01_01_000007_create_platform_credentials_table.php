@@ -30,11 +30,20 @@ return new class extends Migration {
 
         // Partial unique index — only one ACTIVE row per (platform, key) at a time.
         // Rotated/revoked rows are kept for historical sync log explanations.
-        DB::statement(
-            'CREATE UNIQUE INDEX platform_credentials_active_unique '
-            . 'ON platform_credentials (platform, key) '
-            . "WHERE status = 'active'"
-        );
+        if (DB::getDriverName() === 'mysql') {
+            Schema::table('platform_credentials', function (Blueprint $table) {
+                $table->string('active_key')
+                    ->virtualAs("CASE WHEN status = 'active' THEN `key` ELSE NULL END")
+                    ->nullable();
+                $table->unique(['platform', 'active_key'], 'platform_credentials_active_unique');
+            });
+        } else {
+            DB::statement(
+                'CREATE UNIQUE INDEX platform_credentials_active_unique '
+                . 'ON platform_credentials (platform, key) '
+                . "WHERE status = 'active'"
+            );
+        }
     }
 
     public function down(): void

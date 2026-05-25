@@ -57,7 +57,7 @@ class BackfillFxRatesJob implements ShouldQueue
             // Postgres jsonb expression — works on the same column we
             // already index. `is_complete` filter avoids spinning on
             // today's still-open partial row.
-            ->whereRaw("metadata->>'fx_pending' = 'true'")
+            ->where('metadata->fx_pending', 'true')
             ->orderBy('id')
             ->chunkById(self::BATCH_SIZE, function ($batch) use ($fx, &$resolved, &$skipped, &$failed) {
                 foreach ($batch as $row) {

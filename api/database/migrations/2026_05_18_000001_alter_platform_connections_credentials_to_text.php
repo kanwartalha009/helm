@@ -15,17 +15,23 @@ use Illuminate\Support\Facades\DB;
 return new class extends Migration {
     public function up(): void
     {
-        // ALTER directly via raw SQL — Doctrine DBAL isn't installed and we don't
-        // need it for a one-column type change. Cast jsonb → text is implicit
-        // in Postgres so existing rows (if any) survive the transition.
-        DB::statement('ALTER TABLE platform_connections ALTER COLUMN credentials TYPE TEXT USING credentials::text');
+        if (DB::getDriverName() === 'mysql') {
+            \Illuminate\Support\Facades\Schema::table('platform_connections', function (\Illuminate\Database\Schema\Blueprint $table) {
+                $table->text('credentials')->change();
+            });
+        } else {
+            DB::statement('ALTER TABLE platform_connections ALTER COLUMN credentials TYPE TEXT USING credentials::text');
+        }
     }
 
     public function down(): void
     {
-        // jsonb requires valid JSON in every row, so the reverse cast will fail
-        // for any encrypted blob. We accept that — rolling back means the column
-        // is empty or the operator handles it manually.
-        DB::statement('ALTER TABLE platform_connections ALTER COLUMN credentials TYPE JSONB USING credentials::jsonb');
+        if (DB::getDriverName() === 'mysql') {
+            \Illuminate\Support\Facades\Schema::table('platform_connections', function (\Illuminate\Database\Schema\Blueprint $table) {
+                $table->json('credentials')->change();
+            });
+        } else {
+            DB::statement('ALTER TABLE platform_connections ALTER COLUMN credentials TYPE JSONB USING credentials::jsonb');
+        }
     }
 };
