@@ -792,7 +792,7 @@ function ShopifyOAuthButton({
               </li>
               <li>
                 Configuration → <strong>Allowed redirection URL(s)</strong>:{' '}
-                <span className="mono">http://localhost:8000/connections/shopify/callback</span>. Save.
+                <span className="mono">{window.location.origin}/connections/shopify/callback</span>. Save.
               </li>
               <li>
                 Distribution → <strong>Custom distribution</strong> → add this brand's store. Save.

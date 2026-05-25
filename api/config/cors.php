@@ -1,27 +1,36 @@
 <?php
 
-return [
+/*
+|--------------------------------------------------------------------------
+| Cross-Origin Resource Sharing (CORS) Configuration
+|--------------------------------------------------------------------------
+|
+| In production, the React SPA is served from the same hostname as the API
+| (it's just /app/index.html under public/), so CORS is technically unused
+| for normal requests. But the policy still needs to be sane for two cases:
+|
+|   1. Local development — Vite at :5173 calls the API at :8000.
+|   2. Future split deployments — frontend on a CDN, API on a subdomain.
+|
+| The allow-list derives from APP_URL + FRONTEND_URL and always includes
+| localhost so `npm run dev` keeps working.
+|
+*/
 
-    /*
-    |--------------------------------------------------------------------------
-    | Cross-Origin Resource Sharing (CORS) Configuration
-    |--------------------------------------------------------------------------
-    |
-    | The SPA at http://localhost:5173 calls the API at http://localhost:8000.
-    | Without allowed_origins listing 5173, the browser blocks responses and
-    | tokens never reach the SPA — which manifests as "I keep getting logged out".
-    |
-    */
+$origins = array_values(array_unique(array_filter([
+    env('APP_URL'),
+    env('FRONTEND_URL'),
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+])));
+
+return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie', 'storage/*'],
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => [
-        env('FRONTEND_URL', 'http://localhost:5173'),
-        'http://localhost:5173',
-        'http://127.0.0.1:5173',
-    ],
+    'allowed_origins' => $origins,
 
     'allowed_origins_patterns' => [],
 
