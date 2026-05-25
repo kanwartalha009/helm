@@ -5,15 +5,22 @@ interface BannerProps {
   variant?: 'info' | 'warning' | 'default';
   icon?: ReactNode;
   children: ReactNode;
+  className?: string;
 }
 
-export function Banner({ variant = 'default', icon, children }: BannerProps) {
+export function Banner({
+  variant = 'default',
+  icon,
+  children,
+  className
+}: BannerProps) {
   return (
     <div
       className={cn(
         'banner',
         variant === 'info' && 'banner-info',
-        variant === 'warning' && 'banner-warning'
+        variant === 'warning' && 'banner-warning',
+        className
       )}
     >
       {icon}
