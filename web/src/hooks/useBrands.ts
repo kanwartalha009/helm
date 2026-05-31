@@ -364,6 +364,19 @@ export function useTriggerSync() {
       }, 4000);
     },
     onError: (err: any) => {
+      // 409 = controller's idempotency guard tripped — brand already has
+      // queued/running work. Surface as an info toast (this isn't an
+      // error from the operator's perspective; the sync just didn't
+      // double-queue) and bring them to Sync health to see what's running.
+      if (err?.response?.status === 409 && err.response?.data?.reason === 'already_in_progress') {
+        qc.invalidateQueries({ queryKey: ['sync-status'] });
+        toast.info(
+          'Sync already in progress',
+          err.response.data.message ??
+            'A sync is already running for this brand. Wait for it to finish before queueing another.'
+        );
+        return;
+      }
       const msg = err?.response?.data?.message ?? err.message;
       toast.error("Couldn't queue sync", msg);
     },

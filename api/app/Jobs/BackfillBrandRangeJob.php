@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Models\Brand;
 use App\Models\PlatformConnection;
+use App\Models\SyncLog;
 use App\Services\DateRange\DateRangeResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Bus\Queueable;
@@ -44,7 +45,17 @@ class BackfillBrandRangeJob implements ShouldQueue
 
         foreach ($connections as $conn) {
             foreach ($dates->eachDay($this->from, $this->to) as $day) {
-                SyncBrandDayJob::dispatch($this->brand, $conn, $day);
+                // Write the queued sync_logs row at dispatch so the Sync
+                // health page shows backfill progress as it drains. Same
+                // contract as the controller — see SyncStatusController.
+                $log = SyncLog::create([
+                    'brand_id'    => $this->brand->id,
+                    'platform'    => $conn->platform,
+                    'target_date' => $day->toDateString(),
+                    'status'      => 'queued',
+                    'started_at'  => null,
+                ]);
+                SyncBrandDayJob::dispatch($this->brand, $conn, $day, $log->id);
             }
         }
     }

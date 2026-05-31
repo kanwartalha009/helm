@@ -60,11 +60,16 @@ Every endpoint that touches a brand is gated by `EnsureUserCanAccessBrand` middl
 
 ## Sync
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/sync/status` | Last sync per brand × platform, success/fail flags |
-| POST | `/api/brands/{id}/sync` | Manual trigger sync for a brand (rate-limited) |
-| POST | `/api/brands/{id}/backfill` | Backfill a date range. Body: `from`, `to` |
+| Method | Path | Purpose | Throttle | Role |
+|--------|------|---------|----------|------|
+| GET | `/api/sync/status` | 200 most recent `sync_logs` plus last-24h status counts (`queued`, `running`, `successful`, `failed`) | `60,1` | authenticated |
+| GET | `/api/sync/status/export.csv` | Streamed CSV of the last 30 days of `sync_logs` | `60,1` | authenticated |
+| POST | `/api/brands/{brand}/sync` | Manual per-brand "Sync now". Shopify → `SyncBrandHistoryJob` (full history). Ads → `SyncBrandDayJob` × 7. Returns 202 with dispatch count, or 409 `already_in_progress` if a sync is in flight for that brand within the 30-min idempotency window | `30,1` | `BrandPolicy::update` |
+| POST | `/api/sync/all` | Master "Sync now" — same per-brand fan-out applied to every active brand, 30s stagger between brands. Brands with in-flight syncs are silently skipped and counted in `brandsAlreadyRunning`. Returns 202 | `12,5` | role `master_admin` or `manager` |
+| POST | `/api/sync-logs/{log}/retry` | Re-dispatches a single `SyncBrandDayJob` for the (brand, platform, target_date) of the failed log. Writes a fresh `queued` row | `30,1` | authenticated |
+| POST | `/api/brands/{brand}/backfill` | Dispatches `BackfillBrandRangeJob` for a custom range. Body: `from`, `to` | `60,1` | `BrandPolicy::update` |
+
+See [`06-sync`](../06-sync/README.md) for the queue lifecycle, idempotency window, and schedules.
 
 ## Users & access — Phase 1.5
 
@@ -83,4 +88,4 @@ Every endpoint that touches a brand is gated by `EnsureUserCanAccessBrand` middl
 - **Filtering:** query params, never POST bodies for GET requests.
 - **Date inputs:** ISO 8601 strings. The API resolves them to the requesting user's accessible brands using each brand's own timezone.
 - **Currency:** every monetary response field includes a sibling `_currency` field. The dashboard never displays a number without its currency.
-- **Rate limiting:** Sanctum's `throttle:60,1` on most endpoints. Manual sync endpoints throttled at `5,1` per user to prevent stampede.
+- **Rate limiting:** Sanctum's `throttle:60,1` on most endpoints. Per-brand manual sync (`POST /api/brands/{brand}/sync`) is `30,1` — a single click fans out 7 jobs/connection, so the request-rate limit isn't the right defense and per-queue concurrency carries the load. Master sync (`POST /api/sync/all`) is `12,5`. Per-row retry (`POST /api/sync-logs/{log}/retry`) is `30,1`.

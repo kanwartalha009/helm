@@ -20,6 +20,7 @@ interface MasterSyncResult {
   dispatched: number;
   brandsSynced: number;
   brandsSkipped: number;
+  brandsAlreadyRunning?: number;
   totalBrands: number;
   message?: string;
 }
@@ -29,6 +30,10 @@ interface MasterSyncResult {
  * but for every active brand at once. The endpoint returns 202 immediately
  * and Horizon drains the queue in the background, so the dashboard query is
  * invalidated on a short delay rather than waiting for jobs to complete.
+ *
+ * Brands that already have an in-flight sync are silently skipped server-
+ * side and counted as `brandsAlreadyRunning`. We mention this in the toast
+ * so the operator understands why fewer jobs queued than they expected.
  */
 export function useMasterSync() {
   const qc = useQueryClient();
@@ -39,21 +44,43 @@ export function useMasterSync() {
     },
     onSuccess: (result) => {
       if (result.dispatched === 0) {
+        // Two distinct zero-dispatch cases: nothing to sync at all, or
+        // everything was already running. Render them differently.
+        if ((result.brandsAlreadyRunning ?? 0) > 0) {
+          toast.info(
+            'Sync already in progress',
+            `${result.brandsAlreadyRunning} brand${
+              result.brandsAlreadyRunning === 1 ? '' : 's'
+            } already syncing. Nothing new queued.`
+          );
+          return;
+        }
         toast.info(result.message ?? 'Nothing to sync', 'No active brands have any connections.');
         return;
       }
-      const skipped =
-        result.brandsSkipped > 0
-          ? ` ${result.brandsSkipped} brand${result.brandsSkipped === 1 ? '' : 's'} skipped (no connections).`
-          : '';
+
+      const parts: string[] = [];
+      if (result.brandsSkipped > 0) {
+        parts.push(
+          `${result.brandsSkipped} brand${result.brandsSkipped === 1 ? '' : 's'} skipped (no connections)`
+        );
+      }
+      if ((result.brandsAlreadyRunning ?? 0) > 0) {
+        parts.push(
+          `${result.brandsAlreadyRunning} already syncing`
+        );
+      }
+      const tail = parts.length > 0 ? ` ${parts.join(', ')}.` : '';
+
       toast.success(
         'Sync queued',
-        `${result.dispatched} job${result.dispatched === 1 ? '' : 's'} queued across ${result.brandsSynced} brand${result.brandsSynced === 1 ? '' : 's'}.${skipped} Refresh in a minute.`
+        `${result.dispatched} job${result.dispatched === 1 ? '' : 's'} queued across ${result.brandsSynced} brand${result.brandsSynced === 1 ? '' : 's'}.${tail} Refresh in a minute.`
       );
       // Pessimistic refresh — wait briefly so Horizon has a chance to start
       // draining before we re-fetch. The user can also hit refresh manually.
       setTimeout(() => {
         qc.invalidateQueries({ queryKey: ['dashboard'] });
+        qc.invalidateQueries({ queryKey: ['sync-status'] });
       }, 8_000);
     },
     onError: (err: any) => {

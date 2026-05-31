@@ -11,16 +11,38 @@ use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 /**
  * Schedule from spec §12.1 / docs/06-sync — all times UTC.
  *
- *   13:00 daily       — RunDailySyncCommand   (7-day rolling)
- *   13:30 daily       — FetchCurrencyRatesCommand
- *   :00 hourly 06-22  — RunHourlySyncCommand   (top-20 hot brands)
+ *   01:00 daily       — SyncShopifyRollingCommand   (today + yesterday, Shopify)
+ *   13:00 daily       — SyncShopifyRollingCommand   (today + yesterday, Shopify)
+ *   13:00 daily       — RunDailySyncCommand         (7-day rolling, all platforms)
+ *   13:30 daily       — FetchCurrencyRatesCommand   (removed in Phase 1)
+ *   :00 hourly 06-22  — RunHourlySyncCommand        (top-20 hot brands)
  *   02:00 Sunday      — sync_logs cleanup > 90 days
+ *
+ * See specs/CHANGE_REQUEST_2026-05-31_sync.md for the twice-daily Shopify
+ * cadence rationale.
  */
 class Kernel extends ConsoleKernel
 {
     protected function schedule(Schedule $schedule): void
     {
-        // Daily sync — 7-day rolling window at 13:00 UTC.
+        // Twice-daily Shopify auto-sync — 01:00 and 13:00 UTC. Per brand,
+        // dispatches today + yesterday in the brand timezone. Idempotent
+        // (skips brands with queued/running work). See SyncShopifyRollingCommand.
+        $schedule->command('sync:shopify-rolling')
+            ->dailyAt('01:00')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer();
+
+        $schedule->command('sync:shopify-rolling')
+            ->dailyAt('13:00')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer();
+
+        // Daily sync — 7-day rolling window at 13:00 UTC. Covers all
+        // platforms (Shopify + ads). Catches late-attribution refunds and
+        // late conversions on ads.
         $schedule->command('sync:daily')
             ->dailyAt('13:00')
             ->timezone('UTC')

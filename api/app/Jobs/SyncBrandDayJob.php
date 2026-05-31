@@ -44,11 +44,18 @@ class SyncBrandDayJob implements ShouldQueue
      * Queueable trait already declares a `$connection` property (used to
      * select which queue connection — redis/sync — the job dispatches on),
      * and PHP rejects the trait composition if our property name collides.
+     *
+     * $logId is the id of a prewritten sync_logs row in `queued` state. The
+     * controller / cron command writes this row before dispatch so the
+     * Sync health page can show pending work without waiting for the
+     * worker to pick the job up. When $logId is null (older callers, tests),
+     * the job creates its own row as before — back-compat preserved.
      */
     public function __construct(
         public readonly Brand $brand,
         public readonly PlatformConnection $platformConnection,
         public readonly CarbonImmutable $date,
+        public readonly ?int $logId = null,
     ) {
         // 'shopify-sync' queue tolerates higher concurrency than ads-sync.
         $this->onQueue($platformConnection->platform === 'shopify' ? 'shopify-sync' : 'ads-sync');
@@ -56,13 +63,39 @@ class SyncBrandDayJob implements ShouldQueue
 
     public function handle(PlatformRegistry $registry): void
     {
-        $log = SyncLog::create([
-            'brand_id'    => $this->brand->id,
-            'platform'    => $this->platformConnection->platform,
-            'target_date' => $this->date->toDateString(),
-            'status'      => 'running',
-            'started_at'  => now(),
-        ]);
+        // Two paths in:
+        //   - $logId set      → controller/command already wrote a `queued`
+        //                       row. We transition it to `running` here.
+        //   - $logId null     → legacy callers. Create the row inline.
+        // Either way, $log holds the row we update on success/failure.
+        if ($this->logId !== null) {
+            /** @var SyncLog|null $log */
+            $log = SyncLog::find($this->logId);
+            if ($log === null) {
+                // Row was pruned (cleanup cron) between dispatch and handle.
+                // Create a fresh one so the run is still recorded.
+                $log = SyncLog::create([
+                    'brand_id'    => $this->brand->id,
+                    'platform'    => $this->platformConnection->platform,
+                    'target_date' => $this->date->toDateString(),
+                    'status'      => 'running',
+                    'started_at'  => now(),
+                ]);
+            } else {
+                $log->update([
+                    'status'     => 'running',
+                    'started_at' => now(),
+                ]);
+            }
+        } else {
+            $log = SyncLog::create([
+                'brand_id'    => $this->brand->id,
+                'platform'    => $this->platformConnection->platform,
+                'target_date' => $this->date->toDateString(),
+                'status'      => 'running',
+                'started_at'  => now(),
+            ]);
+        }
 
         try {
             $adapter  = $registry->for($this->platformConnection->platform);

@@ -47,11 +47,15 @@ class SyncBrandHistoryJob implements ShouldQueue
     /**
      * Property name is $platformConnection, not $connection — the Queueable
      * trait already claims `$connection` for queue-connection routing.
+     *
+     * $logId is the id of a prewritten `queued` sync_logs row. Same
+     * mechanism as SyncBrandDayJob — see that file for the rationale.
      */
     public function __construct(
         public readonly Brand $brand,
         public readonly PlatformConnection $platformConnection,
         public readonly ?CarbonImmutable $since = null,
+        public readonly ?int $logId = null,
     ) {
         $this->onQueue('shopify-sync');
     }
@@ -68,15 +72,37 @@ class SyncBrandHistoryJob implements ShouldQueue
             throw new \RuntimeException('Shopify adapter missing from registry.');
         }
 
-        $log = SyncLog::create([
-            'brand_id'    => $this->brand->id,
-            'platform'    => 'shopify',
-            // We log the target_date as today — the row spans many days but
-            // the schema has a NOT NULL date column. Metadata captures the range.
-            'target_date' => CarbonImmutable::now($this->brand->timezone)->toDateString(),
-            'status'      => 'running',
-            'started_at'  => now(),
-        ]);
+        // Same two-path pattern as SyncBrandDayJob — either transition a
+        // prewritten `queued` row or create one inline for legacy callers.
+        if ($this->logId !== null) {
+            /** @var SyncLog|null $log */
+            $log = SyncLog::find($this->logId);
+            if ($log === null) {
+                $log = SyncLog::create([
+                    'brand_id'    => $this->brand->id,
+                    'platform'    => 'shopify',
+                    'target_date' => CarbonImmutable::now($this->brand->timezone)->toDateString(),
+                    'status'      => 'running',
+                    'started_at'  => now(),
+                ]);
+            } else {
+                $log->update([
+                    'status'     => 'running',
+                    'started_at' => now(),
+                ]);
+            }
+        } else {
+            $log = SyncLog::create([
+                'brand_id'    => $this->brand->id,
+                'platform'    => 'shopify',
+                // We log the target_date as today — the row spans many days
+                // but the schema has a NOT NULL date column. Metadata
+                // captures the range.
+                'target_date' => CarbonImmutable::now($this->brand->timezone)->toDateString(),
+                'status'      => 'running',
+                'started_at'  => now(),
+            ]);
+        }
 
         try {
             $snapshots = $fetcher->fetchAllSince($this->platformConnection, $this->since);

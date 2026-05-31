@@ -15,10 +15,24 @@ use App\Models\PlatformConnection;
 use App\Models\SyncLog;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Collection;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class SyncStatusController extends Controller
 {
+    /**
+     * Idempotency window. A second "Sync now" click within this window for
+     * a brand that already has queued/running work is rejected (per-brand
+     * trigger) or skipped (master triggerAll / cron).
+     *
+     * Tuned to cover the worst-case wall time of a single Shopify history
+     * scan (15m × 2 attempts = 30m) plus a couple of minutes' worth of
+     * Horizon backoff slack. Past 30 minutes a queued/running row is
+     * treated as orphaned (Horizon crashed, queue stuck) and a fresh
+     * dispatch is allowed.
+     */
+    private const IDEMPOTENCY_WINDOW_MINUTES = 30;
+
     /**
      * GET /api/sync/status
      *
@@ -64,12 +78,32 @@ class SyncStatusController extends Controller
      * adapters aren't implemented yet so most will throw into sync_logs, but
      * the dispatch path is in place for when they come online.
      *
+     * Idempotent: if any sync_log row is already queued/running for this
+     * brand within the last IDEMPOTENCY_WINDOW_MINUTES, returns 409 with a
+     * payload describing the in-flight work — no new jobs are dispatched.
+     *
      * The nightly cron still owns the canonical 7-day rolling backfill —
      * see RunDailySyncCommand. That's where late-refund attribution settles.
      */
     public function trigger(Brand $brand): JsonResponse
     {
         $this->authorize('update', $brand);
+
+        $existing = $this->pendingLogsForBrand($brand->id);
+        if ($existing->isNotEmpty()) {
+            return response()->json([
+                'queued'    => false,
+                'reason'    => 'already_in_progress',
+                'message'   => "A sync is already in progress for {$brand->name}. Wait for it to finish before queueing another.",
+                'inFlight'  => $existing->map(fn ($l) => [
+                    'id'         => $l->id,
+                    'platform'   => $l->platform,
+                    'status'     => $l->status,
+                    'started_at' => $l->started_at?->toIso8601String(),
+                    'created_at' => $l->created_at?->toIso8601String(),
+                ])->all(),
+            ], 409);
+        }
 
         $today = CarbonImmutable::now($brand->timezone)->startOfDay();
         $from  = $today->subDays(6);
@@ -79,35 +113,16 @@ class SyncStatusController extends Controller
             ->where('status', '!=', 'paused')
             ->get();
 
-        $dispatched = 0;
-        foreach ($connections as $conn) {
-            if ($conn->platform === 'shopify') {
-                // Queue the history scan on Horizon. We previously ran this
-                // inline (dispatchSync) so the response held populated data,
-                // but PHP's max_execution_time (30s default) kills the request
-                // for any store with more than a few hundred orders. Async
-                // means the response returns in milliseconds and the brand
-                // page's polling picks up data as it lands.
-                SyncBrandHistoryJob::dispatch($brand, $conn);
-                $dispatched++;
-                continue;
-            }
-            // Ad platforms — fan out one day at a time across the 7-day window.
-            // These stay queued because their adapters aren't implemented yet
-            // and we don't want to block the request on failing jobs.
-            for ($d = $from; $d->lessThanOrEqualTo($today); $d = $d->addDay()) {
-                SyncBrandDayJob::dispatch($brand, $conn, $d);
-                $dispatched++;
-            }
-        }
+        $dispatched = $this->dispatchForBrand($brand, $connections, $today, $from);
 
         return response()->json([
+            'queued'     => true,
             'dispatched' => $dispatched,
             'mode'       => 'history-for-shopify+7d-for-ads',
             'from'       => $from->toDateString(),
             'to'         => $today->toDateString(),
             'platforms'  => $connections->pluck('platform')->all(),
-        ]);
+        ], 202);
     }
 
     /**
@@ -118,6 +133,11 @@ class SyncStatusController extends Controller
      * each brand page in turn:
      *   - Shopify connections → SyncBrandHistoryJob (paginated all-time scan)
      *   - Ad connections      → SyncBrandDayJob × 7 (today + 6 days back)
+     *
+     * Brands with an in-flight sync (queued/running within the idempotency
+     * window) are silently skipped and counted in `brandsAlreadyRunning`
+     * rather than 409'ing the whole call. The dashboard click is portfolio-
+     * wide — partial success is the right default.
      *
      * Authorization is enforced upstream by the `role:master_admin,manager`
      * middleware on the route (see routes/api.php). Lower-tier users still
@@ -148,9 +168,14 @@ class SyncStatusController extends Controller
             ->get()
             ->groupBy('brand_id');
 
-        $dispatched      = 0;
-        $brandsSynced    = 0;
-        $brandsSkipped   = 0;
+        // Per-brand pending lookup — single query across the brand set so we
+        // don't issue 100+ lookups during a portfolio fan-out.
+        $pendingByBrand = $this->pendingLogsForBrandIds($brandIds)->groupBy('brand_id');
+
+        $dispatched           = 0;
+        $brandsSynced         = 0;
+        $brandsSkipped        = 0; // active brands with no connections
+        $brandsAlreadyRunning = 0; // active brands with an in-flight sync
 
         // Stagger dispatch by N seconds per brand so a fan-out across 17+
         // stores doesn't all hit Shopify within the same minute. The queue
@@ -162,6 +187,11 @@ class SyncStatusController extends Controller
         $perBrandStagger = 30;
 
         foreach ($brands as $brand) {
+            if ($pendingByBrand->has($brand->id)) {
+                $brandsAlreadyRunning++;
+                continue;
+            }
+
             $connections = $connectionsByBrand->get($brand->id) ?? collect();
             if ($connections->isEmpty()) {
                 $brandsSkipped++;
@@ -174,26 +204,17 @@ class SyncStatusController extends Controller
 
             $delayAt = now()->addSeconds($staggerSeconds);
 
-            foreach ($connections as $conn) {
-                if ($conn->platform === 'shopify') {
-                    SyncBrandHistoryJob::dispatch($brand, $conn)->delay($delayAt);
-                    $dispatched++;
-                    continue;
-                }
-                for ($d = $from; $d->lessThanOrEqualTo($today); $d = $d->addDay()) {
-                    SyncBrandDayJob::dispatch($brand, $conn, $d)->delay($delayAt);
-                    $dispatched++;
-                }
-            }
+            $dispatched += $this->dispatchForBrand($brand, $connections, $today, $from, $delayAt);
 
             $staggerSeconds += $perBrandStagger;
         }
 
         return response()->json([
-            'dispatched'    => $dispatched,
-            'brandsSynced'  => $brandsSynced,
-            'brandsSkipped' => $brandsSkipped, // active brands with no connections
-            'totalBrands'   => $brands->count(),
+            'dispatched'           => $dispatched,
+            'brandsSynced'         => $brandsSynced,
+            'brandsSkipped'        => $brandsSkipped,
+            'brandsAlreadyRunning' => $brandsAlreadyRunning,
+            'totalBrands'          => $brands->count(),
         ], 202);
     }
 
@@ -244,7 +265,10 @@ class SyncStatusController extends Controller
      * POST /api/sync-logs/{log}/retry
      *
      * Re-dispatches a single failed SyncBrandDayJob from a sync_log row.
-     * Used by the per-row Retry button on Sync health.
+     * Used by the per-row Retry button on Sync health. Writes a fresh
+     * `queued` row for the retry so it shows up in the queue tile and the
+     * audit chain stays clean (the original failed row keeps its error
+     * message; the retry row tells a new story).
      */
     public function retryLog(\App\Models\SyncLog $log): JsonResponse
     {
@@ -265,10 +289,20 @@ class SyncStatusController extends Controller
         }
 
         $date = CarbonImmutable::parse($log->target_date)->startOfDay();
-        SyncBrandDayJob::dispatch($brand, $connection, $date);
+
+        $queued = SyncLog::create([
+            'brand_id'    => $brand->id,
+            'platform'    => $log->platform,
+            'target_date' => $date->toDateString(),
+            'status'      => 'queued',
+            'started_at'  => null,
+        ]);
+
+        SyncBrandDayJob::dispatch($brand, $connection, $date, $queued->id);
 
         return response()->json([
             'queued'      => true,
+            'logId'       => $queued->id,
             'platform'    => $log->platform,
             'target_date' => $log->target_date,
         ], 202);
@@ -288,5 +322,99 @@ class SyncStatusController extends Controller
             'from'   => $from->toDateString(),
             'to'     => $to->toDateString(),
         ], 202);
+    }
+
+    // ---------- internal helpers ------------------------------------------
+
+    /**
+     * Dispatch all sync jobs for one (brand × connections) tuple and write
+     * a `queued` sync_logs row for each job at dispatch time so the Sync
+     * health page shows pending work immediately.
+     *
+     * Shopify → one SyncBrandHistoryJob (today as target_date — the row
+     * spans many days but the schema NOT-NULLs date).
+     * Ads      → 7 × SyncBrandDayJob (today + 6 prior).
+     *
+     * @param  \Illuminate\Support\Collection<int, PlatformConnection>  $connections
+     * @return int Number of jobs dispatched.
+     */
+    private function dispatchForBrand(
+        Brand $brand,
+        Collection $connections,
+        CarbonImmutable $today,
+        CarbonImmutable $from,
+        ?\Illuminate\Support\Carbon $delayAt = null,
+    ): int {
+        $dispatched = 0;
+
+        foreach ($connections as $conn) {
+            if ($conn->platform === 'shopify') {
+                $log = SyncLog::create([
+                    'brand_id'    => $brand->id,
+                    'platform'    => 'shopify',
+                    'target_date' => $today->toDateString(),
+                    'status'      => 'queued',
+                    'started_at'  => null,
+                ]);
+                $pending = SyncBrandHistoryJob::dispatch($brand, $conn, null, $log->id);
+                if ($delayAt !== null) {
+                    $pending->delay($delayAt);
+                }
+                $dispatched++;
+                continue;
+            }
+
+            // Ad platform — fan out one day at a time across the 7-day
+            // window. One queued sync_logs row per day.
+            for ($d = $from; $d->lessThanOrEqualTo($today); $d = $d->addDay()) {
+                $log = SyncLog::create([
+                    'brand_id'    => $brand->id,
+                    'platform'    => $conn->platform,
+                    'target_date' => $d->toDateString(),
+                    'status'      => 'queued',
+                    'started_at'  => null,
+                ]);
+                $pending = SyncBrandDayJob::dispatch($brand, $conn, $d, $log->id);
+                if ($delayAt !== null) {
+                    $pending->delay($delayAt);
+                }
+                $dispatched++;
+            }
+        }
+
+        return $dispatched;
+    }
+
+    /**
+     * Returns any sync_logs in queued/running status for this brand within
+     * the idempotency window. Used by `trigger()` (returns 409) and
+     * indirectly by `triggerAll()` (counts as "alreadyRunning").
+     *
+     * @return \Illuminate\Support\Collection<int, SyncLog>
+     */
+    private function pendingLogsForBrand(int $brandId): Collection
+    {
+        return SyncLog::query()
+            ->where('brand_id', $brandId)
+            ->whereIn('status', ['queued', 'running'])
+            ->where('created_at', '>=', now()->subMinutes(self::IDEMPOTENCY_WINDOW_MINUTES))
+            ->orderByDesc('created_at')
+            ->get();
+    }
+
+    /**
+     * Bulk variant of pendingLogsForBrand for the master fan-out — one query
+     * across the brand set instead of N.
+     *
+     * @param  array<int, int>  $brandIds
+     * @return \Illuminate\Support\Collection<int, SyncLog>
+     */
+    private function pendingLogsForBrandIds(array $brandIds): Collection
+    {
+        return SyncLog::query()
+            ->whereIn('brand_id', $brandIds)
+            ->whereIn('status', ['queued', 'running'])
+            ->where('created_at', '>=', now()->subMinutes(self::IDEMPOTENCY_WINDOW_MINUTES))
+            ->get();
     }
 }
