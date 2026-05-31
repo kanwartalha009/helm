@@ -114,9 +114,12 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
 
     // Master Sync now — dispatches the same fan-out as the per-brand Sync
     // now button, but for every active brand at once. Restricted to roles
-    // that can `update` a brand (mirrors BrandPolicy). Tight throttle: this
-    // can queue hundreds of jobs in a single request.
-    Route::middleware(['role:master_admin,manager', 'throttle:5,5'])
+    // that can `update` a brand (mirrors BrandPolicy). Throttle was 5,5
+    // (5 hits per 5 minutes) which is too aggressive — testing/polling on
+    // dashboards with 17+ brands triggered "Too many attempts" 429s after
+    // legitimate clicks. Bumped to 12,5 (still rate-limited, but a real
+    // operator clicking a few times in a row won't get blocked).
+    Route::middleware(['role:master_admin,manager', 'throttle:12,5'])
         ->post('sync/all', [SyncStatusController::class, 'triggerAll']);
 
     // Users & invitations (Phase 1.5 — admin/manager only via policies)

@@ -152,6 +152,15 @@ class SyncStatusController extends Controller
         $brandsSynced    = 0;
         $brandsSkipped   = 0;
 
+        // Stagger dispatch by N seconds per brand so a fan-out across 17+
+        // stores doesn't all hit Shopify within the same minute. The queue
+        // worker still processes serially, but adding a delay means a
+        // failure on brand #4 doesn't push brand #5 onto a retry minute
+        // when Shopify is throttling. 30s feels right at ~100 brands:
+        // 100 × 30s = 50 min spread, well inside the 12h sync window.
+        $staggerSeconds  = 0;
+        $perBrandStagger = 30;
+
         foreach ($brands as $brand) {
             $connections = $connectionsByBrand->get($brand->id) ?? collect();
             if ($connections->isEmpty()) {
@@ -163,17 +172,21 @@ class SyncStatusController extends Controller
             $today = CarbonImmutable::now($brand->timezone)->startOfDay();
             $from  = $today->subDays(6);
 
+            $delayAt = now()->addSeconds($staggerSeconds);
+
             foreach ($connections as $conn) {
                 if ($conn->platform === 'shopify') {
-                    SyncBrandHistoryJob::dispatch($brand, $conn);
+                    SyncBrandHistoryJob::dispatch($brand, $conn)->delay($delayAt);
                     $dispatched++;
                     continue;
                 }
                 for ($d = $from; $d->lessThanOrEqualTo($today); $d = $d->addDay()) {
-                    SyncBrandDayJob::dispatch($brand, $conn, $d);
+                    SyncBrandDayJob::dispatch($brand, $conn, $d)->delay($delayAt);
                     $dispatched++;
                 }
             }
+
+            $staggerSeconds += $perBrandStagger;
         }
 
         return response()->json([
