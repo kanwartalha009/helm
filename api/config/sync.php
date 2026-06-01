@@ -30,7 +30,21 @@ return [
 
     'hot_brands_limit' => 20,
 
-    // FX provider + currency_groupings removed in Phase 1. Sync stores
-    // native currency only; the dashboard renders each brand in its own
-    // currency. Restore both blocks if/when USD aggregation comes back.
+    // FX / currency conversion. The native value is always stored; the USD
+    // rate is snapshotted onto each daily_metrics row at sync time and the
+    // dashboard's USD toggle reads `revenue * fx_rate_to_usd` in SQL. Rates
+    // are populated nightly by FetchDailyCurrencyRatesJob (fx_at_utc) and on
+    // demand by FxService. USD aggregation is a Phase 1 acceptance item
+    // (docs/12-acceptance), so this block must stay populated.
+    'fx' => [
+        'target'       => 'USD',
+        // Provider must honour the /{date}?from=&to= contract (frankfurter.app
+        // by default — ECB reference rates, daily, no API key).
+        'provider_url' => env('FX_PROVIDER_URL', 'https://api.frankfurter.app'),
+        // Seed currencies fetched nightly even before a brand uses them, so a
+        // day-one sync hits a cached rate instead of an on-demand provider call.
+        // (Sweden's SEK still converts to USD; the Sweden exclusion only applies
+        // to EUR groupings, which return in Phase 2.)
+        'currencies'   => ['EUR', 'GBP', 'SEK', 'DKK', 'NOK', 'AED', 'SAR', 'CAD', 'AUD'],
+    ],
 ];

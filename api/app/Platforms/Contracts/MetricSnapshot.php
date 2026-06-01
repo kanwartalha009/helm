@@ -44,8 +44,18 @@ final class MetricSnapshot
      * the row to upsert(). The sync jobs do this just before the upsert
      * call — see SyncBrandDayJob / SyncBrandHistoryJob.
      */
-    public function toRow(float $fxRateToUsd): array
+    public function toRow(?float $fxRateToUsd, bool $fxPending = false): array
     {
+        // When the USD rate can't be resolved at sync time we still store the
+        // native facts immediately and leave fx_rate_to_usd null, flagging the
+        // row so BackfillFxRatesJob fills it once a rate is available. Native
+        // figures (revenue, orders, refunds) are never blocked on FX.
+        $metadata = $this->metadata;
+        if ($fxPending) {
+            $metadata ??= [];
+            $metadata['fx_pending'] = true;
+        }
+
         return [
             'brand_id'         => $this->brandId,
             'platform'         => $this->platform,
@@ -62,7 +72,7 @@ final class MetricSnapshot
             'conversion_value' => $this->conversionValue,
             'currency'         => $this->currency,
             'fx_rate_to_usd'   => $fxRateToUsd,
-            'metadata'         => $this->metadata,
+            'metadata'         => $metadata,
             'is_complete'      => $this->isComplete,
             'pulled_at'        => now(),
         ];

@@ -6,7 +6,7 @@ import type { DashboardRow, Platform } from '@/types/domain';
 
 interface Props {
   rows: DashboardRow[];
-  /** Phase 1: ignored — each row formats in its own native currency. */
+  /** When set (e.g. 'USD'), format every row in this currency; otherwise each brand renders in its own native currency. */
   currency?: string;
   /** 'net' = revenue − refunds (default). 'gross' = revenue. */
   returns?: 'gross' | 'net';
@@ -19,7 +19,7 @@ interface Props {
   visibleAdPlatforms?: Set<Platform>;
 }
 
-export function BrandsTable({ rows, returns = 'net', visibleAdPlatforms }: Props) {
+export function BrandsTable({ rows, returns = 'net', visibleAdPlatforms, currency }: Props) {
   const showMeta   = visibleAdPlatforms?.has('meta')   ?? false;
   const showGoogle = visibleAdPlatforms?.has('google') ?? false;
   const showTikTok = visibleAdPlatforms?.has('tiktok') ?? false;
@@ -52,6 +52,7 @@ export function BrandsTable({ rows, returns = 'net', visibleAdPlatforms }: Props
               key={row.brand.id}
               row={row}
               returns={returns}
+              displayCurrency={currency}
               showMeta={showMeta}
               showGoogle={showGoogle}
               showTikTok={showTikTok}
@@ -67,6 +68,7 @@ export function BrandsTable({ rows, returns = 'net', visibleAdPlatforms }: Props
 function Row({
   row,
   returns,
+  displayCurrency,
   showMeta,
   showGoogle,
   showTikTok,
@@ -74,6 +76,7 @@ function Row({
 }: {
   row: DashboardRow;
   returns: 'gross' | 'net';
+  displayCurrency?: string;
   showMeta: boolean;
   showGoogle: boolean;
   showTikTok: boolean;
@@ -81,7 +84,9 @@ function Row({
 }) {
   const { brand, yesterday, dayBefore, last7d } = row;
   const detailHref = `/brands/${brand.slug}`;
-  const currency    = brand.baseCurrency || 'USD';
+  // USD mode (displayCurrency set) formats every row in USD; otherwise each
+  // brand renders in its own native currency.
+  const currency    = displayCurrency || brand.baseCurrency || 'USD';
   const renderMoney = (v: number | null) => formatMoney(v, currency);
   const connected = new Set(brand.platforms ?? []);
   const hasShopify = connected.has('shopify');

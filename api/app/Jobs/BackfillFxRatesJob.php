@@ -16,9 +16,9 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Sweeps every daily_metrics row flagged `metadata->>'fx_pending' = 'true'`
- * and tries to stamp `fx_rate_to_usd` using whatever rates have since
- * arrived in currency_rates (or pulled on-demand by FxService::rate()).
+ * Sweeps every daily_metrics row whose `fx_rate_to_usd` is still null and
+ * tries to stamp it using whatever rates have since arrived in
+ * currency_rates (or pulled on-demand by FxService::rate()).
  *
  * Runs nightly after FetchDailyCurrencyRatesJob. Also dispatchable on
  * demand from `php artisan fx:rebackfill` — useful when the operator
@@ -54,10 +54,13 @@ class BackfillFxRatesJob implements ShouldQueue
         $failed   = 0;
 
         DailyMetric::query()
-            // Postgres jsonb expression — works on the same column we
-            // already index. `is_complete` filter avoids spinning on
-            // today's still-open partial row.
-            ->where('metadata->fx_pending', 'true')
+            // A null fx_rate_to_usd is the driver-agnostic signal that a row's
+            // USD rate hasn't been resolved yet — sync flags these and leaves
+            // the native facts intact. Keying on the column instead of a jsonb
+            // metadata path keeps this correct on MySQL and Postgres alike and
+            // lets the column index do the work.
+            ->whereNull('fx_rate_to_usd')
+            ->whereNotNull('currency')
             ->orderBy('id')
             ->chunkById(self::BATCH_SIZE, function ($batch) use ($fx, &$resolved, &$skipped, &$failed) {
                 foreach ($batch as $row) {

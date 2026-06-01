@@ -37,10 +37,11 @@ return Application::configure(basePath: dirname(__DIR__))
     | Schedule (Laravel 11)
     |--------------------------------------------------------------------------
     |
-    | Laravel 11 schedules live HERE — App\Console\Kernel is obsolete on 11.x
-    | and is ignored at boot. Before this block existed, `schedule:list` was
-    | empty and NOTHING ran on cron. (See app/Console/Kernel.php — kept only
-    | as historical reference; safe to delete.)
+    | Laravel 11 schedules live HERE — there is no App\Console\Kernel on 11.x
+    | (any such class is ignored at boot). This block is the single source of
+    | truth for cron; the obsolete app/Console/Kernel.php is neutralised (delete
+    | it for good with `git rm api/app/Console/Kernel.php`).
+    | Before this block existed, `schedule:list` was empty and NOTHING ran.
     |
     | Cadence: every 12 hours (01:00 / 13:00 UTC). Retainer client wanted
     | fresher numbers than the spec's once-daily without paying the hourly
@@ -55,6 +56,24 @@ return Application::configure(basePath: dirname(__DIR__))
         // Twice-daily sync — 7-day rolling window per brand × connection.
         $schedule->command('sync:daily')
             ->twiceDailyAt(1, 13, 0)
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
+        // FX rates — 13:30 UTC, just after the 13:00 sync. Pulls yesterday's
+        // native->USD rates for every active brand currency into currency_rates,
+        // then (13:45) sweeps any rows that synced before the rate existed.
+        // USD aggregation is a Phase 1 acceptance item (docs/12).
+        $schedule->command('fx:fetch')
+            ->dailyAt('13:30')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
+        $schedule->command('fx:rebackfill')
+            ->dailyAt('13:45')
             ->timezone('UTC')
             ->withoutOverlapping()
             ->onOneServer()

@@ -16,7 +16,7 @@ use Illuminate\Console\Command;
 class FetchCurrencyRatesCommand extends Command
 {
     protected $signature = 'fx:fetch';
-    protected $description = 'Fetch yesterday\'s currency rates from exchangerate.host.';
+    protected $description = 'Fetch yesterday\'s native->USD currency rates from the configured FX provider.';
 
     public function handle(): int
     {

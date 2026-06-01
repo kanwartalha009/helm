@@ -1,0 +1,48 @@
+name: api-ci
+
+on:
+  push:
+    paths:
+      - 'api/**'
+      - '.github/workflows/api-ci.yml'
+  pull_request:
+    paths:
+      - 'api/**'
+      - '.github/workflows/api-ci.yml'
+
+jobs:
+  test:
+    name: Pest/PHPUnit (PHP 8.3)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo, pdo_sqlite, sqlite3, bcmath, intl
+          coverage: none
+
+      - name: Copy environment file
+        run: cp .env.example .env
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: api/vendor
+          key: composer-${{ hashFiles('api/composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Generate application key
+        run: php artisan key:generate
+
+      - name: Run unit tests
+        run: vendor/bin/phpunit --testsuite=Unit

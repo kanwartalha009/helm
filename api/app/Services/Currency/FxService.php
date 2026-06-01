@@ -79,6 +79,28 @@ final class FxService
     }
 
     /**
+     * DB-only USD rate for the sync hot path. Returns 1.0 when the currency
+     * is already the target (USD), the most recent cached rate on/before
+     * $date, or null when no rate is cached yet. NEVER calls the provider —
+     * sync must land native facts fast and not block on the network. A null
+     * return tells the caller to flag the row fx_pending so BackfillFxRatesJob
+     * (off the hot path) fills it once a rate exists.
+     */
+    public function cachedToUsd(string $currency, CarbonImmutable $date): ?float
+    {
+        $base   = strtoupper($currency);
+        $target = strtoupper((string) config('sync.fx.target', 'USD'));
+
+        if ($base === $target) {
+            return 1.0;
+        }
+
+        $row = $this->lookup($base, $target, $date);
+
+        return $row !== null ? (float) $row->rate : null;
+    }
+
+    /**
      * Pure DB lookup — no provider fallback. Used by the nightly job to
      * avoid re-fetching what we already have.
      */

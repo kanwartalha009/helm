@@ -26,6 +26,8 @@ export function DashboardPage() {
   const setReturns = useFiltersStore((s) => s.setReturns);
   const view = useFiltersStore((s) => s.view);
   const setView = useFiltersStore((s) => s.setView);
+  const currency = useFiltersStore((s) => s.currency);
+  const setCurrency = useFiltersStore((s) => s.setCurrency);
   const brandGroup = useFiltersStore((s) => s.brandGroup);
   const setBrandGroup = useFiltersStore((s) => s.setBrandGroup);
 
@@ -150,6 +152,14 @@ export function DashboardPage() {
           value={returns}
           onChange={setReturns}
         />
+        <Segmented
+          options={[
+            { value: 'native', label: 'Native' },
+            { value: 'usd', label: 'USD' },
+          ]}
+          value={currency}
+          onChange={setCurrency}
+        />
 
         {/*
           Master Sync now — fires the same fan-out as the per-brand Sync now
@@ -198,12 +208,14 @@ export function DashboardPage() {
           <BrandsTableWide
             rows={filteredRows}
             returns={returns}
+            currency={currency === 'usd' ? 'USD' : undefined}
             visibleAdPlatforms={visibleAdPlatforms}
           />
         ) : (
           <BrandsTable
             rows={filteredRows}
             returns={returns}
+            currency={currency === 'usd' ? 'USD' : undefined}
             visibleAdPlatforms={visibleAdPlatforms}
           />
         )}

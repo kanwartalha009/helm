@@ -68,7 +68,17 @@ final class DashboardQuery
             })
             ->all();
 
-        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand): array {
+        // Currency mode. ?currency=USD converts every brand to USD (the
+        // blended view); absent/native renders each brand in its own currency.
+        // Conversion is `revenue * fx_rate_to_usd` done in SQL (docs/10),
+        // falling back to the native value (rate 1) only for a row whose USD
+        // rate hasn't been backfilled yet — run `php artisan fx:apply` to fix
+        // those. Expressions are built from constants, never user input.
+        $usd         = strtoupper((string) ($params['currency'] ?? '')) === 'USD';
+        $grossExpr   = $usd ? 'revenue * COALESCE(fx_rate_to_usd, 1)'        : 'revenue';
+        $refundsExpr = $usd ? 'refunds_amount * COALESCE(fx_rate_to_usd, 1)' : 'refunds_amount';
+
+        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr): array {
             $tz             = $b->timezone ?: 'UTC';
             $yesterdayDate  = CarbonImmutable::now($tz)->subDay()->startOfDay()->toDateString();
             $dayBeforeDate  = CarbonImmutable::now($tz)->subDays(2)->startOfDay()->toDateString();
@@ -82,6 +92,12 @@ final class DashboardQuery
             $yesterdayRow = $this->shopifyRow($b->id, $yesterdayDate);
             $dayBeforeRow = $this->shopifyRow($b->id, $dayBeforeDate);
 
+            // Per-row USD multiplier for the single-day cells. Native mode it's
+            // 1.0 (no-op); USD mode it's the row's snapshotted rate, falling
+            // back to 1 for a row not yet backfilled.
+            $yMult = $usd ? (float) ($yesterdayRow->fx_rate_to_usd ?? 1.0) : 1.0;
+            $dMult = $usd ? (float) ($dayBeforeRow->fx_rate_to_usd ?? 1.0) : 1.0;
+
             // Compute net = gross − refunds explicitly at read time. The
             // `revenue_net` column is also maintained at write time, but
             // recomputing it here keeps the formula visible in code and
@@ -91,10 +107,10 @@ final class DashboardQuery
                 ->where('brand_id', $b->id)
                 ->where('platform', 'shopify')
                 ->whereBetween('date', [$last7dStart, $last7dEnd])
-                ->selectRaw('
-                    COALESCE(SUM(revenue), 0)        AS gross,
-                    COALESCE(SUM(refunds_amount), 0) AS refunds
-                ')
+                ->selectRaw("
+                    COALESCE(SUM({$grossExpr}), 0)   AS gross,
+                    COALESCE(SUM({$refundsExpr}), 0) AS refunds
+                ")
                 ->first();
 
             $last7dGross   = (float) ($last7dTotals->gross ?? 0);
@@ -117,10 +133,10 @@ final class DashboardQuery
                 ->where('brand_id', $b->id)
                 ->where('platform', 'shopify')
                 ->whereBetween('date', [$prior7dStart, $prior7dEnd])
-                ->selectRaw('
-                    COALESCE(SUM(revenue), 0)        AS gross,
-                    COALESCE(SUM(refunds_amount), 0) AS refunds
-                ')
+                ->selectRaw("
+                    COALESCE(SUM({$grossExpr}), 0)   AS gross,
+                    COALESCE(SUM({$refundsExpr}), 0) AS refunds
+                ")
                 ->first();
 
             $prior7dGross   = (float) ($prior7dTotals->gross ?? 0);
@@ -158,13 +174,13 @@ final class DashboardQuery
                     // computed at query time as `revenue − refunds_amount`
                     // (see selectRaw above), not read from `revenue_net`.
                     'revenue'     => $yesterdayRow
-                        ? round((float) $yesterdayRow->revenue, 2)
+                        ? round((float) $yesterdayRow->revenue * $yMult, 2)
                         : null,
                     'revenueNet'  => $yesterdayRow
-                        ? round((float) $yesterdayRow->revenue - (float) $yesterdayRow->refunds_amount, 2)
+                        ? round(((float) $yesterdayRow->revenue - (float) $yesterdayRow->refunds_amount) * $yMult, 2)
                         : null,
                     'refundsAmount' => $yesterdayRow
-                        ? round((float) $yesterdayRow->refunds_amount, 2)
+                        ? round((float) $yesterdayRow->refunds_amount * $yMult, 2)
                         : null,
                     'metaSpend'   => null,
                     'googleSpend' => null,
@@ -175,13 +191,13 @@ final class DashboardQuery
                 ],
                 'dayBefore' => [
                     'revenue'     => $dayBeforeRow
-                        ? round((float) $dayBeforeRow->revenue, 2)
+                        ? round((float) $dayBeforeRow->revenue * $dMult, 2)
                         : null,
                     'revenueNet'  => $dayBeforeRow
-                        ? round((float) $dayBeforeRow->revenue - (float) $dayBeforeRow->refunds_amount, 2)
+                        ? round(((float) $dayBeforeRow->revenue - (float) $dayBeforeRow->refunds_amount) * $dMult, 2)
                         : null,
                     'refundsAmount' => $dayBeforeRow
-                        ? round((float) $dayBeforeRow->refunds_amount, 2)
+                        ? round((float) $dayBeforeRow->refunds_amount * $dMult, 2)
                         : null,
                     'metaSpend'   => null,
                     'googleSpend' => null,

@@ -4,77 +4,23 @@ declare(strict_types=1);
 
 namespace App\Console;
 
-use App\Models\SyncLog;
-use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 
 /**
- * Schedule from spec §12.1 / docs/06-sync — all times UTC.
+ * OBSOLETE — DO NOT ADD SCHEDULES HERE.
  *
- *   01:00 daily       — SyncShopifyRollingCommand   (today + yesterday, Shopify)
- *   13:00 daily       — SyncShopifyRollingCommand   (today + yesterday, Shopify)
- *   13:00 daily       — RunDailySyncCommand         (7-day rolling, all platforms)
- *   13:30 daily       — FetchCurrencyRatesCommand   (removed in Phase 1)
- *   :00 hourly 06-22  — RunHourlySyncCommand        (top-20 hot brands)
- *   02:00 Sunday      — sync_logs cleanup > 90 days
+ * Laravel 11 does not use App\Console\Kernel. The framework never
+ * instantiates this class, so any schedule() defined here is dead code that
+ * silently never runs. This caused a real bug: the ratified twice-daily
+ * cadence was once edited into this file and never executed.
  *
- * See specs/CHANGE_REQUEST_2026-05-31_sync.md for the twice-daily Shopify
- * cadence rationale.
+ * The single source of truth for scheduling is bootstrap/app.php
+ * (->withSchedule()). This stub is retained only because it could not be
+ * deleted automatically — remove it for good with:
+ *
+ *     git rm api/app/Console/Kernel.php
  */
-class Kernel extends ConsoleKernel
+final class Kernel extends ConsoleKernel
 {
-    protected function schedule(Schedule $schedule): void
-    {
-        // Twice-daily Shopify auto-sync — 01:00 and 13:00 UTC. Per brand,
-        // dispatches today + yesterday in the brand timezone. Idempotent
-        // (skips brands with queued/running work). See SyncShopifyRollingCommand.
-        $schedule->command('sync:shopify-rolling')
-            ->dailyAt('01:00')
-            ->timezone('UTC')
-            ->withoutOverlapping()
-            ->onOneServer();
-
-        $schedule->command('sync:shopify-rolling')
-            ->dailyAt('13:00')
-            ->timezone('UTC')
-            ->withoutOverlapping()
-            ->onOneServer();
-
-        // Daily sync — 7-day rolling window at 13:00 UTC. Covers all
-        // platforms (Shopify + ads). Catches late-attribution refunds and
-        // late conversions on ads.
-        $schedule->command('sync:daily')
-            ->dailyAt('13:00')
-            ->timezone('UTC')
-            ->withoutOverlapping()
-            ->onOneServer();
-
-        // FX rate fetch + backfill removed in Phase 1. Sync stores native
-        // currency only; the dashboard renders each brand in its own
-        // currency. Restore these schedules when (and if) USD aggregation
-        // gets re-introduced — see docs/10-edge-cases / currency.
-
-        // Hourly hot-brands sync — every hour from 06:00 to 22:00 UTC.
-        $schedule->command('sync:hourly')
-            ->hourlyAt(0)
-            ->between('06:00', '22:00')
-            ->timezone('UTC')
-            ->withoutOverlapping()
-            ->onOneServer();
-
-        // sync_logs cleanup — Sunday 02:00 UTC, delete rows older than 90 days.
-        $schedule->call(function (): void {
-            SyncLog::where('created_at', '<', now()->subDays(90))->delete();
-        })
-            ->name('sync_logs.cleanup')
-            ->weeklyOn(0, '02:00')
-            ->timezone('UTC')
-            ->onOneServer();
-    }
-
-    protected function commands(): void
-    {
-        $this->load(__DIR__ . '/Commands');
-        require base_path('routes/console.php');
-    }
+    // Intentionally empty. Scheduling lives in bootstrap/app.php.
 }

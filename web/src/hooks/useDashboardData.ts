@@ -2,15 +2,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as mockApi from '@/lib/mockApi';
 import { api } from '@/lib/api';
 import { toast } from '@/stores/toastStore';
+import { useFiltersStore } from '@/stores/filtersStore';
 import type { DashboardRow } from '@/types/domain';
 
 // Real /api/dashboard call. Returns [] when the user has no brands yet —
-// the DashboardPage renders an empty-state CTA in that case.
+// the DashboardPage renders an empty-state CTA in that case. The currency
+// mode is part of the query key so flipping the Native/USD toggle refetches;
+// the backend converts server-side when it receives ?currency=USD.
 export function useDashboardData() {
+  const currency = useFiltersStore((s) => s.currency);
   return useQuery({
-    queryKey: ['dashboard'],
+    queryKey: ['dashboard', currency],
     queryFn: async (): Promise<DashboardRow[]> => {
-      const { data } = await api.get<{ rows: DashboardRow[] }>('/dashboard');
+      const params = currency === 'usd' ? { currency: 'USD' } : undefined;
+      const { data } = await api.get<{ rows: DashboardRow[] }>('/dashboard', { params });
       return Array.isArray(data) ? data : data.rows ?? [];
     },
   });

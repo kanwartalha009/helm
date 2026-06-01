@@ -12,6 +12,7 @@ use App\Platforms\PlatformRegistry;
 use App\Platforms\Shopify\RevenueFetcher;
 use App\Platforms\Shopify\ShopifyAdapter;
 use App\Platforms\Support\SyncFailureClassifier;
+use App\Services\Currency\FxService;
 use Carbon\CarbonImmutable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -60,7 +61,7 @@ class SyncBrandHistoryJob implements ShouldQueue
         $this->onQueue('shopify-sync');
     }
 
-    public function handle(PlatformRegistry $registry, RevenueFetcher $fetcher): void
+    public function handle(PlatformRegistry $registry, RevenueFetcher $fetcher, FxService $fx): void
     {
         if ($this->platformConnection->platform !== 'shopify') {
             // History fan-out for ad platforms ships in Phase 2.
@@ -123,14 +124,17 @@ class SyncBrandHistoryJob implements ShouldQueue
                 return;
             }
 
-            // Phase 1: no currency conversion. Every row keeps its native
-            // (shopMoney) currency; the dashboard renders each brand in its
-            // own currency. We pass 1.0 as the fx multiplier so any legacy
-            // SQL that does `revenue * fx_rate_to_usd` still returns the
-            // native value back.
+            // Snapshot the native->USD rate per day at write time (docs/10
+            // currency). Each historical day gets its own rate; cachedToUsd is
+            // a DB-only lookup, so a months-long backfill never hammers the FX
+            // provider inside the sync loop. Run `php artisan fx:backfill
+            // --since=<first order date>` first to populate currency_rates;
+            // any day still missing a rate lands fx_pending and is filled later
+            // by BackfillFxRatesJob.
             $rows = [];
             foreach ($snapshots as $snapshot) {
-                $rows[] = $snapshot->toRow(1.0);
+                $fxRate = $fx->cachedToUsd($snapshot->currency, $snapshot->date);
+                $rows[] = $snapshot->toRow($fxRate, fxPending: $fxRate === null);
             }
 
             // Use the first snapshot's updateableFields() — they're identical

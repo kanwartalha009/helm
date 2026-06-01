@@ -10,6 +10,7 @@ use App\Models\PlatformConnection;
 use App\Models\SyncLog;
 use App\Platforms\PlatformRegistry;
 use App\Platforms\Support\SyncFailureClassifier;
+use App\Services\Currency\FxService;
 use Carbon\CarbonImmutable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -61,7 +62,7 @@ class SyncBrandDayJob implements ShouldQueue
         $this->onQueue($platformConnection->platform === 'shopify' ? 'shopify-sync' : 'ads-sync');
     }
 
-    public function handle(PlatformRegistry $registry): void
+    public function handle(PlatformRegistry $registry, FxService $fx): void
     {
         // Two paths in:
         //   - $logId set      → controller/command already wrote a `queued`
@@ -101,12 +102,15 @@ class SyncBrandDayJob implements ShouldQueue
             $adapter  = $registry->for($this->platformConnection->platform);
             $snapshot = $adapter->fetchDay($this->platformConnection, $this->date);
 
-            // Phase 1: currency conversion is removed entirely. Every row
-            // stays in the store's native currency (Shopify's shopMoney).
-            // The dashboard renders each brand in its own currency. We pass
-            // 1.0 as the fx multiplier so any legacy query that does
-            // `revenue * fx_rate_to_usd` still gets the native value back.
-            $row = $snapshot->toRow(1.0);
+            // Snapshot the native->USD rate onto the row at write time so the
+            // dashboard's USD toggle reads `revenue * fx_rate_to_usd` straight
+            // from SQL (docs/10 currency). cachedToUsd is a DB-only lookup, so
+            // sync never blocks on the FX provider. When the rate isn't cached
+            // yet it returns null and we flag the row fx_pending — the native
+            // figures still land now and BackfillFxRatesJob fills the USD rate
+            // once FetchDailyCurrencyRatesJob has pulled it.
+            $fxRate = $fx->cachedToUsd($snapshot->currency, $this->date);
+            $row    = $snapshot->toRow($fxRate, fxPending: $fxRate === null);
 
             // Model::upsert() bypasses Eloquent's cast pipeline, so the
             // `array`/`jsonb` cast on `metadata` is NOT applied. Encode

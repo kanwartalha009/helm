@@ -20,13 +20,13 @@ interface MetricGroup {
 
 interface Props {
   rows: DashboardRow[];
-  /** Phase 1: ignored — each row formats in its own native currency. */
+  /** When set (e.g. 'USD'), format every row in this currency; otherwise each brand renders in its own native currency. */
   currency?: string;
   returns?: 'gross' | 'net';
   visibleAdPlatforms?: Set<Platform>;
 }
 
-export function BrandsTableWide({ rows, returns = 'net', visibleAdPlatforms }: Props) {
+export function BrandsTableWide({ rows, returns = 'net', visibleAdPlatforms, currency }: Props) {
   const showMeta   = visibleAdPlatforms?.has('meta')   ?? false;
   const showGoogle = visibleAdPlatforms?.has('google') ?? false;
   const showTikTok = visibleAdPlatforms?.has('tiktok') ?? false;
@@ -74,6 +74,7 @@ export function BrandsTableWide({ rows, returns = 'net', visibleAdPlatforms }: P
               key={row.brand.id}
               row={row}
               returns={returns}
+              displayCurrency={currency}
               showMeta={showMeta}
               showGoogle={showGoogle}
               showTikTok={showTikTok}
@@ -99,6 +100,7 @@ function SubHeaders({ groupStart }: { groupStart?: boolean }) {
 function Row({
   row,
   returns,
+  displayCurrency,
   showMeta,
   showGoogle,
   showTikTok,
@@ -106,6 +108,7 @@ function Row({
 }: {
   row: DashboardRow;
   returns: 'gross' | 'net';
+  displayCurrency?: string;
   showMeta: boolean;
   showGoogle: boolean;
   showTikTok: boolean;
@@ -115,7 +118,9 @@ function Row({
   const detailHref = `/brands/${brand.slug}`;
   const connected = new Set(brand.platforms ?? []);
   const health = brand.platformHealth ?? {};
-  const currency = brand.baseCurrency || 'USD';
+  // USD mode (displayCurrency set) formats every row in USD; otherwise each
+  // brand renders in its own native currency.
+  const currency = displayCurrency || brand.baseCurrency || 'USD';
 
   const yRev   = returns === 'gross' ? yesterday.revenue          : yesterday.revenueNet;
   const dbRev  = returns === 'gross' ? dayBefore.revenue          : dayBefore.revenueNet;
