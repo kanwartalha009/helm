@@ -6,14 +6,20 @@ namespace App\Platforms\Meta;
 
 use App\Models\PlatformConnection;
 use App\Platforms\Contracts\MetricSnapshot;
+use App\Services\Currency\FxService;
 use Carbon\CarbonImmutable;
 
 /**
- * Pulls one day of account-level ad insights (spend, impressions, clicks,
- * conversions, conversion value) for one Meta ad account and returns a
- * MetricSnapshot with the attribution window stamped into metadata.
+ * Pulls one day of account-level ad insights for a brand's Meta connection
+ * and returns a single blended MetricSnapshot.
  *
- * Calls act_{id}/insights with level=account, time_increment=1, and
+ * A brand connects ONE Meta row but may select several ad accounts under the
+ * agency Business Manager (metadata.ad_account_ids). This fetcher pulls each
+ * account's day, then blends them into the one row daily_metrics allows per
+ * (brand, meta, date): counts are summed; money is summed natively when every
+ * account shares a currency, or converted to USD first when they differ.
+ *
+ * Each account call uses level=account, time_increment=1, and
  * action_attribution_windows=['7d_click'] — the locked default per
  * docs/05-platforms/meta.md.
  */
@@ -31,38 +37,138 @@ final class InsightsFetcher
 
     public function __construct(
         private readonly MetaClient $client,
+        private readonly FxService $fx,
     ) {}
 
     public function fetch(PlatformConnection $conn, CarbonImmutable $date): MetricSnapshot
     {
-        $accountId = self::normalizeAccountId((string) $conn->external_id);
-        $day       = $date->toDateString();
+        $accountIds   = $this->accountIdsFor($conn);
+        $day          = $date->toDateString();
+        $tz           = $conn->brand?->timezone ?: 'UTC';
+        $isComplete   = $date->startOfDay()->lessThan(CarbonImmutable::now($tz)->startOfDay());
+        $baseCurrency = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+        $brandId      = (int) $conn->brand_id;
 
-        $body = $this->client->get("{$accountId}/insights", [
-            'level'                       => 'account',
-            'fields'                      => 'spend,impressions,clicks,actions,action_values,account_currency',
-            'action_attribution_windows'  => json_encode([self::ATTRIBUTION_WINDOW]),
-            'time_range'                  => json_encode(['since' => $day, 'until' => $day]),
-            'time_increment'              => 1,
-            // Use the requested window, not whatever the account's default is set to.
-            'use_account_attribution_setting' => 'false',
-        ]);
+        if ($accountIds === []) {
+            // No ad accounts selected for this brand yet — store an empty row
+            // in the brand currency rather than throwing, so the sync succeeds
+            // and the dashboard shows a real zero, not a failure.
+            return self::mapInsightRow([], $brandId, $date, $baseCurrency, $isComplete);
+        }
 
-        $row = $body['data'][0] ?? [];
+        $perAccount = [];
+        foreach ($accountIds as $accountId) {
+            $body = $this->client->get(self::normalizeAccountId($accountId) . '/insights', [
+                'level'                           => 'account',
+                'fields'                          => 'spend,impressions,clicks,actions,action_values,account_currency',
+                'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
+                'time_range'                      => json_encode(['since' => $day, 'until' => $day]),
+                'time_increment'                  => 1,
+                // Use the requested window, not whatever the account default is.
+                'use_account_attribution_setting' => 'false',
+            ]);
 
-        // A day is complete once it is fully in the past in the brand's own
-        // timezone — today's row is still accruing spend and is partial.
-        $tz         = $conn->brand?->timezone ?: 'UTC';
-        $isComplete = $date->startOfDay()->lessThan(CarbonImmutable::now($tz)->startOfDay());
+            $perAccount[] = self::mapInsightRow($body['data'][0] ?? [], $brandId, $date, $baseCurrency, $isComplete);
+        }
 
-        $fallbackCurrency = (string) ($conn->metadata['currency'] ?? 'USD');
-
-        return self::mapInsightRow($row, (int) $conn->brand_id, $date, $fallbackCurrency, $isComplete);
+        return $this->blend($perAccount, $brandId, $date, $baseCurrency, $isComplete, $accountIds);
     }
 
     /**
-     * Pure mapping from a Meta insights row to a MetricSnapshot. Static and
-     * side-effect-free so it can be unit-tested against a captured payload
+     * The ad accounts to pull for this brand: the selected list when present,
+     * otherwise the single external_id (legacy / one-account connection).
+     *
+     * @return array<int, string>
+     */
+    private function accountIdsFor(PlatformConnection $conn): array
+    {
+        $ids = $conn->metadata['ad_account_ids'] ?? null;
+        if (is_array($ids) && $ids !== []) {
+            return array_values(array_map(static fn ($i) => (string) $i, $ids));
+        }
+
+        return $conn->external_id ? [(string) $conn->external_id] : [];
+    }
+
+    /**
+     * Blend per-account snapshots into one brand-level Meta snapshot. Counts
+     * always sum; money sums natively when all accounts share one currency,
+     * else each currency is converted to USD before summing and the row is
+     * stamped USD (its fx_rate_to_usd is then 1.0 at write time).
+     *
+     * @param array<int, MetricSnapshot> $snapshots
+     * @param array<int, string> $accountIds
+     */
+    private function blend(
+        array $snapshots,
+        int $brandId,
+        CarbonImmutable $date,
+        string $baseCurrency,
+        bool $isComplete,
+        array $accountIds,
+    ): MetricSnapshot {
+        $impressions = 0;
+        $clicks      = 0;
+        $conversions = 0;
+        $spendByCcy  = [];
+        $valueByCcy  = [];
+
+        foreach ($snapshots as $s) {
+            $impressions += (int) ($s->impressions ?? 0);
+            $clicks      += (int) ($s->clicks ?? 0);
+            $conversions += (int) ($s->conversions ?? 0);
+
+            $ccy = strtoupper($s->currency);
+            $spendByCcy[$ccy] = ($spendByCcy[$ccy] ?? 0.0) + (float) ($s->spend ?? 0.0);
+            $valueByCcy[$ccy] = ($valueByCcy[$ccy] ?? 0.0) + (float) ($s->conversionValue ?? 0.0);
+        }
+
+        $currencies = array_values(array_unique(array_merge(array_keys($spendByCcy), array_keys($valueByCcy))));
+
+        if ($currencies === []) {
+            $currency = $baseCurrency;
+            $spend    = 0.0;
+            $value    = 0.0;
+        } elseif (count($currencies) === 1) {
+            $currency = $currencies[0];
+            $spend    = $spendByCcy[$currency] ?? 0.0;
+            $value    = $valueByCcy[$currency] ?? 0.0;
+        } else {
+            // Mixed currencies across the brand's accounts — convert each to USD
+            // and store the blended row in USD. toUsd is DB-first; it only hits
+            // the provider for a genuinely missing rate, which is rare and only
+            // on the (uncommon) multi-currency brand.
+            $currency = 'USD';
+            $spend    = 0.0;
+            $value    = 0.0;
+            foreach ($currencies as $ccy) {
+                $rate   = $this->fx->toUsd($ccy, $date);
+                $spend += ($spendByCcy[$ccy] ?? 0.0) * $rate;
+                $value += ($valueByCcy[$ccy] ?? 0.0) * $rate;
+            }
+        }
+
+        return new MetricSnapshot(
+            brandId: $brandId,
+            platform: 'meta',
+            date: $date,
+            currency: $currency,
+            spend: round($spend, 2),
+            impressions: $impressions,
+            clicks: $clicks,
+            conversions: $conversions,
+            conversionValue: round($value, 2),
+            metadata: [
+                'attribution_window' => self::ATTRIBUTION_WINDOW,
+                'ad_account_ids'     => array_values(array_map([self::class, 'normalizeAccountId'], $accountIds)),
+            ],
+            isComplete: $isComplete,
+        );
+    }
+
+    /**
+     * Pure mapping from a single Meta insights row to a MetricSnapshot. Static
+     * and side-effect-free so it can be unit-tested against a captured payload
      * without touching the network (tests/Unit/MetaInsightsMapperTest.php).
      *
      * @param array<string, mixed> $row

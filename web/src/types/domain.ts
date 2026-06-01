@@ -65,6 +65,9 @@ export interface PlatformConnection {
   status: ConnectionStatus;
   lastSyncAt: string | null;
   lastError: string | null;
+  // Free-form per-connection data. For Meta this holds the selected ad
+  // accounts: metadata.ad_account_ids (string[]) + account_names (id -> name).
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface DailyMetric {

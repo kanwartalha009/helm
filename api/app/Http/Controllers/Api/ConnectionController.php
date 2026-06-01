@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\PlatformConnectionResource;
 use App\Models\Brand;
 use App\Models\PlatformConnection;
+use App\Platforms\Meta\MetaAdapter;
 use App\Platforms\PlatformRegistry;
 use App\Platforms\Shopify\ShopifyAdapter;
 use App\Platforms\Shopify\ShopifyClient;
@@ -105,15 +106,17 @@ class ConnectionController extends Controller
 
         try {
             $adapter = $this->registry->for($platform);
+
+            // Account discovery draws from the org-level token (Business
+            // Manager / MCC / BC), not a brand connection, so a connection need
+            // not exist yet — use the brand's if present, else a transient one
+            // so the operator can pick accounts before the first attach.
             $conn = PlatformConnection::query()
                 ->where('brand_id', $brand->id)
                 ->where('platform', $platform)
-                ->first();
-            if (! $conn) {
-                return response()->json([
-                    'message' => "No {$platform} connection for this brand yet.",
-                ], 404);
-            }
+                ->first()
+                ?? new PlatformConnection(['brand_id' => $brand->id, 'platform' => $platform]);
+
             return response()->json([
                 'accounts' => $adapter->listAvailableAccounts($conn),
             ]);
@@ -135,13 +138,42 @@ class ConnectionController extends Controller
     {
         $this->authorize('update', $brand);
 
-        $request->validate([
-            'external_id' => ['required', 'string', 'max:190'],
+        // Accept a single external_id or a list of account_ids. Meta blends
+        // every selected ad account into one brand connection (see MetaAdapter);
+        // its daily metrics are summed at sync time.
+        $data = $request->validate([
+            'account_ids'   => ['sometimes', 'array', 'min:1'],
+            'account_ids.*' => ['string', 'max:190'],
+            'external_id'   => ['sometimes', 'string', 'max:190'],
         ]);
 
-        return response()->json([
-            'message' => "Attaching {$platform} accounts ships in Phase 2.",
-        ], 501);
+        $ids = $data['account_ids'] ?? (isset($data['external_id']) ? [$data['external_id']] : []);
+        if ($ids === []) {
+            return response()->json(['message' => 'Provide account_ids[] or external_id.'], 422);
+        }
+
+        $adapter = $this->registry->for($platform);
+        if (! $adapter instanceof MetaAdapter) {
+            return response()->json([
+                'message' => ucfirst($platform) . ' account attach is not available yet.',
+            ], 501);
+        }
+
+        $conn = PlatformConnection::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', $platform)
+            ->first()
+            ?? new PlatformConnection(['brand_id' => $brand->id, 'platform' => $platform]);
+
+        try {
+            $adapter->attachAccounts($conn, $ids);
+        } catch (Throwable $e) {
+            return response()->json(['message' => 'Could not attach account(s): ' . $e->getMessage()], 422);
+        }
+
+        return (new PlatformConnectionResource($conn->refresh()))
+            ->response()
+            ->setStatusCode(201);
     }
 
     /**

@@ -98,6 +98,17 @@ final class DashboardQuery
             $yMult = $usd ? (float) ($yesterdayRow->fx_rate_to_usd ?? 1.0) : 1.0;
             $dMult = $usd ? (float) ($dayBeforeRow->fx_rate_to_usd ?? 1.0) : 1.0;
 
+            // Meta ad spend per day, blended across the brand's ad accounts at
+            // sync (one meta row per brand/day). Display-currency spend mirrors
+            // the revenue multiplier; ROAS is computed USD-normalized so the
+            // ratio is correct in either Native or USD mode.
+            $yMeta      = $this->adRow($b->id, 'meta', $yesterdayDate);
+            $dMeta      = $this->adRow($b->id, 'meta', $dayBeforeDate);
+            $yMetaSpend = $yMeta ? round((float) $yMeta->spend * ($usd ? (float) ($yMeta->fx_rate_to_usd ?? 1.0) : 1.0), 2) : null;
+            $dMetaSpend = $dMeta ? round((float) $dMeta->spend * ($usd ? (float) ($dMeta->fx_rate_to_usd ?? 1.0) : 1.0), 2) : null;
+            $yRoas      = $this->roas($yesterdayRow, $yMeta);
+            $dRoas      = $this->roas($dayBeforeRow, $dMeta);
+
             // Compute net = gross − refunds explicitly at read time. The
             // `revenue_net` column is also maintained at write time, but
             // recomputing it here keeps the formula visible in code and
@@ -182,11 +193,11 @@ final class DashboardQuery
                     'refundsAmount' => $yesterdayRow
                         ? round((float) $yesterdayRow->refunds_amount * $yMult, 2)
                         : null,
-                    'metaSpend'   => null,
+                    'metaSpend'   => $yMetaSpend,
                     'googleSpend' => null,
                     'tiktokSpend' => null,
-                    'totalSpend'  => null,
-                    'roas'        => null,
+                    'totalSpend'  => $yMetaSpend,
+                    'roas'        => $yRoas,
                     'isComplete'  => (bool) ($yesterdayRow?->is_complete ?? false),
                 ],
                 'dayBefore' => [
@@ -199,11 +210,11 @@ final class DashboardQuery
                     'refundsAmount' => $dayBeforeRow
                         ? round((float) $dayBeforeRow->refunds_amount * $dMult, 2)
                         : null,
-                    'metaSpend'   => null,
+                    'metaSpend'   => $dMetaSpend,
                     'googleSpend' => null,
                     'tiktokSpend' => null,
-                    'totalSpend'  => null,
-                    'roas'        => null,
+                    'totalSpend'  => $dMetaSpend,
+                    'roas'        => $dRoas,
                 ],
                 'last7d' => [
                     'revenue'             => $last7dCount > 0 ? round($last7dNet, 2)   : null,
@@ -257,6 +268,35 @@ final class DashboardQuery
             ->where('platform', 'shopify')
             ->where('date', $date)
             ->first();
+    }
+
+    private function adRow(int $brandId, string $platform, string $date): ?DailyMetric
+    {
+        return DailyMetric::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', $platform)
+            ->where('date', $date)
+            ->first();
+    }
+
+    /**
+     * Blended ROAS = gross revenue / ad spend, both normalized to USD via each
+     * row's stored fx_rate so the ratio holds regardless of currency or the
+     * Native/USD toggle. Null when either side is missing or spend is zero —
+     * no divide-by-zero, no fake infinity.
+     */
+    private function roas(?DailyMetric $revRow, ?DailyMetric $adRow): ?float
+    {
+        if ($revRow === null || $adRow === null) {
+            return null;
+        }
+        $spendUsd = (float) $adRow->spend * (float) ($adRow->fx_rate_to_usd ?? 1.0);
+        if ($spendUsd <= 0.0) {
+            return null;
+        }
+        $revUsd = (float) $revRow->revenue * (float) ($revRow->fx_rate_to_usd ?? 1.0);
+
+        return round($revUsd / $spendUsd, 2);
     }
 
     /** @param array<string, mixed> $params */

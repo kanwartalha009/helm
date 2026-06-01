@@ -82,20 +82,60 @@ final class MetaAdapter implements PlatformAdapter
 
     public function attachAccount(PlatformConnection $conn, string $externalId): void
     {
-        $accountId = InsightsFetcher::normalizeAccountId($externalId);
+        $this->attachAccounts($conn, [$externalId]);
+    }
 
-        // Confirm the token can actually see this account, and capture its
-        // name + currency so the dashboard can label it and convert to USD.
-        $account = $this->client->get($accountId, ['fields' => 'name,currency,account_status']);
+    /**
+     * Attach one or more ad accounts (all under the org Business Manager) to a
+     * brand. Their daily metrics are blended into the brand's single Meta row
+     * at sync time — see InsightsFetcher. `external_id` holds the primary
+     * account; `metadata.ad_account_ids` holds the full selected list.
+     *
+     * @param array<int, string> $externalIds
+     */
+    public function attachAccounts(PlatformConnection $conn, array $externalIds): void
+    {
+        $ids = [];
+        foreach ($externalIds as $raw) {
+            $id = InsightsFetcher::normalizeAccountId((string) $raw);
+            if ($id !== 'act_' && ! in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+
+        if ($ids === []) {
+            throw new RuntimeException('No ad accounts provided to attach.');
+        }
+
+        // Confirm the System User token can see each account, and capture its
+        // name + currency so the dashboard can label and convert it.
+        $names      = [];
+        $currencies = [];
+        foreach ($ids as $id) {
+            $account     = $this->client->get($id, ['fields' => 'name,currency,account_status']);
+            $names[$id]  = (string) ($account['name'] ?? $id);
+            if (! empty($account['currency'])) {
+                $currencies[] = strtoupper((string) $account['currency']);
+            }
+        }
+        $currencies = array_values(array_unique($currencies));
 
         $metadata = $conn->metadata ?? [];
-        $metadata['currency']       = (string) ($account['currency'] ?? ($metadata['currency'] ?? ''));
-        $metadata['account_status'] = $account['account_status'] ?? null;
+        $metadata['ad_account_ids'] = $ids;
+        $metadata['account_names']  = $names;
+        $metadata['currencies']     = $currencies;
+        // Informational: the blended row's currency is the shared one if every
+        // account agrees, else USD (InsightsFetcher converts at fetch time).
+        $metadata['currency'] = count($currencies) === 1 ? $currencies[0] : 'USD';
+
+        // Meta carries no per-brand secret — the org System User token does the
+        // work — but credentials is NOT NULL, so persist an empty encrypted bag.
+        $conn->credentials = $conn->credentials ?: [];
 
         $conn->forceFill([
             'platform'     => 'meta',
-            'external_id'  => $accountId,
-            'display_name' => (string) ($account['name'] ?? $accountId),
+            'external_id'  => $ids[0],
+            'display_name' => count($ids) === 1 ? ($names[$ids[0]] ?? $ids[0]) : count($ids) . ' ad accounts',
             'metadata'     => $metadata,
             'status'       => 'active',
             'last_error'   => null,

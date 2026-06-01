@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { toast } from '@/stores/toastStore';
 import type { Brand } from '@/types/domain';
@@ -180,6 +180,59 @@ export function useDisconnectConnection() {
     },
     onError: (err: any) => {
       toast.error("Couldn't disconnect", err?.response?.data?.message ?? err.message);
+    },
+  });
+}
+
+/* ---- Meta ad-account connection (Phase 2) --------------------------- */
+
+export interface MetaAdAccount {
+  external_id: string;
+  name: string;
+  currency: string;
+}
+
+/**
+ * GET /api/brands/{slug}/connections/meta/available — every ad account the
+ * agency System User token can see under the Business Manager. Only fetched
+ * when `enabled` (the picker is open) so we don't hit Meta on every page view.
+ */
+export function useMetaAvailableAccounts(brandSlug: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ['meta-available', brandSlug],
+    enabled: !!brandSlug && enabled,
+    staleTime: 5 * 60_000,
+    queryFn: async (): Promise<MetaAdAccount[]> => {
+      const { data } = await api.get<{ accounts: MetaAdAccount[] }>(
+        `/brands/${brandSlug}/connections/meta/available`
+      );
+      return data.accounts ?? [];
+    },
+  });
+}
+
+/**
+ * POST /api/brands/{slug}/connections/meta/attach — saves the selected ad
+ * accounts onto the brand's single Meta connection. Their daily spend is
+ * blended at sync time (see InsightsFetcher).
+ */
+export function useAttachMetaAccounts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { brandSlug: string; accountIds: string[] }) => {
+      const { data } = await api.post(
+        `/brands/${input.brandSlug}/connections/meta/attach`,
+        { account_ids: input.accountIds }
+      );
+      return data;
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['brand', vars.brandSlug] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('Meta accounts saved', 'Run a sync to pull spend for the selected accounts.');
+    },
+    onError: (err: any) => {
+      toast.error("Couldn't save accounts", err?.response?.data?.message ?? err.message);
     },
   });
 }
