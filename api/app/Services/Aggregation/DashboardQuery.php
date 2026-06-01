@@ -24,6 +24,9 @@ final class DashboardQuery
      */
     public function run(array $params): array
     {
+        // Pull alphabetically for deterministic tie-breaks. The final order
+        // the dashboard renders is set by the revenue sort at the bottom of
+        // this method — best-performing brands first, zero/missing last.
         $brands = Brand::query()
             ->where('status', 'active')
             ->orderBy('name')
@@ -65,7 +68,7 @@ final class DashboardQuery
             })
             ->all();
 
-        return $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand): array {
+        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand): array {
             $tz             = $b->timezone ?: 'UTC';
             $yesterdayDate  = CarbonImmutable::now($tz)->subDay()->startOfDay()->toDateString();
             $dayBeforeDate  = CarbonImmutable::now($tz)->subDays(2)->startOfDay()->toDateString();
@@ -195,6 +198,40 @@ final class DashboardQuery
                 ],
             ];
         })->all();
+
+        // Sort by last-7d net revenue desc — best performers at the top,
+        // zero/missing revenue brands at the bottom. Tiebreak alphabetically
+        // so the order is stable across requests when revenue ties (common
+        // for brand-new stores all at 0). Net is the right signal here
+        // rather than gross because refunds matter for "is this brand
+        // actually performing".
+        //
+        // null revenue (brand has no L7d rows at all — likely a freshly
+        // installed store or a sync that's never landed) sorts to the very
+        // bottom and below 0-revenue brands, since at least 0 is a
+        // confirmed signal.
+        usort($rows, function (array $a, array $b): int {
+            $aRev = $a['last7d']['revenue'];
+            $bRev = $b['last7d']['revenue'];
+
+            // Three-tier sort: confirmed revenue > confirmed zero > unknown.
+            $aTier = $aRev === null ? 2 : ($aRev > 0 ? 0 : 1);
+            $bTier = $bRev === null ? 2 : ($bRev > 0 ? 0 : 1);
+            if ($aTier !== $bTier) {
+                return $aTier <=> $bTier;
+            }
+
+            // Within "has revenue", sort high → low.
+            if ($aTier === 0) {
+                return $bRev <=> $aRev;
+            }
+
+            // Within "zero" or "unknown", sort alphabetically by brand name
+            // so the trailing block reads predictably.
+            return strcasecmp($a['brand']['name'], $b['brand']['name']);
+        });
+
+        return $rows;
     }
 
     private function shopifyRow(int $brandId, string $date): ?DailyMetric
