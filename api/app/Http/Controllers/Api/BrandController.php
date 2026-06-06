@@ -158,7 +158,7 @@ class BrandController extends Controller
         $tile = static function (string $label) {
             return [
                 'label'       => $label,
-                'revenueNet'  => 0.0,
+                'revenue'     => 0.0,
                 'orders'      => 0,
                 'refunds'     => 0.0,
                 'days'        => 0,
@@ -182,11 +182,11 @@ class BrandController extends Controller
             }
 
             $d = $r->date->toDateString();
-            $rev = (float) ($r->revenue_net ?? 0);
+            $rev = (float) ($r->revenue ?? 0); // Total sales before returns — matches the dashboard metric
             $ord = (int)   ($r->orders ?? 0);
             $ref = (float) ($r->refunds_amount ?? 0);
 
-            $allTile['revenueNet'] += $rev;
+            $allTile['revenue'] += $rev;
             $allTile['orders']     += $ord;
             $allTile['refunds']    += $ref;
             $allTile['days']       += 1;
@@ -195,20 +195,20 @@ class BrandController extends Controller
             }
 
             if ($d === $todayKey) {
-                $todayTile['revenueNet'] = $rev;
+                $todayTile['revenue'] = $rev;
                 $todayTile['orders']     = $ord;
                 $todayTile['refunds']    = $ref;
                 $todayTile['days']       = 1;
                 // isComplete already false above.
             }
             if ($d === $yesterdayKey) {
-                $yesterdayTile['revenueNet'] = $rev;
+                $yesterdayTile['revenue'] = $rev;
                 $yesterdayTile['orders']     = $ord;
                 $yesterdayTile['refunds']    = $ref;
                 $yesterdayTile['isComplete'] = (bool) $r->is_complete;
             }
             if ($d >= $l7StartKey && $d <= $todayKey) {
-                $last7Tile['revenueNet'] += $rev;
+                $last7Tile['revenue'] += $rev;
                 $last7Tile['orders']     += $ord;
                 $last7Tile['refunds']    += $ref;
                 $last7Tile['days']       += 1;
@@ -217,7 +217,7 @@ class BrandController extends Controller
                 }
             }
             if ($d >= $l30StartKey && $d <= $todayKey) {
-                $last30Tile['revenueNet'] += $rev;
+                $last30Tile['revenue'] += $rev;
                 $last30Tile['orders']     += $ord;
                 $last30Tile['refunds']    += $ref;
                 $last30Tile['days']       += 1;

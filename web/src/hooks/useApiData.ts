@@ -47,7 +47,7 @@ export function useBrandDetail(slug: string | undefined) {
 
 export interface BrandMetricTile {
   label: string;
-  revenueNet: number;
+  revenue: number;
   orders: number;
   refunds: number;
   days: number;
