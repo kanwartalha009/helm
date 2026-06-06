@@ -12,28 +12,24 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Pulls orders + refunds from Shopify GraphQL and assembles MetricSnapshots.
- * Delegates the HTTP work to ShopifyClient.
+ * Pulls Shopify order metrics and assembles MetricSnapshots. Delegates HTTP to
+ * ShopifyClient.
  *
  * Field definitions:
  *   - revenue        = sum of order.totalPriceSet.shopMoney.amount
  *                      (gross order value at creation — tax + shipping +
  *                      discounts already applied, refunds NOT subtracted).
  *                      Drives the dashboard "Total revenue" (gross) toggle.
- *   - net_sales      = Σ (currentSubtotalPriceSet − product tax) for orders
- *                      created in the window, MINUS the ex-tax value of every
- *                      refund processed in the window. Mirrors Shopify's "Net
- *                      sales": product revenue after discounts, excluding tax,
- *                      shipping, duties, and returns. Default dashboard metric.
- *                      product tax = currentTotalTaxSet − shipping-line tax
- *                      (shipping tax is excluded because the subtotal never
- *                      carried shipping; duties never enter the subtotal).
- *                      We use the CURRENT (after-returns) subtotal/tax fields on
- *                      purpose — they match Shopify's reported Net sales. The
- *                      before-returns totalTaxSet over-removes tax (~€686 on
- *                      Flabelus 2026-06-05) and lands the figure low. Verified
- *                      against `shopify:diagnose` (€20,637.69 vs Shopify
- *                      €20,631.32, a 0.03% rounding gap).
+ *   - net_sales      = Shopify's OWN "Net sales" figure, pulled from the
+ *                      analytics engine via ShopifyQL (`shopifyqlQuery`): product
+ *                      revenue after discounts and returns, excluding tax,
+ *                      shipping, and duties, with returns attributed by refund
+ *                      date. This is the exact number behind Analytics > Reports.
+ *                      We pull it directly rather than reconstructing from order
+ *                      money fields — reconstruction was neither exact (Shopify's
+ *                      tax/return rounding doesn't map to order fields) nor
+ *                      stable (the "current" fields mutate as refunds process).
+ *                      Default dashboard metric.
  *   - refunds_amount = sum of order.totalRefundedSet.shopMoney.amount
  *                      (order-date aggregate; legacy "total refunds" column)
  *   - revenue_net    = revenue - refunds_amount (legacy; order-date)
@@ -44,12 +40,9 @@ use Throwable;
  * the order's current state — refunds are already excluded — so subtracting
  * refunds again gives you net-of-refunds-twice.
  *
- * Refund attribution: net_sales dates returns to the REFUND'S createdAt (the
- * day Shopify processes the refund), NOT the original order date — this is how
- * Shopify's analytics computes Net sales, and it overrides the original spec
- * §15.2 order-date policy (changed 2026-06-06 at the client's request; every
- * brand must be re-synced for the change to take effect). `revenue` and
- * `refunds_amount` stay order-dated for backward compatibility.
+ * net_sales failures degrade gracefully: if ShopifyQL errors (scope/syntax/
+ * transient), net_sales is left null (missing, NOT zero — spec rule 9) and the
+ * order-based revenue/orders/refunds still record. The failure is logged.
  */
 final class RevenueFetcher
 {
@@ -62,11 +55,20 @@ final class RevenueFetcher
     /** Hard safety cap on cursor pages — 200 × 250 = 50,000 orders/sync. */
     private const MAX_HISTORY_PAGES = 200;
 
+    /**
+     * Admin API version that exposes `shopifyqlQuery`. The field was removed in
+     * 2024-07 and reinstated since; the client's default version (see
+     * ShopifyClient) predates the reinstatement, so the ShopifyQL calls pass
+     * this version explicitly while the order queries keep the default.
+     */
+    private const SHOPIFYQL_API_VERSION = '2026-04';
+
     public function __construct(private readonly OAuthService $oauth) {}
 
     /**
      * Order source_names that count as the Online Store channel (lowercased).
-     * Default ['web']. Empty array = count every channel.
+     * Default ['web']. Empty array = count every channel. Applies to the
+     * order-based revenue/orders/refunds figures.
      *
      * We filter in PHP on each order's `sourceName` rather than via the orders
      * query string — Shopify's GraphQL orders search does not reliably honour a
@@ -96,6 +98,12 @@ final class RevenueFetcher
         return in_array(strtolower((string) $sourceName), $allowed, true);
     }
 
+    /** ShopifyQL sales-channel name scoping net_sales (matches the dashboard). */
+    private function shopifyqlChannel(): string
+    {
+        return (string) config('sync.shopify.shopifyql_sales_channel', 'Online Store');
+    }
+
     /**
      * Fetch one day for one (brand × shopify connection) and return a snapshot.
      */
@@ -110,6 +118,7 @@ final class RevenueFetcher
         $endLocal   = $startLocal->endOfDay();
         $startUtc   = $startLocal->setTimezone('UTC')->toIso8601String();
         $endUtc     = $endLocal->setTimezone('UTC')->toIso8601String();
+        $dateStr    = $startLocal->toDateString();
 
         $currency = $this->resolveCurrency($conn, $client);
 
@@ -118,16 +127,10 @@ query OrdersForDay($q: String!, $first: Int!) {
   orders(first: $first, query: $q, sortKey: CREATED_AT) {
     edges {
       node {
-        id
         createdAt
         sourceName
         totalPriceSet    { shopMoney { amount currencyCode } }
-        currentSubtotalPriceSet { shopMoney { amount } }
-        currentTotalTaxSet      { shopMoney { amount } }
         totalRefundedSet { shopMoney { amount } }
-        shippingLines(first: 20) {
-          edges { node { taxLines { priceSet { shopMoney { amount } } } } }
-        }
       }
     }
     pageInfo { hasNextPage }
@@ -146,7 +149,6 @@ GQL;
         }
 
         $revenue        = 0.0;
-        $exTaxBase      = 0.0;   // Σ (product subtotal − product tax), before returns
         $refundsAmount  = 0.0;
         $orders         = 0;
         $refundedOrders = 0;
@@ -160,18 +162,11 @@ GQL;
                 continue;
             }
 
-            $gross    = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
-            $subtotal = (float) ($node['currentSubtotalPriceSet']['shopMoney']['amount'] ?? 0.0);
-            $totalTax = (float) ($node['currentTotalTaxSet']['shopMoney']['amount'] ?? 0.0);
-            $shipTax  = $this->shippingTax($node);
-            $refund   = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
+            $gross  = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
+            $refund = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
 
-            // Net-sales base = product subtotal minus PRODUCT tax only. Total
-            // order tax includes tax charged on shipping, which the subtotal
-            // never contained, so shipping tax is excluded here.
-            $exTaxBase += $subtotal - ($totalTax - $shipTax);
-            $revenue   += $gross;
-            $orders    += 1;
+            $revenue += $gross;
+            $orders  += 1;
 
             if ($refund > 0) {
                 $refundsAmount  += $refund;
@@ -189,11 +184,10 @@ GQL;
 
         $revenueNet = round($revenue - $refundsAmount, 2);
 
-        // Returns are attributed to the date the REFUND was created (Shopify's
-        // "Net sales" convention), not the original order date — so we query
-        // refunds separately rather than netting each order's own refunds.
-        $refundDateReturns = $this->fetchRefundDateReturns($client, $tz, $date, $allowed);
-        $netSales          = round($exTaxBase - $refundDateReturns, 2);
+        // net_sales: Shopify's own figure via ShopifyQL (one-day window). Null
+        // if ShopifyQL is unavailable — missing, not zero.
+        $netByDay = $this->netSalesByDay($client, $dateStr, $dateStr);
+        $netSales = $netByDay[$dateStr] ?? null;
 
         $todayLocal = CarbonImmutable::now($tz)->startOfDay();
         $isComplete = $date->setTimezone($tz)->startOfDay()->lessThan($todayLocal);
@@ -246,22 +240,10 @@ query OrdersHistory($q: String!, $first: Int!, $after: String) {
     edges {
       cursor
       node {
-        id
         createdAt
         sourceName
         totalPriceSet    { shopMoney { amount currencyCode } }
-        currentSubtotalPriceSet { shopMoney { amount } }
-        currentTotalTaxSet      { shopMoney { amount } }
         totalRefundedSet { shopMoney { amount } }
-        shippingLines(first: 20) {
-          edges { node { taxLines { priceSet { shopMoney { amount } } } } }
-        }
-        refunds {
-          createdAt
-          refundLineItems(first: 100) {
-            edges { node { subtotalSet { shopMoney { amount } } } }
-          }
-        }
       }
     }
     pageInfo { hasNextPage endCursor }
@@ -269,12 +251,11 @@ query OrdersHistory($q: String!, $first: Int!, $after: String) {
 }
 GQL;
 
-        /** @var array<string, array{revenue: float, exbase: float, orders: int, refunds: float, refunded: int}> $byDay */
-        $allowed      = $this->allowedSources();
-        $byDay        = [];
-        $returnsByDay = [];   // ex-tax product returns, keyed by REFUND date
-        $cursor       = null;
-        $pages        = 0;
+        /** @var array<string, array{revenue: float, orders: int, refunds: float, refunded: int}> $byDay */
+        $allowed = $this->allowedSources();
+        $byDay   = [];
+        $cursor  = null;
+        $pages   = 0;
 
         do {
             $data = $client->graphql($gql, [
@@ -304,37 +285,18 @@ GQL;
                     ->toDateString();
 
                 if (! isset($byDay[$localDate])) {
-                    $byDay[$localDate] = ['revenue' => 0.0, 'exbase' => 0.0, 'orders' => 0, 'refunds' => 0.0, 'refunded' => 0];
+                    $byDay[$localDate] = ['revenue' => 0.0, 'orders' => 0, 'refunds' => 0.0, 'refunded' => 0];
                 }
 
-                $gross    = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
-                $subtotal = (float) ($node['currentSubtotalPriceSet']['shopMoney']['amount'] ?? 0.0);
-                $totalTax = (float) ($node['currentTotalTaxSet']['shopMoney']['amount'] ?? 0.0);
-                $shipTax  = $this->shippingTax($node);
-                $refund   = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
+                $gross  = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
+                $refund = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
 
                 $byDay[$localDate]['revenue'] += $gross;
-                $byDay[$localDate]['exbase']  += $subtotal - ($totalTax - $shipTax);
                 $byDay[$localDate]['orders']  += 1;
 
                 if ($refund > 0) {
                     $byDay[$localDate]['refunds']  += $refund;
                     $byDay[$localDate]['refunded'] += 1;
-                }
-
-                // Bucket returns by the date each REFUND was created.
-                foreach (($node['refunds'] ?? []) as $r) {
-                    $refundCreated = (string) ($r['createdAt'] ?? '');
-                    if ($refundCreated === '') {
-                        continue;
-                    }
-                    $refundDate = CarbonImmutable::parse($refundCreated)
-                        ->setTimezone($tz)
-                        ->toDateString();
-                    foreach (($r['refundLineItems']['edges'] ?? []) as $rli) {
-                        $returnsByDay[$refundDate] = ($returnsByDay[$refundDate] ?? 0.0)
-                            + (float) ($rli['node']['subtotalSet']['shopMoney']['amount'] ?? 0.0);
-                    }
                 }
             }
 
@@ -352,19 +314,30 @@ GQL;
             ]);
         }
 
-        // Assemble one snapshot per day. A day can appear in the returns map
-        // with no sales (refunds processed on a day that had no orders) — those
-        // still get a row, with negative net sales, matching Shopify.
+        // net_sales for the whole range in one ShopifyQL call (grouped by day).
         $todayLocal = CarbonImmutable::now($tz)->toDateString();
-        $allDates   = array_values(array_unique(array_merge(array_keys($byDay), array_keys($returnsByDay))));
-        $snapshots  = [];
-        foreach ($allDates as $date) {
-            $totals = $byDay[$date] ?? ['revenue' => 0.0, 'exbase' => 0.0, 'orders' => 0, 'refunds' => 0.0, 'refunded' => 0];
+        $sinceStr   = $since !== null
+            ? $since->setTimezone($tz)->toDateString()
+            : (count($byDay) > 0 ? min(array_keys($byDay)) : $todayLocal);
+        $netByDay = $this->netSalesByDay($client, $sinceStr, $todayLocal);
+
+        // Days with orders, plus refund-only days ShopifyQL reports a non-zero
+        // net for (e.g. a day of pure returns → negative net sales).
+        $dates = array_keys($byDay);
+        foreach (array_keys($netByDay) as $d) {
+            if (! isset($byDay[$d]) && ($netByDay[$d] ?? 0.0) != 0.0) {
+                $dates[] = $d;
+            }
+        }
+        $dates = array_values(array_unique($dates));
+
+        $snapshots = [];
+        foreach ($dates as $date) {
+            $totals = $byDay[$date] ?? ['revenue' => 0.0, 'orders' => 0, 'refunds' => 0.0, 'refunded' => 0];
 
             $revenue    = round($totals['revenue'], 2);
             $refunds    = round($totals['refunds'], 2);
             $revenueNet = round($revenue - $refunds, 2);
-            $netSales   = round($totals['exbase'] - ($returnsByDay[$date] ?? 0.0), 2);
 
             $snapshots[$date] = new MetricSnapshot(
                 brandId:        $conn->brand_id,
@@ -373,7 +346,7 @@ GQL;
                 currency:       $currency,
                 revenue:        $revenue,
                 revenueNet:     $revenueNet,
-                netSales:       $netSales,
+                netSales:       $netByDay[$date] ?? null,
                 orders:         $totals['orders'],
                 refundsAmount:  $refunds,
                 refundedOrders: $totals['refunded'],
@@ -386,102 +359,87 @@ GQL;
         return $snapshots;
     }
 
-    /** Σ tax charged on shipping lines for one order node (before returns). */
-    private function shippingTax(array $node): float
-    {
-        $sum = 0.0;
-        foreach (($node['shippingLines']['edges'] ?? []) as $slEdge) {
-            foreach (($slEdge['node']['taxLines'] ?? []) as $tl) {
-                $sum += (float) ($tl['priceSet']['shopMoney']['amount'] ?? 0.0);
-            }
-        }
-
-        return $sum;
-    }
-
     /**
-     * Σ ex-tax product value of every refund whose createdAt falls on $date
-     * (in the brand timezone), across orders updated on/after that day. This is
-     * the "returns" component of Shopify's Net sales — attributed by refund
-     * date, not by the original order date.
+     * Net sales per day from Shopify's analytics engine (ShopifyQL) — the exact
+     * "Net sales" figure behind Analytics > Reports, scoped to the Online Store
+     * channel. Dates are grouped in the STORE timezone (ShopifyQL's native
+     * grouping), which we assume equals the brand timezone — the dashboard
+     * already relies on that alignment.
      *
-     * Used by the per-day fetch(). fetchAllSince() does its own refund-date
-     * bucketing inline during the history scan.
+     * Returns an empty map (so callers store net_sales = null, NOT zero) if
+     * ShopifyQL errors, rather than failing the whole sync.
+     *
+     * @return array<string, float>  [Y-m-d => net_sales]
      */
-    private function fetchRefundDateReturns(
-        ShopifyClient $client,
-        string $tz,
-        CarbonImmutable $date,
-        array $allowed
-    ): float {
-        $startLocal = $date->setTimezone($tz)->startOfDay();
-        $startUtc   = $startLocal->setTimezone('UTC')->toIso8601String();
-        $targetDate = $startLocal->toDateString();
+    private function netSalesByDay(ShopifyClient $client, string $sinceStr, string $untilStr): array
+    {
+        // Strip quotes so the channel value can't break out of the WHERE literal.
+        $channel = str_replace("'", '', $this->shopifyqlChannel());
+        $ql = "FROM sales SHOW net_sales GROUP BY day "
+            . "SINCE {$sinceStr} UNTIL {$untilStr} "
+            . "WHERE sales_channel = '{$channel}' ORDER BY day";
 
         $gql = <<<'GQL'
-query RefundsSince($q: String!, $first: Int!, $after: String) {
-  orders(first: $first, query: $q, sortKey: UPDATED_AT, after: $after) {
-    edges {
-      node {
-        sourceName
-        refunds {
-          createdAt
-          refundLineItems(first: 100) {
-            edges { node { subtotalSet { shopMoney { amount } } } }
-          }
-        }
-      }
-    }
-    pageInfo { hasNextPage endCursor }
+query ($q: String!) {
+  shopifyqlQuery(query: $q) {
+    tableData { columns { name } rows }
+    parseErrors
   }
 }
 GQL;
 
-        $q       = "status:any AND updated_at:>='{$startUtc}'";
-        $returns = 0.0;
-        $cursor  = null;
-        $pages   = 0;
+        try {
+            $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
+        } catch (Throwable $e) {
+            Log::warning('shopify.shopifyql.request_failed', ['error' => $e->getMessage(), 'ql' => $ql]);
+            return [];
+        }
 
-        do {
-            $data  = $client->graphql($gql, [
-                'q'     => $q,
-                'first' => self::HISTORY_PAGE_SIZE,
-                'after' => $cursor,
+        $resp = $data['shopifyqlQuery'] ?? null;
+        if (! is_array($resp)) {
+            return [];
+        }
+        if (! empty($resp['parseErrors'])) {
+            $pe = $resp['parseErrors'];
+            Log::warning('shopify.shopifyql.parse_error', [
+                'parseErrors' => is_array($pe) ? json_encode($pe) : (string) $pe,
+                'ql'          => $ql,
             ]);
-            $edges = $data['orders']['edges'] ?? [];
-            if (! is_array($edges)) {
+            return [];
+        }
+
+        $columns = $resp['tableData']['columns'] ?? [];
+        $rows    = $resp['tableData']['rows'] ?? [];
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        // The grouping (day) column is the only non-metric column.
+        $dayCol = null;
+        foreach ($columns as $c) {
+            $name = (string) ($c['name'] ?? '');
+            if ($name !== '' && $name !== 'net_sales') {
+                $dayCol = $name;
                 break;
             }
+        }
 
-            foreach ($edges as $edge) {
-                $node = $edge['node'] ?? [];
-                if (! $this->isAllowedSource($node['sourceName'] ?? null, $allowed)) {
-                    continue;
-                }
-                foreach (($node['refunds'] ?? []) as $r) {
-                    $refundCreated = (string) ($r['createdAt'] ?? '');
-                    if ($refundCreated === '') {
-                        continue;
-                    }
-                    $refundDate = CarbonImmutable::parse($refundCreated)
-                        ->setTimezone($tz)
-                        ->toDateString();
-                    if ($refundDate !== $targetDate) {
-                        continue;
-                    }
-                    foreach (($r['refundLineItems']['edges'] ?? []) as $rli) {
-                        $returns += (float) ($rli['node']['subtotalSet']['shopMoney']['amount'] ?? 0.0);
-                    }
-                }
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
             }
+            $rawDay = $dayCol !== null ? ($row[$dayCol] ?? null) : null;
+            $ns     = $row['net_sales'] ?? null;
+            if ($rawDay === null || $ns === null) {
+                continue;
+            }
+            // Normalise "2026-06-05T00:00:00" / "2026-06-05" → "2026-06-05".
+            $day       = substr((string) $rawDay, 0, 10);
+            $out[$day] = round((float) $ns, 2);
+        }
 
-            $pageInfo = $data['orders']['pageInfo'] ?? [];
-            $hasNext  = (bool) ($pageInfo['hasNextPage'] ?? false);
-            $cursor   = (string) ($pageInfo['endCursor'] ?? '');
-            $pages++;
-        } while ($hasNext && $cursor !== '' && $pages < self::MAX_HISTORY_PAGES);
-
-        return round($returns, 2);
+        return $out;
     }
 
     /**
