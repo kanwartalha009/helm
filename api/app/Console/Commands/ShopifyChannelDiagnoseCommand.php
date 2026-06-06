@@ -101,6 +101,15 @@ query($q: String!, $first: Int!, $after: String) {
         currentTotalTaxSet { shopMoney { amount } }
         totalPriceSet { shopMoney { amount } }
         totalRefundedSet { shopMoney { amount } }
+        lineItems(first: 100) {
+          edges {
+            node {
+              quantity
+              discountedTotalSet { shopMoney { amount } }
+              taxLines { priceSet { shopMoney { amount } } }
+            }
+          }
+        }
       }
     }
     pageInfo { hasNextPage endCursor }
@@ -121,6 +130,7 @@ GQL;
         $netSubtotal      = 0.0;  // Σ subtotalPriceSet (after discounts, before returns)
         $netCurrentSub    = 0.0;  // Σ currentSubtotalPriceSet (after discounts AND returns)
         $netCurrentExTax  = 0.0;  // Σ (currentSubtotal − currentTax) — ex-tax, after returns
+        $grossExTaxBeforeReturns = 0.0;  // Σ line items ex-tax, after discounts, before returns
         $taxesIncluded    = null;
         $cursor           = null;
         $pages            = 0;
@@ -157,8 +167,24 @@ GQL;
                     $netSubtotal     += (float) ($n['subtotalPriceSet']['shopMoney']['amount'] ?? 0);
                     $netCurrentSub   += $cs;
                     $netCurrentExTax += ($cs - $ct);
+
+                    $orderTaxIncl = (bool) ($n['taxesIncluded'] ?? false);
                     if ($taxesIncluded === null) {
-                        $taxesIncluded = (bool) ($n['taxesIncluded'] ?? false);
+                        $taxesIncluded = $orderTaxIncl;
+                    }
+
+                    // Ex-tax, after-discount line revenue BEFORE returns — the
+                    // Shopify "Net sales" base. Tax-inclusive stores carry the
+                    // VAT inside discountedTotalSet, so subtract the line tax;
+                    // tax-exclusive stores already report ex-tax line totals.
+                    foreach (($n['lineItems']['edges'] ?? []) as $liEdge) {
+                        $li   = $liEdge['node'] ?? [];
+                        $disc = (float) ($li['discountedTotalSet']['shopMoney']['amount'] ?? 0);
+                        $ltax = 0.0;
+                        foreach (($li['taxLines'] ?? []) as $tl) {
+                            $ltax += (float) ($tl['priceSet']['shopMoney']['amount'] ?? 0);
+                        }
+                        $grossExTaxBeforeReturns += $orderTaxIncl ? ($disc - $ltax) : $disc;
                     }
                 }
             }
@@ -189,6 +215,86 @@ GQL;
         $this->line('  subtotalPriceSet:             ' . number_format($netSubtotal, 2) . '   (after discounts, before returns)');
         $this->line('  currentSubtotalPriceSet:      ' . number_format($netCurrentSub, 2) . '   (after discounts AND returns)');
         $this->line('  currentSubtotal - currentTax: ' . number_format($netCurrentExTax, 2) . '   (ex-tax, after returns)');
+        $this->newLine();
+
+        // --- Refund-date returns -------------------------------------------
+        // Shopify attributes a return to the date the REFUND was created, not
+        // the original order date. So the day's Net sales = ex-tax sales booked
+        // on D, minus the ex-tax value of every refund processed on D (even for
+        // orders placed on earlier days). We pull orders touched on/after D and
+        // keep only refunds whose createdAt falls on D.
+        $returnsGql = <<<'GQL'
+query($q: String!, $first: Int!, $after: String) {
+  orders(first: $first, query: $q, sortKey: UPDATED_AT, after: $after) {
+    edges {
+      node {
+        sourceName
+        test
+        cancelledAt
+        refunds {
+          createdAt
+          refundLineItems(first: 100) {
+            edges { node { subtotalSet { shopMoney { amount } } } }
+          }
+        }
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+GQL;
+
+        $rq          = "status:any AND updated_at:>='{$startUtc}'";
+        $returns     = 0.0;
+        $refundCount = 0;
+        $cursor      = null;
+        $pages       = 0;
+        $rHitCap     = false;
+
+        do {
+            $data  = $client->graphql($returnsGql, ['q' => $rq, 'first' => 250, 'after' => $cursor]);
+            $edges = $data['orders']['edges'] ?? [];
+
+            foreach ($edges as $edge) {
+                $n   = $edge['node'] ?? [];
+                $src = strtolower((string) ($n['sourceName'] ?? '')) ?: 'unknown';
+                if ($src !== 'web' || ! empty($n['cancelledAt']) || (bool) ($n['test'] ?? false)) {
+                    continue;
+                }
+                foreach (($n['refunds'] ?? []) as $refund) {
+                    $createdAt = (string) ($refund['createdAt'] ?? '');
+                    if ($createdAt === '') {
+                        continue;
+                    }
+                    $refundLocal = CarbonImmutable::parse($createdAt)->setTimezone($tz)->toDateString();
+                    if ($refundLocal !== $day->toDateString()) {
+                        continue;
+                    }
+                    foreach (($refund['refundLineItems']['edges'] ?? []) as $rliEdge) {
+                        $returns += (float) ($rliEdge['node']['subtotalSet']['shopMoney']['amount'] ?? 0);
+                    }
+                    $refundCount++;
+                }
+            }
+
+            $pi      = $data['orders']['pageInfo'] ?? [];
+            $cursor  = (string) ($pi['endCursor'] ?? '');
+            $hasNext = (bool) ($pi['hasNextPage'] ?? false);
+            $pages++;
+            if ($pages >= 50 && $hasNext) {
+                $rHitCap = true;
+            }
+        } while ($hasNext && $cursor !== '' && $pages < 50);
+
+        $refundDateNet = $grossExTaxBeforeReturns - $returns;
+
+        $this->line('Refund-date Net sales (this is how Shopify computes "Net sales"):');
+        $this->line('  Gross ex-tax, after discounts, before returns: ' . number_format($grossExTaxBeforeReturns, 2));
+        $this->line('  Returns (ex-tax) refunded on this day:         ' . number_format($returns, 2) . '   (' . $refundCount . ' refunds)');
+        $this->line('  => Net sales (base − returns):                 ' . number_format($refundDateNet, 2));
+        if ($rHitCap) {
+            $this->warn('  (returns scan hit the 50-page cap — figure may be understated)');
+        }
         $this->newLine();
 
         $stored = DailyMetric::query()
