@@ -297,6 +297,54 @@ GQL;
         }
         $this->newLine();
 
+        // Cross-check: same returns, but base = subtotal minus the FULL order
+        // tax (incl. any shipping tax) instead of just line-item tax. Where this
+        // diverges from the line-method figure above, Shopify is allocating tax
+        // in a way the line items don't expose.
+        $orderTaxNet = $netCurrentExTax - $returns;
+        $this->line('Cross-check — order-tax base − refund-date returns: ' . number_format($orderTaxNet, 2));
+        $this->newLine();
+
+        // --- ShopifyQL: ask Shopify for its OWN Net sales figure -----------
+        // shopifyqlQuery is the analytics engine behind the Shopify report, so
+        // it returns the report's exact number (and uses the store timezone,
+        // sidestepping our tz assumptions) — IF the token carries read_reports
+        // and the store is on the Shopify plan or higher. Read-only.
+        $this->line('ShopifyQL net_sales (Shopify\'s own number — the report engine):');
+        try {
+            $sqlGql = <<<'GQL'
+query ($q: String!) {
+  shopifyqlQuery(query: $q) {
+    __typename
+    ... on TableResponse {
+      tableData { rowData columns { name } }
+    }
+    parseErrors { code message }
+  }
+}
+GQL;
+            $sqlQuery = 'FROM sales SHOW net_sales SINCE ' . $day->toDateString() . ' UNTIL ' . $day->toDateString();
+            $sql      = $client->graphql($sqlGql, ['q' => $sqlQuery]);
+            $resp     = $sql['shopifyqlQuery'] ?? null;
+
+            if (! $resp) {
+                $this->warn('  No response — field may be unavailable on this API version.');
+            } elseif (! empty($resp['parseErrors'])) {
+                foreach ($resp['parseErrors'] as $pe) {
+                    $this->warn('  parse error: ' . trim(($pe['code'] ?? '') . ' ' . ($pe['message'] ?? '')));
+                }
+            } else {
+                $cols = array_map(static fn ($c) => $c['name'] ?? '?', $resp['tableData']['columns'] ?? []);
+                $this->line('  type:    ' . ($resp['__typename'] ?? '?'));
+                $this->line('  columns: ' . implode(', ', $cols));
+                $this->line('  rowData: ' . json_encode($resp['tableData']['rowData'] ?? null));
+            }
+        } catch (Throwable $e) {
+            $this->warn('  ShopifyQL unavailable: ' . $e->getMessage());
+            $this->line('  (most likely the token lacks read_reports, or the store is on Basic plan.)');
+        }
+        $this->newLine();
+
         $stored = DailyMetric::query()
             ->where('brand_id', $brand->id)
             ->where('platform', 'shopify')
