@@ -14,8 +14,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "==> [1/6] git pull origin main"
-git pull origin main
+echo "==> [1/6] git pull (skipped when this isn't a shell git checkout — e.g. Cloudways pulls via its Git panel)"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git pull origin main
+else
+  echo "    not a git working tree here — assuming the host already deployed the latest code; continuing with build + cache."
+fi
 
 echo "==> [2/6] composer install (api)"
 cd "$ROOT/api"

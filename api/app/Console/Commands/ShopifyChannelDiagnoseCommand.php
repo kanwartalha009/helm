@@ -29,12 +29,38 @@ class ShopifyChannelDiagnoseCommand extends Command
     public function handle(): int
     {
         $brandArg = (string) $this->argument('brand');
+        $lower    = strtolower(trim($brandArg));
+
+        // Match on id, or exact slug/name (case-insensitive), or a partial
+        // name/slug — so "flabelus" finds the brand "Flabelus" without needing
+        // the exact generated slug.
         $brand = is_numeric($brandArg)
             ? Brand::find((int) $brandArg)
-            : Brand::query()->where('slug', $brandArg)->first();
+            : (Brand::query()
+                ->whereRaw('LOWER(slug) = ?', [$lower])
+                ->orWhereRaw('LOWER(name) = ?', [$lower])
+                ->first()
+                ?: Brand::query()
+                    ->where('name', 'like', '%' . $brandArg . '%')
+                    ->orWhere('slug', 'like', '%' . $brandArg . '%')
+                    ->first());
 
         if (! $brand) {
             $this->error("Brand not found: {$brandArg}");
+            $hints = Brand::query()
+                ->where('name', 'like', '%' . $brandArg . '%')
+                ->orWhere('slug', 'like', '%' . $brandArg . '%')
+                ->limit(10)
+                ->get(['name', 'slug']);
+            if ($hints->isNotEmpty()) {
+                $this->line('Closest matches:');
+                foreach ($hints as $h) {
+                    $this->line("  - {$h->name}  (slug: {$h->slug})");
+                }
+            } else {
+                $this->line('Pass the brand id or exact slug (see the Brands page for the slug).');
+            }
+
             return self::FAILURE;
         }
 
