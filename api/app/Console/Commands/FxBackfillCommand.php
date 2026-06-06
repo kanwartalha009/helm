@@ -78,8 +78,17 @@ class FxBackfillCommand extends Command
 
         $bases = array_values(array_filter($bases, fn ($b) => $b !== '' && $b !== $target));
 
+        // Pegged currencies (AED, SAR, ...) are resolved from a fixed peg by
+        // FxService and have no provider feed — skip them so we don't 404.
+        $pegged      = array_map('strtoupper', array_keys((array) config('sync.fx.pegs', [])));
+        $skippedPegs = array_values(array_intersect($bases, $pegged));
+        $bases       = array_values(array_diff($bases, $pegged));
+        if ($skippedPegs !== []) {
+            $this->line('Skipping pegged currencies (resolved via fixed peg): ' . implode(', ', $skippedPegs));
+        }
+
         if ($bases === []) {
-            $this->warn('No base currencies to backfill (every active brand is already in ' . $target . ').');
+            $this->warn('No base currencies to backfill (every active brand is already in ' . $target . ' or pegged).');
             return self::SUCCESS;
         }
 

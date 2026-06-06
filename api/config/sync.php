@@ -46,5 +46,21 @@ return [
         // (Sweden's SEK still converts to USD; the Sweden exclusion only applies
         // to EUR groupings, which return in Phase 2.)
         'currencies'   => ['EUR', 'GBP', 'SEK', 'DKK', 'NOK', 'AED', 'SAR', 'CAD', 'AUD'],
+        // Hard-pegged currencies the ECB / frankfurter feed doesn't cover.
+        // Value = units of the currency per 1 USD (the official peg); FxService
+        // uses 1 / peg as the USD rate and never calls the provider for these.
+        // AED pegged at 3.6725 since 1997; SAR at 3.75 since 1986.
+        'pegs'         => [
+            'AED' => 3.6725,
+            'SAR' => 3.75,
+        ],
+    ],
+
+    // Shopify order scoping. The dashboard's "Total sales" must match the
+    // client's report, which is filtered to the Online Store sales channel.
+    // source_name:web = Online Store; set SHOPIFY_SALES_CHANNEL_QUERY empty to
+    // count every channel.
+    'shopify' => [
+        'sales_channel_query' => env('SHOPIFY_SALES_CHANNEL_QUERY', 'source_name:web'),
     ],
 ];

@@ -24,7 +24,7 @@ use RuntimeException;
  */
 final class MetaClient
 {
-    private const DEFAULT_VERSION = 'v19.0';
+    private const DEFAULT_VERSION = 'v24.0';
     private const BASE = 'https://graph.facebook.com';
 
     /** Meta rate-limit / transient error codes worth a backoff + retry. */

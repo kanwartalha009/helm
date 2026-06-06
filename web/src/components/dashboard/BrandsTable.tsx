@@ -8,8 +8,6 @@ interface Props {
   rows: DashboardRow[];
   /** When set (e.g. 'USD'), format every row in this currency; otherwise each brand renders in its own native currency. */
   currency?: string;
-  /** 'net' = revenue − refunds (default). 'gross' = revenue. */
-  returns?: 'gross' | 'net';
   /**
    * Ad platforms that should appear as columns. Computed in DashboardPage as
    * "platforms that at least one brand has actively connected". When empty
@@ -19,7 +17,7 @@ interface Props {
   visibleAdPlatforms?: Set<Platform>;
 }
 
-export function BrandsTable({ rows, returns = 'net', visibleAdPlatforms, currency }: Props) {
+export function BrandsTable({ rows, visibleAdPlatforms, currency }: Props) {
   const showMeta   = visibleAdPlatforms?.has('meta')   ?? false;
   const showGoogle = visibleAdPlatforms?.has('google') ?? false;
   const showTikTok = visibleAdPlatforms?.has('tiktok') ?? false;
@@ -28,7 +26,7 @@ export function BrandsTable({ rows, returns = 'net', visibleAdPlatforms, currenc
   // Shopify-only workspace.
   const showAdRollup = showMeta || showGoogle || showTikTok;
 
-  const revenueHeader = returns === 'gross' ? 'Revenue (gross)' : 'Revenue (net)';
+  const revenueHeader = 'Total sales';
 
   return (
     <Card style={{ overflowX: 'auto' }}>
@@ -42,7 +40,7 @@ export function BrandsTable({ rows, returns = 'net', visibleAdPlatforms, currenc
             {showTikTok && <th className="num">TikTok</th>}
             {showAdRollup && <th className="num">Total spend</th>}
             {showAdRollup && <th className="num">ROAS</th>}
-            <th className="num col-group-start">Revenue (last 7d)</th>
+            <th className="num col-group-start">Total sales (7d)</th>
             <th />
           </tr>
         </thead>
@@ -51,7 +49,6 @@ export function BrandsTable({ rows, returns = 'net', visibleAdPlatforms, currenc
             <Row
               key={row.brand.id}
               row={row}
-              returns={returns}
               displayCurrency={currency}
               showMeta={showMeta}
               showGoogle={showGoogle}
@@ -67,7 +64,6 @@ export function BrandsTable({ rows, returns = 'net', visibleAdPlatforms, currenc
 
 function Row({
   row,
-  returns,
   displayCurrency,
   showMeta,
   showGoogle,
@@ -75,7 +71,6 @@ function Row({
   showAdRollup,
 }: {
   row: DashboardRow;
-  returns: 'gross' | 'net';
   displayCurrency?: string;
   showMeta: boolean;
   showGoogle: boolean;
@@ -94,11 +89,12 @@ function Row({
   const shopifyErrored = !!shopifyHealth?.hasError;
   const shopifySynced = !!shopifyHealth?.lastSyncAt;
 
-  // Pick the field pair the Gross/Net toggle is asking for.
-  const yRev   = returns === 'gross' ? yesterday.revenue   : yesterday.revenueNet;
-  const dbRev  = returns === 'gross' ? dayBefore.revenue   : dayBefore.revenueNet;
-  const l7Rev  = returns === 'gross' ? last7d.revenueGross        : last7d.revenue;
-  const l7Prev = returns === 'gross' ? last7d.revenueGrossPrior7d : last7d.revenuePrior7d;
+  // Total sales before returns — the single revenue metric the client wants
+  // (product − discounts + shipping + taxes, returns not subtracted).
+  const yRev   = yesterday.revenue;
+  const dbRev  = dayBefore.revenue;
+  const l7Rev  = last7d.revenueGross;
+  const l7Prev = last7d.revenueGrossPrior7d;
 
   const adCell = (platform: 'meta' | 'google' | 'tiktok', value: number | null, prior: number | null) => {
     if (value === null) {

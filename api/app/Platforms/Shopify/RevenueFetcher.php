@@ -48,6 +48,17 @@ final class RevenueFetcher
     public function __construct(private readonly OAuthService $oauth) {}
 
     /**
+     * Shopify order-search fragment that restricts to the configured sales
+     * channel (default: Online Store, i.e. source_name:web). Empty string =
+     * no channel filter (every channel). Appended to every orders query so the
+     * dashboard's "Total sales" matches the client's Online-Store-only report.
+     */
+    private function channelFilter(): string
+    {
+        return trim((string) config('sync.shopify.sales_channel_query', ''));
+    }
+
+    /**
      * Fetch one day for one (brand × shopify connection) and return a snapshot.
      */
     public function fetch(PlatformConnection $conn, CarbonImmutable $date): MetricSnapshot
@@ -80,8 +91,14 @@ query OrdersForDay($q: String!, $first: Int!) {
 }
 GQL;
 
+        $q = "created_at:>='{$startUtc}' AND created_at:<='{$endUtc}'";
+        $channel = $this->channelFilter();
+        if ($channel !== '') {
+            $q .= " AND {$channel}";
+        }
+
         $data = $client->graphql($gql, [
-            'q'     => "created_at:>='{$startUtc}' AND created_at:<='{$endUtc}'",
+            'q'     => $q,
             'first' => self::PAGE_SIZE,
         ]);
 
@@ -158,6 +175,10 @@ GQL;
 
         // Build the Shopify search query. `status:any` includes cancelled/closed.
         $queryParts = ['status:any'];
+        $channel = $this->channelFilter();
+        if ($channel !== '') {
+            $queryParts[] = $channel;
+        }
         if ($since !== null) {
             $sinceUtc = $since->setTimezone('UTC')->toIso8601String();
             $queryParts[] = "created_at:>='{$sinceUtc}'";

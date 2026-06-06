@@ -63,6 +63,11 @@ class FetchDailyCurrencyRatesJob implements ShouldQueue
         $bases = array_values(array_unique(array_merge($brandCurrencies, $seeded)));
         $bases = array_values(array_filter($bases, fn ($b) => $b !== $target));
 
+        // Pegged currencies are resolved from a fixed peg by FxService — they
+        // have no provider feed, so don't try to fetch them (avoids 404s).
+        $pegged = array_map('strtoupper', array_keys((array) config('sync.fx.pegs', [])));
+        $bases  = array_values(array_filter($bases, fn ($b) => ! in_array($b, $pegged, true)));
+
         if ($bases === []) {
             Log::info('fx.fetch.skip', ['reason' => 'no non-target currencies to fetch']);
             return;

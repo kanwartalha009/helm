@@ -1,7 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
-import { BrandsTable } from '@/components/dashboard/BrandsTable';
 import { BrandsTableWide } from '@/components/dashboard/BrandsTableWide';
 import {
   Banner,
@@ -22,10 +21,8 @@ export function DashboardPage() {
   const { data: rows = [], isLoading } = useDashboardData();
   const { data: user } = useCurrentUser();
   const masterSync = useMasterSync();
-  const returns = useFiltersStore((s) => s.returns);
-  const setReturns = useFiltersStore((s) => s.setReturns);
-  const view = useFiltersStore((s) => s.view);
-  const setView = useFiltersStore((s) => s.setView);
+  // Client wants to prioritize by revenue — sort control (Total sales 7d desc) vs A–Z.
+  const [sortBy, setSortBy] = useState<'revenue' | 'name'>('revenue');
   const currency = useFiltersStore((s) => s.currency);
   const setCurrency = useFiltersStore((s) => s.setCurrency);
   const brandGroup = useFiltersStore((s) => s.brandGroup);
@@ -65,6 +62,19 @@ export function DashboardPage() {
     if (!brandGroup) return rows;
     return rows.filter((r) => r.brand.groupTag === brandGroup);
   }, [rows, brandGroup]);
+
+  // Client-side sort so "order by revenue to prioritize" is one click. Revenue
+  // sorts by Total sales (before returns) over the last 7 days, high → low;
+  // brands with no data sort to the bottom.
+  const sortedRows: DashboardRow[] = useMemo(() => {
+    const list = [...filteredRows];
+    if (sortBy === 'name') {
+      list.sort((a, b) => a.brand.name.localeCompare(b.brand.name));
+    } else {
+      list.sort((a, b) => (b.last7d.revenueGross ?? -1) - (a.last7d.revenueGross ?? -1));
+    }
+    return list;
+  }, [filteredRows, sortBy]);
 
   if (!isLoading && rows.length === 0) {
     return (
@@ -138,19 +148,11 @@ export function DashboardPage() {
 
         <Segmented
           options={[
-            { value: 'compact', label: 'Compact' },
-            { value: 'wide', label: 'Wide' },
+            { value: 'revenue', label: 'Revenue' },
+            { value: 'name', label: 'Name' },
           ]}
-          value={view}
-          onChange={setView}
-        />
-        <Segmented
-          options={[
-            { value: 'gross', label: 'Gross' },
-            { value: 'net', label: 'Net' },
-          ]}
-          value={returns}
-          onChange={setReturns}
+          value={sortBy}
+          onChange={setSortBy}
         />
         <Segmented
           options={[
@@ -200,25 +202,15 @@ export function DashboardPage() {
           </svg>
         }
       >
-        Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. The Gross/Net toggle switches between gross revenue and revenue net of refunds.
+        Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Revenue is <strong>total sales before returns</strong> (incl. shipping and taxes), Online Store channel only.
       </Banner>
 
       <div style={{ marginTop: 16 }}>
-        {view === 'wide' ? (
-          <BrandsTableWide
-            rows={filteredRows}
-            returns={returns}
-            currency={currency === 'usd' ? 'USD' : undefined}
-            visibleAdPlatforms={visibleAdPlatforms}
-          />
-        ) : (
-          <BrandsTable
-            rows={filteredRows}
-            returns={returns}
-            currency={currency === 'usd' ? 'USD' : undefined}
-            visibleAdPlatforms={visibleAdPlatforms}
-          />
-        )}
+        <BrandsTableWide
+          rows={sortedRows}
+          currency={currency === 'usd' ? 'USD' : undefined}
+          visibleAdPlatforms={visibleAdPlatforms}
+        />
       </div>
 
       <div className="flex items-center justify-between mt-24">

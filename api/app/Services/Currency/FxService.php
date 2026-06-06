@@ -39,6 +39,13 @@ final class FxService
             return 1.0;
         }
 
+        if ($target === 'USD') {
+            $peg = $this->pegRate($base);
+            if ($peg !== null) {
+                return $peg;
+            }
+        }
+
         $row = $this->lookup($base, $target, $date);
         if ($row !== null) {
             return (float) $row->rate;
@@ -95,9 +102,29 @@ final class FxService
             return 1.0;
         }
 
+        // Hard-pegged currencies (AED, SAR, ...) the provider can't serve are
+        // resolved from the fixed peg — no DB row or network call needed.
+        $peg = $this->pegRate($base);
+        if ($peg !== null) {
+            return $peg;
+        }
+
         $row = $this->lookup($base, $target, $date);
 
         return $row !== null ? (float) $row->rate : null;
+    }
+
+    /**
+     * USD rate for a hard-pegged currency the ECB / frankfurter feed doesn't
+     * cover (e.g. AED, SAR). The peg in config('sync.fx.pegs') is the official
+     * currency-per-USD rate, so the USD rate is 1 / peg. Null when not pegged.
+     */
+    public function pegRate(string $base): ?float
+    {
+        $pegs = array_change_key_case((array) config('sync.fx.pegs', []), CASE_UPPER);
+        $peg  = $pegs[strtoupper($base)] ?? null;
+
+        return is_numeric($peg) && (float) $peg > 0 ? round(1.0 / (float) $peg, 6) : null;
     }
 
     /**

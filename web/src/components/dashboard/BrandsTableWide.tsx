@@ -22,11 +22,10 @@ interface Props {
   rows: DashboardRow[];
   /** When set (e.g. 'USD'), format every row in this currency; otherwise each brand renders in its own native currency. */
   currency?: string;
-  returns?: 'gross' | 'net';
   visibleAdPlatforms?: Set<Platform>;
 }
 
-export function BrandsTableWide({ rows, returns = 'net', visibleAdPlatforms, currency }: Props) {
+export function BrandsTableWide({ rows, visibleAdPlatforms, currency }: Props) {
   const showMeta   = visibleAdPlatforms?.has('meta')   ?? false;
   const showGoogle = visibleAdPlatforms?.has('google') ?? false;
   const showTikTok = visibleAdPlatforms?.has('tiktok') ?? false;
@@ -42,7 +41,7 @@ export function BrandsTableWide({ rows, returns = 'net', visibleAdPlatforms, cur
     + (showAdRollup ? 2 : 0) // Total spend + ROAS
     + 1; // L7d
 
-  const revenueLabel = returns === 'gross' ? 'Revenue (gross)' : 'Revenue (net)';
+  const revenueLabel = 'Total sales';
 
   return (
     <Card style={{ overflowX: 'auto' }}>
@@ -59,7 +58,7 @@ export function BrandsTableWide({ rows, returns = 'net', visibleAdPlatforms, cur
             {showTikTok && <th className="group-head group-start" colSpan={3}>TikTok inv.</th>}
             {showAdRollup && <th className="group-head group-start" colSpan={3}>Total inv.</th>}
             {showAdRollup && <th className="group-head group-start" colSpan={3}>ROAS</th>}
-            <th className="group-head group-start" colSpan={3}>Revenue last 7d</th>
+            <th className="group-head group-start" colSpan={3}>Total sales 7d</th>
           </tr>
           {/* Sub-header — Y / Y-1 / Δ for each group */}
           <tr>
@@ -73,7 +72,6 @@ export function BrandsTableWide({ rows, returns = 'net', visibleAdPlatforms, cur
             <Row
               key={row.brand.id}
               row={row}
-              returns={returns}
               displayCurrency={currency}
               showMeta={showMeta}
               showGoogle={showGoogle}
@@ -99,7 +97,6 @@ function SubHeaders({ groupStart }: { groupStart?: boolean }) {
 
 function Row({
   row,
-  returns,
   displayCurrency,
   showMeta,
   showGoogle,
@@ -107,7 +104,6 @@ function Row({
   showAdRollup,
 }: {
   row: DashboardRow;
-  returns: 'gross' | 'net';
   displayCurrency?: string;
   showMeta: boolean;
   showGoogle: boolean;
@@ -122,10 +118,10 @@ function Row({
   // brand renders in its own native currency.
   const currency = displayCurrency || brand.baseCurrency || 'USD';
 
-  const yRev   = returns === 'gross' ? yesterday.revenue          : yesterday.revenueNet;
-  const dbRev  = returns === 'gross' ? dayBefore.revenue          : dayBefore.revenueNet;
-  const l7Rev  = returns === 'gross' ? last7d.revenueGross        : last7d.revenue;
-  const l7Prev = returns === 'gross' ? last7d.revenueGrossPrior7d : last7d.revenuePrior7d;
+  const yRev   = yesterday.revenue;
+  const dbRev  = dayBefore.revenue;
+  const l7Rev  = last7d.revenueGross;
+  const l7Prev = last7d.revenueGrossPrior7d;
 
   const groups: MetricGroup[] = [
     { label: 'Revenue', yesterday: yRev, dayBefore: dbRev, kind: 'money', platform: 'shopify' },
