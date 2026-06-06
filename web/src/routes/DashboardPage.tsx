@@ -9,7 +9,6 @@ import {
   PopoverDivider,
   PopoverItem,
   PopoverLabel,
-  Segmented,
 } from '@/components/ui';
 import { useDashboardData, useMasterSync } from '@/hooks/useDashboardData';
 import { useCurrentUser } from '@/hooks/useSettings';
@@ -21,10 +20,8 @@ export function DashboardPage() {
   const { data: rows = [], isLoading } = useDashboardData();
   const { data: user } = useCurrentUser();
   const masterSync = useMasterSync();
-  // Client wants to prioritize by revenue — sort control (Total sales 7d desc) vs A–Z.
-  const [sortBy, setSortBy] = useState<'revenue' | 'name'>('revenue');
-  const currency = useFiltersStore((s) => s.currency);
-  const setCurrency = useFiltersStore((s) => s.setCurrency);
+  // Sort control: best/worst performing (by Total sales, last 7 days) or A–Z.
+  const [sortBy, setSortBy] = useState<'best' | 'worst' | 'name'>('best');
   const brandGroup = useFiltersStore((s) => s.brandGroup);
   const setBrandGroup = useFiltersStore((s) => s.setBrandGroup);
 
@@ -63,18 +60,29 @@ export function DashboardPage() {
     return rows.filter((r) => r.brand.groupTag === brandGroup);
   }, [rows, brandGroup]);
 
-  // Client-side sort so "order by revenue to prioritize" is one click. Revenue
-  // sorts by Total sales (before returns) over the last 7 days, high → low;
-  // brands with no data sort to the bottom.
+  // Client-side sort. Best/worst performing rank by Total sales over the last 7
+  // days (high→low / low→high); brands with no data sort to the bottom either
+  // way. Name is A–Z.
   const sortedRows: DashboardRow[] = useMemo(() => {
     const list = [...filteredRows];
     if (sortBy === 'name') {
       list.sort((a, b) => a.brand.name.localeCompare(b.brand.name));
     } else {
-      list.sort((a, b) => (b.last7d.revenueGross ?? -1) - (a.last7d.revenueGross ?? -1));
+      const dir = sortBy === 'worst' ? 1 : -1;
+      list.sort((a, b) => {
+        const av = a.last7d.revenueGross;
+        const bv = b.last7d.revenueGross;
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1; // no-data brands always last
+        if (bv == null) return -1;
+        return dir * (av - bv);
+      });
     }
     return list;
   }, [filteredRows, sortBy]);
+
+  const sortLabel =
+    sortBy === 'best' ? 'Best performing' : sortBy === 'worst' ? 'Worst performing' : 'Name';
 
   if (!isLoading && rows.length === 0) {
     return (
@@ -146,22 +154,27 @@ export function DashboardPage() {
 
         <span style={{ flex: 1 }} />
 
-        <Segmented
-          options={[
-            { value: 'revenue', label: 'Revenue' },
-            { value: 'name', label: 'Name' },
-          ]}
-          value={sortBy}
-          onChange={setSortBy}
-        />
-        <Segmented
-          options={[
-            { value: 'native', label: 'Native' },
-            { value: 'usd', label: 'USD' },
-          ]}
-          value={currency}
-          onChange={setCurrency}
-        />
+        <Popover
+          trigger={
+            <button className="filter-btn">
+              Sort: <strong style={{ fontWeight: 500 }}>{sortLabel}</strong>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          }
+        >
+          <PopoverLabel>Sort by</PopoverLabel>
+          <PopoverItem active={sortBy === 'best'} onClick={() => setSortBy('best')}>
+            Best performing
+          </PopoverItem>
+          <PopoverItem active={sortBy === 'worst'} onClick={() => setSortBy('worst')}>
+            Worst performing
+          </PopoverItem>
+          <PopoverItem active={sortBy === 'name'} onClick={() => setSortBy('name')}>
+            Name (A–Z)
+          </PopoverItem>
+        </Popover>
 
         {/*
           Master Sync now — fires the same fan-out as the per-brand Sync now
@@ -208,7 +221,6 @@ export function DashboardPage() {
       <div style={{ marginTop: 16 }}>
         <BrandsTableWide
           rows={sortedRows}
-          currency={currency === 'usd' ? 'USD' : undefined}
           visibleAdPlatforms={visibleAdPlatforms}
         />
       </div>

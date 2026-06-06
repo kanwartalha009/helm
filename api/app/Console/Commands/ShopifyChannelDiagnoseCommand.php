@@ -95,6 +95,10 @@ query($q: String!, $first: Int!, $after: String) {
         sourceName
         test
         cancelledAt
+        taxesIncluded
+        subtotalPriceSet { shopMoney { amount } }
+        currentSubtotalPriceSet { shopMoney { amount } }
+        currentTotalTaxSet { shopMoney { amount } }
         totalPriceSet { shopMoney { amount } }
         totalRefundedSet { shopMoney { amount } }
       }
@@ -114,6 +118,10 @@ GQL;
         $testCount        = 0;
         $webLiveCount     = 0;
         $webLiveRevenue   = 0.0;
+        $netSubtotal      = 0.0;  // Σ subtotalPriceSet (after discounts, before returns)
+        $netCurrentSub    = 0.0;  // Σ currentSubtotalPriceSet (after discounts AND returns)
+        $netCurrentExTax  = 0.0;  // Σ (currentSubtotal − currentTax) — ex-tax, after returns
+        $taxesIncluded    = null;
         $cursor           = null;
         $pages            = 0;
 
@@ -143,6 +151,15 @@ GQL;
                 if ($src === 'web' && ! $isCancelled && ! $isTest) {
                     $webLiveCount++;
                     $webLiveRevenue += $rev;
+
+                    $cs = (float) ($n['currentSubtotalPriceSet']['shopMoney']['amount'] ?? 0);
+                    $ct = (float) ($n['currentTotalTaxSet']['shopMoney']['amount'] ?? 0);
+                    $netSubtotal     += (float) ($n['subtotalPriceSet']['shopMoney']['amount'] ?? 0);
+                    $netCurrentSub   += $cs;
+                    $netCurrentExTax += ($cs - $ct);
+                    if ($taxesIncluded === null) {
+                        $taxesIncluded = (bool) ($n['taxesIncluded'] ?? false);
+                    }
                 }
             }
 
@@ -165,6 +182,13 @@ GQL;
         $this->line('Cancelled:           ' . $cancelledCount . ' orders · ' . number_format($cancelledRevenue, 2));
         $this->line('Test orders:         ' . $testCount);
         $this->line('Online Store (web, not cancelled, not test): ' . $webLiveCount . ' orders · ' . number_format($webLiveRevenue, 2));
+        $this->newLine();
+
+        $this->line('Net sales candidates (web, not cancelled, not test) — match against Shopify "Net sales":');
+        $this->line('  taxesIncluded:                ' . ($taxesIncluded ? 'true (prices include VAT)' : 'false'));
+        $this->line('  subtotalPriceSet:             ' . number_format($netSubtotal, 2) . '   (after discounts, before returns)');
+        $this->line('  currentSubtotalPriceSet:      ' . number_format($netCurrentSub, 2) . '   (after discounts AND returns)');
+        $this->line('  currentSubtotal - currentTax: ' . number_format($netCurrentExTax, 2) . '   (ex-tax, after returns)');
         $this->newLine();
 
         $stored = DailyMetric::query()
