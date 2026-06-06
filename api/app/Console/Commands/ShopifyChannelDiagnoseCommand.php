@@ -391,9 +391,8 @@ GQL;
             $sqlGql = <<<'GQL'
 query ($q: String!) {
   shopifyqlQuery(query: $q) {
-    __typename
-    ... on TableResponse { tableData { rowData columns { name } } }
-    parseErrors { code message }
+    tableData { columns { name } rows }
+    parseErrors
   }
 }
 GQL;
@@ -406,17 +405,16 @@ GQL;
             if (! $resp) {
                 $this->warn('  No response from shopifyqlQuery.');
             } elseif (! empty($resp['parseErrors'])) {
-                foreach ($resp['parseErrors'] as $pe) {
-                    $this->warn('  parse error: ' . trim((string) ($pe['code'] ?? '') . ' ' . (string) ($pe['message'] ?? '')));
-                }
+                $pe = $resp['parseErrors'];
+                $this->warn('  parse error: ' . (is_array($pe) ? json_encode($pe) : (string) $pe));
             } else {
                 $cols = array_map(static fn ($c) => $c['name'] ?? '?', $resp['tableData']['columns'] ?? []);
                 $this->line('  columns: ' . implode(', ', $cols));
-                $this->line('  rowData: ' . json_encode($resp['tableData']['rowData'] ?? null));
+                $this->line('  rows:    ' . json_encode($resp['tableData']['rows'] ?? null));
             }
         } catch (Throwable $e) {
             $this->warn('  shopifyqlQuery failed: ' . $e->getMessage());
-            $this->line('  (if "doesn\'t exist on type QueryRoot" → 2026-04 lacks it; if access denied → token needs read_analytics / read_reports.)');
+            $this->line('  (if access denied → the token needs read_analytics / read_reports scope.)');
         }
         $this->newLine();
 
