@@ -22,6 +22,8 @@ final class MetricSnapshot
         public readonly string $currency,
         public readonly ?float $revenue = null,
         public readonly ?float $revenueNet = null,
+        /** Net sales = line items after discounts and returns, excl. shipping/tax/duties (Shopify currentSubtotalPriceSet). */
+        public readonly ?float $netSales = null,
         public readonly ?int $orders = null,
         public readonly ?float $refundsAmount = null,
         public readonly ?int $refundedOrders = null,
@@ -62,6 +64,7 @@ final class MetricSnapshot
             'date'             => $this->date->toDateString(),
             'revenue'          => $this->revenue,
             'revenue_net'      => $this->revenueNet,
+            'net_sales'        => $this->netSales,
             'orders'           => $this->orders,
             'refunds_amount'   => $this->refundsAmount,
             'refunded_orders'  => $this->refundedOrders,
@@ -82,7 +85,7 @@ final class MetricSnapshot
     public function updateableFields(): array
     {
         return [
-            'revenue', 'revenue_net', 'orders', 'refunds_amount', 'refunded_orders',
+            'revenue', 'revenue_net', 'net_sales', 'orders', 'refunds_amount', 'refunded_orders',
             'spend', 'impressions', 'clicks', 'conversions', 'conversion_value',
             'currency', 'fx_rate_to_usd', 'metadata', 'is_complete', 'pulled_at',
         ];

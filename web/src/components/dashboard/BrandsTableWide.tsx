@@ -22,10 +22,12 @@ interface Props {
   rows: DashboardRow[];
   /** When set (e.g. 'USD'), format every row in this currency; otherwise each brand renders in its own native currency. */
   currency?: string;
+  /** Revenue metric: 'net' = Net sales (default), 'total' = Total revenue (before returns, incl. shipping/tax). */
+  metric?: 'net' | 'total';
   visibleAdPlatforms?: Set<Platform>;
 }
 
-export function BrandsTableWide({ rows, visibleAdPlatforms, currency }: Props) {
+export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = 'net' }: Props) {
   const showMeta   = visibleAdPlatforms?.has('meta')   ?? false;
   const showGoogle = visibleAdPlatforms?.has('google') ?? false;
   const showTikTok = visibleAdPlatforms?.has('tiktok') ?? false;
@@ -41,7 +43,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency }: Props) {
     + (showAdRollup ? 2 : 0) // Total spend + ROAS
     + 1; // L7d
 
-  const revenueLabel = 'Total sales';
+  const revenueLabel = metric === 'net' ? 'Net sales' : 'Total revenue';
 
   return (
     <Card style={{ overflowX: 'auto' }}>
@@ -58,7 +60,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency }: Props) {
             {showTikTok && <th className="group-head group-start" colSpan={3}>TikTok inv.</th>}
             {showAdRollup && <th className="group-head group-start" colSpan={3}>Total inv.</th>}
             {showAdRollup && <th className="group-head group-start" colSpan={3}>ROAS</th>}
-            <th className="group-head group-start" colSpan={3}>Total sales 7d</th>
+            <th className="group-head group-start" colSpan={3}>{revenueLabel} 7d</th>
           </tr>
           {/* Sub-header — Y / Y-1 / Δ for each group */}
           <tr>
@@ -73,6 +75,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency }: Props) {
               key={row.brand.id}
               row={row}
               displayCurrency={currency}
+              metric={metric}
               showMeta={showMeta}
               showGoogle={showGoogle}
               showTikTok={showTikTok}
@@ -98,6 +101,7 @@ function SubHeaders({ groupStart }: { groupStart?: boolean }) {
 function Row({
   row,
   displayCurrency,
+  metric,
   showMeta,
   showGoogle,
   showTikTok,
@@ -105,6 +109,7 @@ function Row({
 }: {
   row: DashboardRow;
   displayCurrency?: string;
+  metric: 'net' | 'total';
   showMeta: boolean;
   showGoogle: boolean;
   showTikTok: boolean;
@@ -118,10 +123,11 @@ function Row({
   // brand renders in its own native currency.
   const currency = displayCurrency || brand.baseCurrency || 'USD';
 
-  const yRev   = yesterday.revenue;
-  const dbRev  = dayBefore.revenue;
-  const l7Rev  = last7d.revenueGross;
-  const l7Prev = last7d.revenueGrossPrior7d;
+  // Net sales (default) or Total revenue (before returns) per the toggle.
+  const yRev   = metric === 'net' ? yesterday.netSales : yesterday.revenue;
+  const dbRev  = metric === 'net' ? dayBefore.netSales : dayBefore.revenue;
+  const l7Rev  = metric === 'net' ? last7d.netSales : last7d.revenueGross;
+  const l7Prev = metric === 'net' ? last7d.netSalesPrior7d : last7d.revenueGrossPrior7d;
 
   const groups: MetricGroup[] = [
     { label: 'Revenue', yesterday: yRev, dayBefore: dbRev, kind: 'money', platform: 'shopify' },

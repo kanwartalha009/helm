@@ -77,8 +77,9 @@ final class DashboardQuery
         $usd         = strtoupper((string) ($params['currency'] ?? '')) === 'USD';
         $grossExpr   = $usd ? 'revenue * COALESCE(fx_rate_to_usd, 1)'        : 'revenue';
         $refundsExpr = $usd ? 'refunds_amount * COALESCE(fx_rate_to_usd, 1)' : 'refunds_amount';
+        $netExpr     = $usd ? 'net_sales * COALESCE(fx_rate_to_usd, 1)'      : 'net_sales';
 
-        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr): array {
+        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr): array {
             $tz             = $b->timezone ?: 'UTC';
             $yesterdayDate  = CarbonImmutable::now($tz)->subDay()->startOfDay()->toDateString();
             $dayBeforeDate  = CarbonImmutable::now($tz)->subDays(2)->startOfDay()->toDateString();
@@ -120,13 +121,15 @@ final class DashboardQuery
                 ->whereBetween('date', [$last7dStart, $last7dEnd])
                 ->selectRaw("
                     COALESCE(SUM({$grossExpr}), 0)   AS gross,
-                    COALESCE(SUM({$refundsExpr}), 0) AS refunds
+                    COALESCE(SUM({$refundsExpr}), 0) AS refunds,
+                    COALESCE(SUM({$netExpr}), 0)     AS net
                 ")
                 ->first();
 
-            $last7dGross   = (float) ($last7dTotals->gross ?? 0);
-            $last7dRefunds = (float) ($last7dTotals->refunds ?? 0);
-            $last7dNet     = $last7dGross - $last7dRefunds;
+            $last7dGross    = (float) ($last7dTotals->gross ?? 0);
+            $last7dRefunds  = (float) ($last7dTotals->refunds ?? 0);
+            $last7dNet      = $last7dGross - $last7dRefunds;
+            $last7dNetSales = (float) ($last7dTotals->net ?? 0);
 
             $last7dCount = DailyMetric::query()
                 ->where('brand_id', $b->id)
@@ -146,13 +149,15 @@ final class DashboardQuery
                 ->whereBetween('date', [$prior7dStart, $prior7dEnd])
                 ->selectRaw("
                     COALESCE(SUM({$grossExpr}), 0)   AS gross,
-                    COALESCE(SUM({$refundsExpr}), 0) AS refunds
+                    COALESCE(SUM({$refundsExpr}), 0) AS refunds,
+                    COALESCE(SUM({$netExpr}), 0)     AS net
                 ")
                 ->first();
 
-            $prior7dGross   = (float) ($prior7dTotals->gross ?? 0);
-            $prior7dRefunds = (float) ($prior7dTotals->refunds ?? 0);
-            $prior7dNet     = $prior7dGross - $prior7dRefunds;
+            $prior7dGross    = (float) ($prior7dTotals->gross ?? 0);
+            $prior7dRefunds  = (float) ($prior7dTotals->refunds ?? 0);
+            $prior7dNet      = $prior7dGross - $prior7dRefunds;
+            $prior7dNetSales = (float) ($prior7dTotals->net ?? 0);
 
             $prior7dCount = DailyMetric::query()
                 ->where('brand_id', $b->id)
@@ -190,6 +195,9 @@ final class DashboardQuery
                     'revenueNet'  => $yesterdayRow
                         ? round(((float) $yesterdayRow->revenue - (float) $yesterdayRow->refunds_amount) * $yMult, 2)
                         : null,
+                    'netSales'    => ($yesterdayRow && $yesterdayRow->net_sales !== null)
+                        ? round((float) $yesterdayRow->net_sales * $yMult, 2)
+                        : null,
                     'refundsAmount' => $yesterdayRow
                         ? round((float) $yesterdayRow->refunds_amount * $yMult, 2)
                         : null,
@@ -207,6 +215,9 @@ final class DashboardQuery
                     'revenueNet'  => $dayBeforeRow
                         ? round(((float) $dayBeforeRow->revenue - (float) $dayBeforeRow->refunds_amount) * $dMult, 2)
                         : null,
+                    'netSales'    => ($dayBeforeRow && $dayBeforeRow->net_sales !== null)
+                        ? round((float) $dayBeforeRow->net_sales * $dMult, 2)
+                        : null,
                     'refundsAmount' => $dayBeforeRow
                         ? round((float) $dayBeforeRow->refunds_amount * $dMult, 2)
                         : null,
@@ -217,10 +228,12 @@ final class DashboardQuery
                     'roas'        => $dRoas,
                 ],
                 'last7d' => [
-                    'revenue'             => $last7dCount > 0 ? round($last7dNet, 2)   : null,
-                    'revenueGross'        => $last7dCount > 0 ? round($last7dGross, 2) : null,
-                    'revenuePrior7d'      => $prior7dCount > 0 ? round($prior7dNet, 2)   : null,
-                    'revenueGrossPrior7d' => $prior7dCount > 0 ? round($prior7dGross, 2) : null,
+                    'revenue'             => $last7dCount > 0 ? round($last7dNet, 2)        : null,
+                    'revenueGross'        => $last7dCount > 0 ? round($last7dGross, 2)      : null,
+                    'netSales'            => $last7dCount > 0 ? round($last7dNetSales, 2)   : null,
+                    'revenuePrior7d'      => $prior7dCount > 0 ? round($prior7dNet, 2)      : null,
+                    'revenueGrossPrior7d' => $prior7dCount > 0 ? round($prior7dGross, 2)    : null,
+                    'netSalesPrior7d'     => $prior7dCount > 0 ? round($prior7dNetSales, 2) : null,
                     'isComplete'          => $last7dCount >= 7,
                 ],
             ];

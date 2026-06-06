@@ -114,6 +114,7 @@ export interface DashboardRow {
     // The Gross/Net toggle on the dashboard swaps between them.
     revenue: number | null;
     revenueNet: number | null;
+    netSales: number | null;
     refundsAmount: number | null;
     metaSpend: number | null;
     googleSpend: number | null;
@@ -125,6 +126,7 @@ export interface DashboardRow {
   dayBefore: {
     revenue: number | null;
     revenueNet: number | null;
+    netSales: number | null;
     refundsAmount: number | null;
     metaSpend: number | null;
     googleSpend: number | null;
@@ -137,8 +139,10 @@ export interface DashboardRow {
     // `revenueGross*` are the gross variants the toggle reaches for.
     revenue: number | null;
     revenueGross: number | null;
+    netSales: number | null;
     revenuePrior7d: number | null;
     revenueGrossPrior7d: number | null;
+    netSalesPrior7d: number | null;
     isComplete: boolean;
   };
 }

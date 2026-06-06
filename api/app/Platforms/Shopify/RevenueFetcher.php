@@ -104,8 +104,9 @@ query OrdersForDay($q: String!, $first: Int!) {
         id
         createdAt
         sourceName
-        totalPriceSet      { shopMoney { amount currencyCode } }
-        totalRefundedSet   { shopMoney { amount } }
+        totalPriceSet           { shopMoney { amount currencyCode } }
+        currentSubtotalPriceSet { shopMoney { amount } }
+        totalRefundedSet        { shopMoney { amount } }
       }
     }
     pageInfo { hasNextPage }
@@ -124,6 +125,7 @@ GQL;
         }
 
         $revenue        = 0.0;
+        $netSales       = 0.0;
         $refundsAmount  = 0.0;
         $orders         = 0;
         $refundedOrders = 0;
@@ -138,10 +140,12 @@ GQL;
             }
 
             $gross  = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
+            $net    = (float) ($node['currentSubtotalPriceSet']['shopMoney']['amount'] ?? 0.0);
             $refund = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
 
-            $revenue += $gross;
-            $orders  += 1;
+            $revenue  += $gross;
+            $netSales += $net;
+            $orders   += 1;
 
             if ($refund > 0) {
                 $refundsAmount  += $refund;
@@ -169,6 +173,7 @@ GQL;
             currency:       $currency,
             revenue:        round($revenue, 2),
             revenueNet:     $revenueNet,
+            netSales:       round($netSales, 2),
             orders:         $orders,
             refundsAmount:  round($refundsAmount, 2),
             refundedOrders: $refundedOrders,
@@ -212,8 +217,9 @@ query OrdersHistory($q: String!, $first: Int!, $after: String) {
         id
         createdAt
         sourceName
-        totalPriceSet    { shopMoney { amount currencyCode } }
-        totalRefundedSet { shopMoney { amount } }
+        totalPriceSet           { shopMoney { amount currencyCode } }
+        currentSubtotalPriceSet { shopMoney { amount } }
+        totalRefundedSet        { shopMoney { amount } }
       }
     }
     pageInfo { hasNextPage endCursor }
@@ -255,13 +261,15 @@ GQL;
                     ->toDateString();
 
                 if (! isset($byDay[$localDate])) {
-                    $byDay[$localDate] = ['revenue' => 0.0, 'orders' => 0, 'refunds' => 0.0, 'refunded' => 0];
+                    $byDay[$localDate] = ['revenue' => 0.0, 'net' => 0.0, 'orders' => 0, 'refunds' => 0.0, 'refunded' => 0];
                 }
 
                 $gross  = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
+                $net    = (float) ($node['currentSubtotalPriceSet']['shopMoney']['amount'] ?? 0.0);
                 $refund = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
 
                 $byDay[$localDate]['revenue'] += $gross;
+                $byDay[$localDate]['net']     += $net;
                 $byDay[$localDate]['orders']  += 1;
 
                 if ($refund > 0) {
@@ -289,6 +297,7 @@ GQL;
         $snapshots  = [];
         foreach ($byDay as $date => $totals) {
             $revenue    = round($totals['revenue'], 2);
+            $netSales   = round($totals['net'] ?? 0, 2);
             $refunds    = round($totals['refunds'], 2);
             $revenueNet = round($revenue - $refunds, 2);
 
@@ -299,6 +308,7 @@ GQL;
                 currency:       $currency,
                 revenue:        $revenue,
                 revenueNet:     $revenueNet,
+                netSales:       $netSales,
                 orders:         $totals['orders'],
                 refundsAmount:  $refunds,
                 refundedOrders: $totals['refunded'],

@@ -9,6 +9,7 @@ import {
   PopoverDivider,
   PopoverItem,
   PopoverLabel,
+  Segmented,
 } from '@/components/ui';
 import { useDashboardData, useMasterSync } from '@/hooks/useDashboardData';
 import { useCurrentUser } from '@/hooks/useSettings';
@@ -20,7 +21,9 @@ export function DashboardPage() {
   const { data: rows = [], isLoading } = useDashboardData();
   const { data: user } = useCurrentUser();
   const masterSync = useMasterSync();
-  // Sort control: best/worst performing (by Total sales, last 7 days) or A–Z.
+  // Revenue metric: Net sales (default) or Total revenue (before returns).
+  const [metric, setMetric] = useState<'net' | 'total'>('net');
+  // Sort control: best/worst performing (by the chosen metric, last 7 days) or A–Z.
   const [sortBy, setSortBy] = useState<'best' | 'worst' | 'name'>('best');
   const brandGroup = useFiltersStore((s) => s.brandGroup);
   const setBrandGroup = useFiltersStore((s) => s.setBrandGroup);
@@ -69,9 +72,11 @@ export function DashboardPage() {
       list.sort((a, b) => a.brand.name.localeCompare(b.brand.name));
     } else {
       const dir = sortBy === 'worst' ? 1 : -1;
+      const val = (r: DashboardRow) =>
+        metric === 'net' ? r.last7d.netSales : r.last7d.revenueGross;
       list.sort((a, b) => {
-        const av = a.last7d.revenueGross;
-        const bv = b.last7d.revenueGross;
+        const av = val(a);
+        const bv = val(b);
         if (av == null && bv == null) return 0;
         if (av == null) return 1; // no-data brands always last
         if (bv == null) return -1;
@@ -79,7 +84,7 @@ export function DashboardPage() {
       });
     }
     return list;
-  }, [filteredRows, sortBy]);
+  }, [filteredRows, sortBy, metric]);
 
   const sortLabel =
     sortBy === 'best' ? 'Best performing' : sortBy === 'worst' ? 'Worst performing' : 'Name';
@@ -154,6 +159,14 @@ export function DashboardPage() {
 
         <span style={{ flex: 1 }} />
 
+        <Segmented
+          options={[
+            { value: 'net', label: 'Net sales' },
+            { value: 'total', label: 'Total revenue' },
+          ]}
+          value={metric}
+          onChange={setMetric}
+        />
         <Popover
           trigger={
             <button className="filter-btn">
@@ -215,12 +228,13 @@ export function DashboardPage() {
           </svg>
         }
       >
-        Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Revenue is <strong>total sales before returns</strong> (incl. shipping and taxes), Online Store channel only.
+        Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Default is <strong>net sales</strong> (after discounts and returns, excl. shipping, tax, and duties); switch to <strong>total revenue</strong> with the toggle. Online Store channel only.
       </Banner>
 
       <div style={{ marginTop: 16 }}>
         <BrandsTableWide
           rows={sortedRows}
+          metric={metric}
           visibleAdPlatforms={visibleAdPlatforms}
         />
       </div>
