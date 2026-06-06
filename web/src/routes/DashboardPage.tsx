@@ -63,26 +63,41 @@ export function DashboardPage() {
     return rows.filter((r) => r.brand.groupTag === brandGroup);
   }, [rows, brandGroup]);
 
-  // Client-side sort. Best/worst performing rank by Total sales over the last 7
-  // days (high→low / low→high); brands with no data sort to the bottom either
-  // way. Name is A–Z.
+  // Client-side sort. Best/worst performing rank by the chosen metric over the
+  // last 7 days (high→low / low→high); Name is A–Z.
+  //
+  // Inactive brands ALWAYS sink to the bottom, in every sort mode. A brand is
+  // "inactive" when its net-sales figure (yesterday) AND its 7-day figure are
+  // both missing or zero — there's nothing live to show, so it never competes
+  // for the top of any ordering (including "worst performing", where we want the
+  // worst *active* brands, not dead/unsynced ones). Ties fall back to name.
   const sortedRows: DashboardRow[] = useMemo(() => {
+    const yVal = (r: DashboardRow) =>
+      metric === 'net' ? r.yesterday.netSales : r.yesterday.revenue;
+    const wVal = (r: DashboardRow) =>
+      metric === 'net' ? r.last7d.netSales : r.last7d.revenueGross;
+    const isDead = (v: number | null) => v == null || v === 0;
+    const isInactive = (r: DashboardRow) => isDead(yVal(r)) && isDead(wVal(r));
+
     const list = [...filteredRows];
-    if (sortBy === 'name') {
-      list.sort((a, b) => a.brand.name.localeCompare(b.brand.name));
-    } else {
+    list.sort((a, b) => {
+      const ai = isInactive(a);
+      const bi = isInactive(b);
+      if (ai !== bi) return ai ? 1 : -1; // inactive always last
+
+      if (sortBy === 'name') {
+        return a.brand.name.localeCompare(b.brand.name);
+      }
+
       const dir = sortBy === 'worst' ? 1 : -1;
-      const val = (r: DashboardRow) =>
-        metric === 'net' ? r.last7d.netSales : r.last7d.revenueGross;
-      list.sort((a, b) => {
-        const av = val(a);
-        const bv = val(b);
-        if (av == null && bv == null) return 0;
-        if (av == null) return 1; // no-data brands always last
-        if (bv == null) return -1;
-        return dir * (av - bv);
-      });
-    }
+      const av = wVal(a);
+      const bv = wVal(b);
+      if (av == null && bv == null) return a.brand.name.localeCompare(b.brand.name);
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (av === bv) return a.brand.name.localeCompare(b.brand.name);
+      return dir * (av - bv);
+    });
     return list;
   }, [filteredRows, sortBy, metric]);
 
