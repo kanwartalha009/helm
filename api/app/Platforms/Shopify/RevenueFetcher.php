@@ -48,14 +48,35 @@ final class RevenueFetcher
     public function __construct(private readonly OAuthService $oauth) {}
 
     /**
-     * Shopify order-search fragment that restricts to the configured sales
-     * channel (default: Online Store, i.e. source_name:web). Empty string =
-     * no channel filter (every channel). Appended to every orders query so the
-     * dashboard's "Total sales" matches the client's Online-Store-only report.
+     * Order source_names that count as the Online Store channel (lowercased).
+     * Default ['web']. Empty array = count every channel.
+     *
+     * We filter in PHP on each order's `sourceName` rather than via the orders
+     * query string — Shopify's GraphQL orders search does not reliably honour a
+     * `source_name:` filter, and `channelInformation` is null for web orders.
+     * The config() default is set here too, so a stale config cache predating
+     * config/sync.php still filters to Online Store.
+     *
+     * @return array<int, string>
      */
-    private function channelFilter(): string
+    private function allowedSources(): array
     {
-        return trim((string) config('sync.shopify.sales_channel_query', ''));
+        $list = (array) config('sync.shopify.online_store_sources', ['web']);
+
+        return array_values(array_filter(array_map(
+            static fn ($s) => strtolower(trim((string) $s)),
+            $list
+        )));
+    }
+
+    /** True when the order's source_name is an allowed channel (or no filter set). */
+    private function isAllowedSource(?string $sourceName, array $allowed): bool
+    {
+        if ($allowed === []) {
+            return true;
+        }
+
+        return in_array(strtolower((string) $sourceName), $allowed, true);
     }
 
     /**
@@ -82,6 +103,7 @@ query OrdersForDay($q: String!, $first: Int!) {
       node {
         id
         createdAt
+        sourceName
         totalPriceSet      { shopMoney { amount currencyCode } }
         totalRefundedSet   { shopMoney { amount } }
       }
@@ -91,14 +113,8 @@ query OrdersForDay($q: String!, $first: Int!) {
 }
 GQL;
 
-        $q = "created_at:>='{$startUtc}' AND created_at:<='{$endUtc}'";
-        $channel = $this->channelFilter();
-        if ($channel !== '') {
-            $q .= " AND {$channel}";
-        }
-
         $data = $client->graphql($gql, [
-            'q'     => $q,
+            'q'     => "created_at:>='{$startUtc}' AND created_at:<='{$endUtc}'",
             'first' => self::PAGE_SIZE,
         ]);
 
@@ -111,9 +127,15 @@ GQL;
         $refundsAmount  = 0.0;
         $orders         = 0;
         $refundedOrders = 0;
+        $allowed        = $this->allowedSources();
 
         foreach ($edges as $edge) {
             $node = $edge['node'] ?? [];
+
+            // Online Store channel only (or all channels when no filter set).
+            if (! $this->isAllowedSource($node['sourceName'] ?? null, $allowed)) {
+                continue;
+            }
 
             $gross  = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
             $refund = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
@@ -175,10 +197,6 @@ GQL;
 
         // Build the Shopify search query. `status:any` includes cancelled/closed.
         $queryParts = ['status:any'];
-        $channel = $this->channelFilter();
-        if ($channel !== '') {
-            $queryParts[] = $channel;
-        }
         if ($since !== null) {
             $sinceUtc = $since->setTimezone('UTC')->toIso8601String();
             $queryParts[] = "created_at:>='{$sinceUtc}'";
@@ -193,6 +211,7 @@ query OrdersHistory($q: String!, $first: Int!, $after: String) {
       node {
         id
         createdAt
+        sourceName
         totalPriceSet    { shopMoney { amount currencyCode } }
         totalRefundedSet { shopMoney { amount } }
       }
@@ -203,9 +222,10 @@ query OrdersHistory($q: String!, $first: Int!, $after: String) {
 GQL;
 
         /** @var array<string, array{revenue: float, orders: int, refunds: float, refunded: int}> $byDay */
-        $byDay  = [];
-        $cursor = null;
-        $pages  = 0;
+        $allowed = $this->allowedSources();
+        $byDay   = [];
+        $cursor  = null;
+        $pages   = 0;
 
         do {
             $data = $client->graphql($gql, [
@@ -221,6 +241,9 @@ GQL;
 
             foreach ($edges as $edge) {
                 $node = $edge['node'] ?? [];
+                if (! $this->isAllowedSource($node['sourceName'] ?? null, $allowed)) {
+                    continue;
+                }
                 $createdAt = (string) ($node['createdAt'] ?? '');
                 if ($createdAt === '') {
                     continue;

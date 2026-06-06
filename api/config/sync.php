@@ -56,11 +56,15 @@ return [
         ],
     ],
 
-    // Shopify order scoping. The dashboard's "Total sales" must match the
-    // client's report, which is filtered to the Online Store sales channel.
-    // source_name:web = Online Store; set SHOPIFY_SALES_CHANNEL_QUERY empty to
-    // count every channel.
+    // Shopify order scoping. Revenue counts only orders whose sales channel
+    // (order.sourceName) is in this list — 'web' = Online Store. RevenueFetcher
+    // filters per order in PHP because the GraphQL orders query-string filter
+    // for source_name is unreliable. Set SHOPIFY_ONLINE_STORE_SOURCES empty to
+    // count every channel (comma-separated for multiple, e.g. "web,pos").
     'shopify' => [
-        'sales_channel_query' => env('SHOPIFY_SALES_CHANNEL_QUERY', 'source_name:web'),
+        'online_store_sources' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('SHOPIFY_ONLINE_STORE_SOURCES', 'web'))
+        ))),
     ],
 ];
