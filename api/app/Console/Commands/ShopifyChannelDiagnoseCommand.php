@@ -131,6 +131,7 @@ GQL;
         $netCurrentSub    = 0.0;  // Σ currentSubtotalPriceSet (after discounts AND returns)
         $netCurrentExTax  = 0.0;  // Σ (currentSubtotal − currentTax) — ex-tax, after returns
         $grossExTaxBeforeReturns = 0.0;  // Σ line items ex-tax, after discounts, before returns
+        $sumCurrentTax    = 0.0;  // Σ currentTotalTaxSet — total order tax (product + shipping)
         $taxesIncluded    = null;
         $cursor           = null;
         $pages            = 0;
@@ -167,6 +168,7 @@ GQL;
                     $netSubtotal     += (float) ($n['subtotalPriceSet']['shopMoney']['amount'] ?? 0);
                     $netCurrentSub   += $cs;
                     $netCurrentExTax += ($cs - $ct);
+                    $sumCurrentTax   += $ct;
 
                     $orderTaxIncl = (bool) ($n['taxesIncluded'] ?? false);
                     if ($taxesIncluded === null) {
@@ -305,45 +307,78 @@ GQL;
         $this->line('Cross-check — order-tax base − refund-date returns: ' . number_format($orderTaxNet, 2));
         $this->newLine();
 
-        // --- ShopifyQL: ask Shopify for its OWN Net sales figure -----------
-        // shopifyqlQuery is the analytics engine behind the Shopify report, so
-        // it returns the report's exact number (and uses the store timezone,
-        // sidestepping our tz assumptions) — IF the token carries read_reports
-        // and the store is on the Shopify plan or higher. Read-only.
-        $this->line('ShopifyQL net_sales (Shopify\'s own number — the report engine):');
-        try {
-            $sqlGql = <<<'GQL'
-query ($q: String!) {
-  shopifyqlQuery(query: $q) {
-    __typename
-    ... on TableResponse {
-      tableData { rowData columns { name } }
+        // --- Shipping tax → isolate PRODUCT tax ----------------------------
+        // shopifyqlQuery isn't on this API version, so we close the match by
+        // hand. The order-tax base above removes the FULL order tax — including
+        // tax charged on shipping. But Net sales' base is the PRODUCT subtotal,
+        // which never included shipping, so its shipping tax must NOT be removed:
+        //   product tax = total order tax − shipping tax
+        //   ex-tax base = product subtotal − product tax
+        //   net sales   = ex-tax base − refund-date returns
+        $shipGql = <<<'GQL'
+query($q: String!, $first: Int!, $after: String) {
+  orders(first: $first, query: $q, sortKey: CREATED_AT, after: $after) {
+    edges {
+      node {
+        sourceName
+        test
+        cancelledAt
+        shippingLines(first: 20) {
+          edges { node { taxLines { priceSet { shopMoney { amount } } } } }
+        }
+      }
     }
-    parseErrors { code message }
+    pageInfo { hasNextPage endCursor }
   }
 }
 GQL;
-            $sqlQuery = 'FROM sales SHOW net_sales SINCE ' . $day->toDateString() . ' UNTIL ' . $day->toDateString();
-            $sql      = $client->graphql($sqlGql, ['q' => $sqlQuery]);
-            $resp     = $sql['shopifyqlQuery'] ?? null;
 
-            if (! $resp) {
-                $this->warn('  No response — field may be unavailable on this API version.');
-            } elseif (! empty($resp['parseErrors'])) {
-                foreach ($resp['parseErrors'] as $pe) {
-                    $this->warn('  parse error: ' . trim(($pe['code'] ?? '') . ' ' . ($pe['message'] ?? '')));
+        $shipTax = 0.0;
+        $shipOk  = true;
+        try {
+            $cursor = null;
+            $pages  = 0;
+            do {
+                $data  = $client->graphql($shipGql, ['q' => $q, 'first' => 250, 'after' => $cursor]);
+                $edges = $data['orders']['edges'] ?? [];
+                foreach ($edges as $edge) {
+                    $n   = $edge['node'] ?? [];
+                    $src = strtolower((string) ($n['sourceName'] ?? '')) ?: 'unknown';
+                    if ($src !== 'web' || ! empty($n['cancelledAt']) || (bool) ($n['test'] ?? false)) {
+                        continue;
+                    }
+                    foreach (($n['shippingLines']['edges'] ?? []) as $slEdge) {
+                        foreach (($slEdge['node']['taxLines'] ?? []) as $tl) {
+                            $shipTax += (float) ($tl['priceSet']['shopMoney']['amount'] ?? 0);
+                        }
+                    }
                 }
-            } else {
-                $cols = array_map(static fn ($c) => $c['name'] ?? '?', $resp['tableData']['columns'] ?? []);
-                $this->line('  type:    ' . ($resp['__typename'] ?? '?'));
-                $this->line('  columns: ' . implode(', ', $cols));
-                $this->line('  rowData: ' . json_encode($resp['tableData']['rowData'] ?? null));
-            }
+                $pi      = $data['orders']['pageInfo'] ?? [];
+                $cursor  = (string) ($pi['endCursor'] ?? '');
+                $hasNext = (bool) ($pi['hasNextPage'] ?? false);
+                $pages++;
+            } while ($hasNext && $cursor !== '' && $pages < 50);
         } catch (Throwable $e) {
-            $this->warn('  ShopifyQL unavailable: ' . $e->getMessage());
-            $this->line('  (most likely the token lacks read_reports, or the store is on Basic plan.)');
+            $shipOk = false;
+            $this->warn('Shipping-tax query failed (field shape?): ' . $e->getMessage());
+            $this->newLine();
         }
-        $this->newLine();
+
+        if ($shipOk) {
+            $productTax = $sumCurrentTax - $shipTax;
+            $exTaxBase  = $netCurrentSub - $productTax;
+            $net        = $exTaxBase - $returns;
+
+            $this->line('Product-tax method (this should equal Shopify "Net sales"):');
+            $this->line('  product subtotal (before returns): ' . number_format($netCurrentSub, 2));
+            $this->line('  total order tax: ' . number_format($sumCurrentTax, 2)
+                . '   shipping tax: ' . number_format($shipTax, 2)
+                . '   => product tax: ' . number_format($productTax, 2));
+            $this->line('  ex-tax base: ' . number_format($exTaxBase, 2));
+            $this->line('  − refund-date returns: ' . number_format($returns, 2));
+            $this->line('  => Net sales: ' . number_format($net, 2));
+            $this->newLine();
+        }
 
         $stored = DailyMetric::query()
             ->where('brand_id', $brand->id)
