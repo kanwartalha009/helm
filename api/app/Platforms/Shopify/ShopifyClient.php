@@ -72,10 +72,10 @@ final class ShopifyClient
      * @param array<string, mixed> $variables
      * @return array<string, mixed>
      */
-    public function graphql(string $query, array $variables = []): array
+    public function graphql(string $query, array $variables = [], ?string $apiVersion = null): array
     {
         try {
-            return $this->doGraphql($query, $variables, allowRetry: true);
+            return $this->doGraphql($query, $variables, allowRetry: true, apiVersion: $apiVersion);
         } catch (RuntimeException $e) {
             throw $e;
         }
@@ -88,9 +88,9 @@ final class ShopifyClient
      * @param array<string, mixed> $variables
      * @return array<string, mixed>
      */
-    private function doGraphql(string $query, array $variables, bool $allowRetry): array
+    private function doGraphql(string $query, array $variables, bool $allowRetry, ?string $apiVersion = null): array
     {
-        $url = sprintf('https://%s/admin/api/%s/graphql.json', $this->shopDomain, self::API_VERSION);
+        $url = sprintf('https://%s/admin/api/%s/graphql.json', $this->shopDomain, $apiVersion ?? self::API_VERSION);
 
         try {
             $response = $this->http->post($url, [
@@ -122,7 +122,7 @@ final class ShopifyClient
             $newToken = ($this->onUnauthorized)();
             if (is_string($newToken) && $newToken !== '') {
                 $this->accessToken = $newToken;
-                return $this->doGraphql($query, $variables, allowRetry: false);
+                return $this->doGraphql($query, $variables, allowRetry: false, apiVersion: $apiVersion);
             }
         }
 

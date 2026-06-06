@@ -380,6 +380,46 @@ GQL;
             $this->newLine();
         }
 
+        // --- ShopifyQL: Shopify's OWN figures (the report engine) -----------
+        // shopifyqlQuery was removed in API 2024-07 but reinstated since, so we
+        // call it on 2026-04 even though the order queries above use the client's
+        // pinned 2025-01. This is the exact breakdown behind Analytics > Reports.
+        // If net_sales here matches the report, we should SOURCE net_sales from
+        // ShopifyQL instead of reconstructing it from orders.
+        $this->line('ShopifyQL (Shopify report engine, API 2026-04, Online Store):');
+        try {
+            $sqlGql = <<<'GQL'
+query ($q: String!) {
+  shopifyqlQuery(query: $q) {
+    __typename
+    ... on TableResponse { tableData { rowData columns { name } } }
+    parseErrors { code message }
+  }
+}
+GQL;
+            $dstr     = $day->toDateString();
+            $sqlQuery = "FROM sales SHOW gross_sales, discounts, returns, net_sales, total_sales "
+                . "SINCE {$dstr} UNTIL {$dstr} WHERE sales_channel = 'Online Store'";
+            $sql  = $client->graphql($sqlGql, ['q' => $sqlQuery], '2026-04');
+            $resp = $sql['shopifyqlQuery'] ?? null;
+
+            if (! $resp) {
+                $this->warn('  No response from shopifyqlQuery.');
+            } elseif (! empty($resp['parseErrors'])) {
+                foreach ($resp['parseErrors'] as $pe) {
+                    $this->warn('  parse error: ' . trim((string) ($pe['code'] ?? '') . ' ' . (string) ($pe['message'] ?? '')));
+                }
+            } else {
+                $cols = array_map(static fn ($c) => $c['name'] ?? '?', $resp['tableData']['columns'] ?? []);
+                $this->line('  columns: ' . implode(', ', $cols));
+                $this->line('  rowData: ' . json_encode($resp['tableData']['rowData'] ?? null));
+            }
+        } catch (Throwable $e) {
+            $this->warn('  shopifyqlQuery failed: ' . $e->getMessage());
+            $this->line('  (if "doesn\'t exist on type QueryRoot" → 2026-04 lacks it; if access denied → token needs read_analytics / read_reports.)');
+        }
+        $this->newLine();
+
         $stored = DailyMetric::query()
             ->where('brand_id', $brand->id)
             ->where('platform', 'shopify')
