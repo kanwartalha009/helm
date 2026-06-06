@@ -20,14 +20,20 @@ use Throwable;
  *                      (gross order value at creation — tax + shipping +
  *                      discounts already applied, refunds NOT subtracted).
  *                      Drives the dashboard "Total revenue" (gross) toggle.
- *   - net_sales      = Σ (subtotalPriceSet − product tax) for orders created in
- *                      the window, MINUS the ex-tax value of every refund
- *                      processed in the window. Mirrors Shopify's "Net sales":
- *                      product revenue after discounts, excluding tax, shipping,
- *                      duties, and returns. Default dashboard metric.
- *                      product tax = totalTaxSet − shipping-line tax (shipping
- *                      tax is excluded because the subtotal never carried
- *                      shipping; duties never enter the subtotal at all).
+ *   - net_sales      = Σ (currentSubtotalPriceSet − product tax) for orders
+ *                      created in the window, MINUS the ex-tax value of every
+ *                      refund processed in the window. Mirrors Shopify's "Net
+ *                      sales": product revenue after discounts, excluding tax,
+ *                      shipping, duties, and returns. Default dashboard metric.
+ *                      product tax = currentTotalTaxSet − shipping-line tax
+ *                      (shipping tax is excluded because the subtotal never
+ *                      carried shipping; duties never enter the subtotal).
+ *                      We use the CURRENT (after-returns) subtotal/tax fields on
+ *                      purpose — they match Shopify's reported Net sales. The
+ *                      before-returns totalTaxSet over-removes tax (~€686 on
+ *                      Flabelus 2026-06-05) and lands the figure low. Verified
+ *                      against `shopify:diagnose` (€20,637.69 vs Shopify
+ *                      €20,631.32, a 0.03% rounding gap).
  *   - refunds_amount = sum of order.totalRefundedSet.shopMoney.amount
  *                      (order-date aggregate; legacy "total refunds" column)
  *   - revenue_net    = revenue - refunds_amount (legacy; order-date)
@@ -116,8 +122,8 @@ query OrdersForDay($q: String!, $first: Int!) {
         createdAt
         sourceName
         totalPriceSet    { shopMoney { amount currencyCode } }
-        subtotalPriceSet { shopMoney { amount } }
-        totalTaxSet      { shopMoney { amount } }
+        currentSubtotalPriceSet { shopMoney { amount } }
+        currentTotalTaxSet      { shopMoney { amount } }
         totalRefundedSet { shopMoney { amount } }
         shippingLines(first: 20) {
           edges { node { taxLines { priceSet { shopMoney { amount } } } } }
@@ -155,8 +161,8 @@ GQL;
             }
 
             $gross    = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
-            $subtotal = (float) ($node['subtotalPriceSet']['shopMoney']['amount'] ?? 0.0);
-            $totalTax = (float) ($node['totalTaxSet']['shopMoney']['amount'] ?? 0.0);
+            $subtotal = (float) ($node['currentSubtotalPriceSet']['shopMoney']['amount'] ?? 0.0);
+            $totalTax = (float) ($node['currentTotalTaxSet']['shopMoney']['amount'] ?? 0.0);
             $shipTax  = $this->shippingTax($node);
             $refund   = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
 
@@ -244,8 +250,8 @@ query OrdersHistory($q: String!, $first: Int!, $after: String) {
         createdAt
         sourceName
         totalPriceSet    { shopMoney { amount currencyCode } }
-        subtotalPriceSet { shopMoney { amount } }
-        totalTaxSet      { shopMoney { amount } }
+        currentSubtotalPriceSet { shopMoney { amount } }
+        currentTotalTaxSet      { shopMoney { amount } }
         totalRefundedSet { shopMoney { amount } }
         shippingLines(first: 20) {
           edges { node { taxLines { priceSet { shopMoney { amount } } } } }
@@ -302,8 +308,8 @@ GQL;
                 }
 
                 $gross    = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
-                $subtotal = (float) ($node['subtotalPriceSet']['shopMoney']['amount'] ?? 0.0);
-                $totalTax = (float) ($node['totalTaxSet']['shopMoney']['amount'] ?? 0.0);
+                $subtotal = (float) ($node['currentSubtotalPriceSet']['shopMoney']['amount'] ?? 0.0);
+                $totalTax = (float) ($node['currentTotalTaxSet']['shopMoney']['amount'] ?? 0.0);
                 $shipTax  = $this->shippingTax($node);
                 $refund   = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
 
