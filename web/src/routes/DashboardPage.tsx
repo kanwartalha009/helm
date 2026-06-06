@@ -67,17 +67,18 @@ export function DashboardPage() {
   // last 7 days (high→low / low→high); Name is A–Z.
   //
   // Inactive brands ALWAYS sink to the bottom, in every sort mode. A brand is
-  // "inactive" when its net-sales figure (yesterday) AND its 7-day figure are
-  // both missing or zero — there's nothing live to show, so it never competes
-  // for the top of any ordering (including "worst performing", where we want the
-  // worst *active* brands, not dead/unsynced ones). Ties fall back to name.
+  // "inactive" when EITHER its net-sales figure (yesterday) OR its 7-day figure
+  // is missing or zero — if either headline column is empty there isn't enough
+  // live data to rank it, so it never competes for the top of any ordering
+  // (including "worst performing", where we want the worst *active* brands, not
+  // empty ones). Ties fall back to name.
   const sortedRows: DashboardRow[] = useMemo(() => {
     const yVal = (r: DashboardRow) =>
       metric === 'net' ? r.yesterday.netSales : r.yesterday.revenue;
     const wVal = (r: DashboardRow) =>
       metric === 'net' ? r.last7d.netSales : r.last7d.revenueGross;
     const isDead = (v: number | null) => v == null || v === 0;
-    const isInactive = (r: DashboardRow) => isDead(yVal(r)) && isDead(wVal(r));
+    const isInactive = (r: DashboardRow) => isDead(yVal(r)) || isDead(wVal(r));
 
     const list = [...filteredRows];
     list.sort((a, b) => {
