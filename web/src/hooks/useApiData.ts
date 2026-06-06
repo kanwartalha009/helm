@@ -48,6 +48,7 @@ export function useBrandDetail(slug: string | undefined) {
 export interface BrandMetricTile {
   label: string;
   revenue: number;
+  netSales: number;
   orders: number;
   refunds: number;
   days: number;
@@ -59,6 +60,7 @@ export interface BrandDailyMetricRow {
   platform: string;
   revenue: number | null;
   revenueNet: number | null;
+  netSales: number | null;
   orders: number | null;
   refunds: number | null;
   currency: string;

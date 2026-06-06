@@ -389,7 +389,8 @@ GQL;
         if ($stored) {
             $this->line(
                 'Helm stored row:     ' . (int) $stored->orders . ' orders · revenue '
-                . number_format((float) $stored->revenue, 2) . ' · refunds '
+                . number_format((float) $stored->revenue, 2) . ' · net_sales '
+                . ($stored->net_sales !== null ? number_format((float) $stored->net_sales, 2) : 'null') . ' · refunds '
                 . number_format((float) ($stored->refunds_amount ?? 0), 2) . ' · ' . $stored->currency
             );
         } else {

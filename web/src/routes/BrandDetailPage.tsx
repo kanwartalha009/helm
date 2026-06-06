@@ -406,7 +406,7 @@ function OverviewTab({
         </h3>
         <span className="text-xs muted">
           {tiles!.allTime.days} day{tiles!.allTime.days === 1 ? '' : 's'} on file ·
-          all-time {formatMoney(tiles!.allTime.revenue, currency)}
+          all-time net sales {formatMoney(tiles!.allTime.netSales, currency)}
         </span>
       </div>
 
@@ -415,7 +415,8 @@ function OverviewTab({
           <thead>
             <tr>
               <th style={{ width: 130 }}>Date</th>
-              <th className="num">Total sales</th>
+              <th className="num">Net sales</th>
+              <th className="num">Total revenue</th>
               <th className="num">Orders</th>
               <th className="num">Refunds</th>
               <th>Status</th>
@@ -426,7 +427,8 @@ function OverviewTab({
             {daily.map((row) => (
               <tr key={`${row.platform}-${row.date}`}>
                 <td className="mono">{row.date}</td>
-                <td className="num">{formatMoney(row.revenue ?? 0, currency)}</td>
+                <td className="num">{row.netSales !== null ? formatMoney(row.netSales, currency) : '—'}</td>
+                <td className="num muted">{formatMoney(row.revenue ?? 0, currency)}</td>
                 <td className="num">{row.orders ?? 0}</td>
                 <td className="num muted">{formatMoney(row.refunds ?? 0, currency)}</td>
                 <td>
@@ -477,7 +479,7 @@ function StatTile({ tile, currency }: { tile: BrandMetricTile; currency: string 
   return (
     <div className="stat">
       <div className="stat-label">{tile.label}</div>
-      <div className="stat-value num">{formatMoney(tile.revenue, currency)}</div>
+      <div className="stat-value num">{formatMoney(tile.netSales, currency)}</div>
       <div className="stat-sub muted">{sub}{!tile.isComplete ? ' · partial' : ''}</div>
     </div>
   );
