@@ -44,6 +44,10 @@ final class GoogleAdsClient
                 ->withOAuth2Credential($oauth)
                 ->withDeveloperToken($this->credentials->get('google', 'developer_token'))
                 ->withLoginCustomerId((int) $this->digits($this->credentials->get('google', 'login_customer_id')))
+                // REST transport: managed hosts (Cloudways) rarely have ext-grpc,
+                // and the SDK defaults to gRPC. REST needs no extension, and our
+                // calls use search() (not searchStream), which REST supports.
+                ->withTransport('rest')
                 ->build();
         } catch (Throwable $e) {
             throw new RuntimeException('Google Ads client build failed: ' . $e->getMessage(), 0, $e);
