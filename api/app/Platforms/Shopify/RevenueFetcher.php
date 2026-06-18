@@ -122,10 +122,14 @@ final class RevenueFetcher
 
         $currency = $this->resolveCurrency($conn, $client);
 
+        // Paginated single-day pull. High-volume brands exceed one page easily
+        // (Meller does ~3,500 web orders/day), so we MUST follow the cursor —
+        // a single page would silently undercount revenue + orders.
         $gql = <<<'GQL'
-query OrdersForDay($q: String!, $first: Int!) {
-  orders(first: $first, query: $q, sortKey: CREATED_AT) {
+query OrdersForDay($q: String!, $first: Int!, $after: String) {
+  orders(first: $first, query: $q, sortKey: CREATED_AT, after: $after) {
     edges {
+      cursor
       node {
         createdAt
         sourceName
@@ -133,49 +137,59 @@ query OrdersForDay($q: String!, $first: Int!) {
         totalRefundedSet { shopMoney { amount } }
       }
     }
-    pageInfo { hasNextPage }
+    pageInfo { hasNextPage endCursor }
   }
 }
 GQL;
-
-        $data = $client->graphql($gql, [
-            'q'     => "created_at:>='{$startUtc}' AND created_at:<='{$endUtc}'",
-            'first' => self::PAGE_SIZE,
-        ]);
-
-        $edges = $data['orders']['edges'] ?? [];
-        if (! is_array($edges)) {
-            $edges = [];
-        }
 
         $revenue        = 0.0;
         $refundsAmount  = 0.0;
         $orders         = 0;
         $refundedOrders = 0;
         $allowed        = $this->allowedSources();
+        $cursor         = null;
+        $pages          = 0;
 
-        foreach ($edges as $edge) {
-            $node = $edge['node'] ?? [];
+        do {
+            $data = $client->graphql($gql, [
+                'q'     => "created_at:>='{$startUtc}' AND created_at:<='{$endUtc}'",
+                'first' => self::HISTORY_PAGE_SIZE,
+                'after' => $cursor,
+            ]);
 
-            // Online Store channel only (or all channels when no filter set).
-            if (! $this->isAllowedSource($node['sourceName'] ?? null, $allowed)) {
-                continue;
+            $edges = $data['orders']['edges'] ?? [];
+            if (! is_array($edges)) {
+                break;
             }
 
-            $gross  = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
-            $refund = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
+            foreach ($edges as $edge) {
+                $node = $edge['node'] ?? [];
 
-            $revenue += $gross;
-            $orders  += 1;
+                // Online Store channel only (or all channels when no filter set).
+                if (! $this->isAllowedSource($node['sourceName'] ?? null, $allowed)) {
+                    continue;
+                }
 
-            if ($refund > 0) {
-                $refundsAmount  += $refund;
-                $refundedOrders += 1;
+                $gross  = (float) ($node['totalPriceSet']['shopMoney']['amount'] ?? 0.0);
+                $refund = (float) ($node['totalRefundedSet']['shopMoney']['amount'] ?? 0.0);
+
+                $revenue += $gross;
+                $orders  += 1;
+
+                if ($refund > 0) {
+                    $refundsAmount  += $refund;
+                    $refundedOrders += 1;
+                }
             }
-        }
 
-        if (($data['orders']['pageInfo']['hasNextPage'] ?? false) === true) {
-            Log::warning('Shopify orders page is full — pagination not yet implemented for fetchDay().', [
+            $pageInfo = $data['orders']['pageInfo'] ?? [];
+            $hasNext  = (bool) ($pageInfo['hasNextPage'] ?? false);
+            $cursor   = (string) ($pageInfo['endCursor'] ?? '');
+            $pages++;
+        } while ($hasNext && $cursor !== '' && $pages < self::MAX_HISTORY_PAGES);
+
+        if ($pages >= self::MAX_HISTORY_PAGES) {
+            Log::warning('Shopify fetch() hit the page cap for a single day.', [
                 'brand_id' => $conn->brand_id,
                 'shop'     => $shop,
                 'date'     => $date->toDateString(),

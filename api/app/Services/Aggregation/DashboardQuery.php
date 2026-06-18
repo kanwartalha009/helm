@@ -293,21 +293,29 @@ final class DashboardQuery
     }
 
     /**
-     * Blended ROAS = gross revenue / ad spend, both normalized to USD via each
-     * row's stored fx_rate so the ratio holds regardless of currency or the
-     * Native/USD toggle. Null when either side is missing or spend is zero —
-     * no divide-by-zero, no fake infinity.
+     * Blended ROAS = net sales / ad spend, both normalized to USD via each row's
+     * stored fx_rate so the ratio holds regardless of currency or the Native/USD
+     * toggle. Null when either side is missing, net_sales is null, or spend is
+     * zero — no divide-by-zero, no fake infinity.
+     *
+     * We use net_sales (the ShopifyQL figure, channel = Online Store), NOT the
+     * gross `revenue` field. Gross revenue is order-based and filtered by
+     * source_name = 'web', which is empty for brands whose Online Store orders
+     * carry a different source_name (headless / custom storefronts) — that made
+     * ROAS show 0.00× for those brands (e.g. Meller, Nude Project). net_sales is
+     * channel-scoped, so it's populated for every brand and matches the
+     * dashboard's default metric.
      */
     private function roas(?DailyMetric $revRow, ?DailyMetric $adRow): ?float
     {
-        if ($revRow === null || $adRow === null) {
+        if ($revRow === null || $adRow === null || $revRow->net_sales === null) {
             return null;
         }
         $spendUsd = (float) $adRow->spend * (float) ($adRow->fx_rate_to_usd ?? 1.0);
         if ($spendUsd <= 0.0) {
             return null;
         }
-        $revUsd = (float) $revRow->revenue * (float) ($revRow->fx_rate_to_usd ?? 1.0);
+        $revUsd = (float) $revRow->net_sales * (float) ($revRow->fx_rate_to_usd ?? 1.0);
 
         return round($revUsd / $spendUsd, 2);
     }
