@@ -31,7 +31,11 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
   const showMeta   = visibleAdPlatforms?.has('meta')   ?? false;
   const showGoogle = visibleAdPlatforms?.has('google') ?? false;
   const showTikTok = visibleAdPlatforms?.has('tiktok') ?? false;
-  const showAdRollup = showMeta || showGoogle || showTikTok;
+  const adPlatformCount = (showMeta ? 1 : 0) + (showGoogle ? 1 : 0) + (showTikTok ? 1 : 0);
+  const showAdRollup = adPlatformCount >= 1; // ROAS shows with any ad platform
+  // "Total inv." only adds value once spend spans 2+ ad platforms — with a
+  // single platform it just duplicates that platform's column, so hide it.
+  const showTotalSpend = adPlatformCount >= 2;
 
   // Each visible group occupies 3 sub-columns (yesterday / day-before / Δ).
   // We track count so the second header row knows how many SubHeaders to emit.
@@ -40,7 +44,8 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
     + (showMeta   ? 1 : 0)
     + (showGoogle ? 1 : 0)
     + (showTikTok ? 1 : 0)
-    + (showAdRollup ? 2 : 0) // Total spend + ROAS
+    + (showTotalSpend ? 1 : 0) // Total inv. (only when 2+ ad platforms)
+    + (showAdRollup ? 1 : 0)   // ROAS
     + 1; // L7d
 
   const revenueLabel = metric === 'net' ? 'Net sales' : 'Total revenue';
@@ -58,7 +63,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
             {showMeta   && <th className="group-head group-start" colSpan={3}>Meta inv.</th>}
             {showGoogle && <th className="group-head group-start" colSpan={3}>Google inv.</th>}
             {showTikTok && <th className="group-head group-start" colSpan={3}>TikTok inv.</th>}
-            {showAdRollup && <th className="group-head group-start" colSpan={3}>Total inv.</th>}
+            {showTotalSpend && <th className="group-head group-start" colSpan={3}>Total inv.</th>}
             {showAdRollup && <th className="group-head group-start" colSpan={3}>ROAS</th>}
             <th className="group-head group-start" colSpan={3}>{revenueLabel} 7d</th>
           </tr>
@@ -79,6 +84,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
               showMeta={showMeta}
               showGoogle={showGoogle}
               showTikTok={showTikTok}
+              showTotalSpend={showTotalSpend}
               showAdRollup={showAdRollup}
             />
           ))}
@@ -105,6 +111,7 @@ function Row({
   showMeta,
   showGoogle,
   showTikTok,
+  showTotalSpend,
   showAdRollup,
 }: {
   row: DashboardRow;
@@ -113,6 +120,7 @@ function Row({
   showMeta: boolean;
   showGoogle: boolean;
   showTikTok: boolean;
+  showTotalSpend: boolean;
   showAdRollup: boolean;
 }) {
   const { brand, yesterday, dayBefore, last7d } = row;
@@ -135,9 +143,11 @@ function Row({
   if (showMeta)   groups.push({ label: 'Meta',   yesterday: yesterday.metaSpend,   dayBefore: dayBefore.metaSpend,   kind: 'money', platform: 'meta'   });
   if (showGoogle) groups.push({ label: 'Google', yesterday: yesterday.googleSpend, dayBefore: dayBefore.googleSpend, kind: 'money', platform: 'google' });
   if (showTikTok) groups.push({ label: 'TikTok', yesterday: yesterday.tiktokSpend, dayBefore: dayBefore.tiktokSpend, kind: 'money', platform: 'tiktok' });
-  if (showAdRollup) {
+  if (showTotalSpend) {
     groups.push({ label: 'Total', yesterday: yesterday.totalSpend, dayBefore: dayBefore.totalSpend, kind: 'money' });
-    groups.push({ label: 'ROAS',  yesterday: yesterday.roas,       dayBefore: dayBefore.roas,       kind: 'roas'  });
+  }
+  if (showAdRollup) {
+    groups.push({ label: 'ROAS',  yesterday: yesterday.roas, dayBefore: dayBefore.roas, kind: 'roas' });
   }
   groups.push({ label: 'L7d', yesterday: l7Rev, dayBefore: l7Prev, kind: 'money', platform: 'shopify' });
 
