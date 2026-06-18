@@ -6,16 +6,16 @@ namespace App\Platforms\Google;
 
 use App\Services\PlatformCredentialService;
 use Google\Ads\GoogleAds\Lib\OAuth2TokenBuilder;
-use Google\Ads\GoogleAds\Lib\V18\GoogleAdsClient as Sdk;
-use Google\Ads\GoogleAds\Lib\V18\GoogleAdsClientBuilder;
-use Google\Ads\GoogleAds\V18\Services\ListAccessibleCustomersRequest;
-use Google\Ads\GoogleAds\V18\Services\SearchGoogleAdsRequest;
+use Google\Ads\GoogleAds\Lib\V24\GoogleAdsClient as Sdk;
+use Google\Ads\GoogleAds\Lib\V24\GoogleAdsClientBuilder;
+use Google\Ads\GoogleAds\V24\Services\ListAccessibleCustomersRequest;
+use Google\Ads\GoogleAds\V24\Services\SearchGoogleAdsRequest;
 use RuntimeException;
 use Throwable;
 
 /**
  * Owns every outbound call to the Google Ads API via the official
- * google-ads-php SDK (V18). Credentials are DB-backed through
+ * google-ads-php SDK (V24). Credentials are DB-backed through
  * PlatformCredentialService (google.refresh_token / client_id / client_secret /
  * developer_token / login_customer_id) — NOT env, so they survive config:cache.
  * The MCC login-customer-id is set on every call; the SDK handles QuotaError
@@ -57,7 +57,7 @@ final class GoogleAdsClient
     /**
      * Run a GAQL query against one customer. Yields GoogleAdsRow objects.
      *
-     * @return iterable<\Google\Ads\GoogleAds\V18\Services\GoogleAdsRow>
+     * @return iterable<\Google\Ads\GoogleAds\V24\Services\GoogleAdsRow>
      */
     public function search(string $customerId, string $gaql): iterable
     {

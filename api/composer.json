@@ -11,7 +11,7 @@
         "laravel/tinker": "^2.9",
         "predis/predis": "^2.0",
         "guzzlehttp/guzzle": "^7.0",
-        "googleads/google-ads-php": "^25.0",
+        "googleads/google-ads-php": "^33.3",
         "facebook/php-business-sdk": "^19.0",
         "sentry/sentry-laravel": "^4.0",
         "pragmarx/google2fa": "^8.0",
