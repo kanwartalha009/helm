@@ -237,6 +237,53 @@ export function useAttachMetaAccounts() {
   });
 }
 
+/* ---- Google ad-account connection (Phase 2) ------------------------ */
+
+/**
+ * GET /api/brands/{slug}/connections/google/available — every customer account
+ * under the agency MCC the org token can see. Only fetched when the picker is
+ * open so we don't hit Google on every page view.
+ */
+export function useGoogleAvailableAccounts(brandSlug: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ['google-available', brandSlug],
+    enabled: !!brandSlug && enabled,
+    staleTime: 5 * 60_000,
+    queryFn: async (): Promise<MetaAdAccount[]> => {
+      const { data } = await api.get<{ accounts: MetaAdAccount[] }>(
+        `/brands/${brandSlug}/connections/google/available`
+      );
+      return data.accounts ?? [];
+    },
+  });
+}
+
+/**
+ * POST /api/brands/{slug}/connections/google/attach — saves the selected
+ * customer IDs onto the brand's single Google connection. Spend is blended at
+ * sync time (see Google ReportsFetcher).
+ */
+export function useAttachGoogleAccounts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { brandSlug: string; accountIds: string[] }) => {
+      const { data } = await api.post(
+        `/brands/${input.brandSlug}/connections/google/attach`,
+        { account_ids: input.accountIds }
+      );
+      return data;
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['brand', vars.brandSlug] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('Google accounts saved', 'Run a sync to pull spend for the selected accounts.');
+    },
+    onError: (err: any) => {
+      toast.error("Couldn't save accounts", err?.response?.data?.message ?? err.message);
+    },
+  });
+}
+
 /**
  * PATCH /api/brands/{slug} — partial update. Server validates each field
  * with `sometimes`, so we only send what changed.

@@ -99,16 +99,26 @@ final class DashboardQuery
             $yMult = $usd ? (float) ($yesterdayRow->fx_rate_to_usd ?? 1.0) : 1.0;
             $dMult = $usd ? (float) ($dayBeforeRow->fx_rate_to_usd ?? 1.0) : 1.0;
 
-            // Meta ad spend per day, blended across the brand's ad accounts at
-            // sync (one meta row per brand/day). Display-currency spend mirrors
-            // the revenue multiplier; ROAS is computed USD-normalized so the
-            // ratio is correct in either Native or USD mode.
-            $yMeta      = $this->adRow($b->id, 'meta', $yesterdayDate);
-            $dMeta      = $this->adRow($b->id, 'meta', $dayBeforeDate);
-            $yMetaSpend = $yMeta ? round((float) $yMeta->spend * ($usd ? (float) ($yMeta->fx_rate_to_usd ?? 1.0) : 1.0), 2) : null;
-            $dMetaSpend = $dMeta ? round((float) $dMeta->spend * ($usd ? (float) ($dMeta->fx_rate_to_usd ?? 1.0) : 1.0), 2) : null;
-            $yRoas      = $this->roas($yesterdayRow, $yMeta);
-            $dRoas      = $this->roas($dayBeforeRow, $dMeta);
+            // Ad spend per day per platform, each blended across the brand's
+            // accounts at sync (one row per platform/brand/day). Display-currency
+            // spend mirrors the revenue multiplier; ROAS is USD-normalized over
+            // ALL ad platforms so the ratio is correct in either Native or USD.
+            $yMeta   = $this->adRow($b->id, 'meta', $yesterdayDate);
+            $dMeta   = $this->adRow($b->id, 'meta', $dayBeforeDate);
+            $yGoogle = $this->adRow($b->id, 'google', $yesterdayDate);
+            $dGoogle = $this->adRow($b->id, 'google', $dayBeforeDate);
+
+            $yMetaSpend   = $this->displaySpend($yMeta, $usd);
+            $dMetaSpend   = $this->displaySpend($dMeta, $usd);
+            $yGoogleSpend = $this->displaySpend($yGoogle, $usd);
+            $dGoogleSpend = $this->displaySpend($dGoogle, $usd);
+
+            // Blended total ad spend = Meta + Google (TikTok joins when built).
+            $yTotalSpend = $this->sumSpend([$yMetaSpend, $yGoogleSpend]);
+            $dTotalSpend = $this->sumSpend([$dMetaSpend, $dGoogleSpend]);
+
+            $yRoas = $this->roas($yesterdayRow, [$yMeta, $yGoogle]);
+            $dRoas = $this->roas($dayBeforeRow, [$dMeta, $dGoogle]);
 
             // Compute net = gross − refunds explicitly at read time. The
             // `revenue_net` column is also maintained at write time, but
@@ -202,9 +212,9 @@ final class DashboardQuery
                         ? round((float) $yesterdayRow->refunds_amount * $yMult, 2)
                         : null,
                     'metaSpend'   => $yMetaSpend,
-                    'googleSpend' => null,
+                    'googleSpend' => $yGoogleSpend,
                     'tiktokSpend' => null,
-                    'totalSpend'  => $yMetaSpend,
+                    'totalSpend'  => $yTotalSpend,
                     'roas'        => $yRoas,
                     'isComplete'  => (bool) ($yesterdayRow?->is_complete ?? false),
                 ],
@@ -222,9 +232,9 @@ final class DashboardQuery
                         ? round((float) $dayBeforeRow->refunds_amount * $dMult, 2)
                         : null,
                     'metaSpend'   => $dMetaSpend,
-                    'googleSpend' => null,
+                    'googleSpend' => $dGoogleSpend,
                     'tiktokSpend' => null,
-                    'totalSpend'  => $dMetaSpend,
+                    'totalSpend'  => $dTotalSpend,
                     'roas'        => $dRoas,
                 ],
                 'last7d' => [
@@ -293,31 +303,57 @@ final class DashboardQuery
     }
 
     /**
-     * Blended ROAS = net sales / ad spend, both normalized to USD via each row's
-     * stored fx_rate so the ratio holds regardless of currency or the Native/USD
-     * toggle. Null when either side is missing, net_sales is null, or spend is
-     * zero — no divide-by-zero, no fake infinity.
+     * Blended ROAS = net sales / TOTAL ad spend across every platform, all
+     * normalized to USD via each row's stored fx_rate so the ratio holds in
+     * Native or USD mode. Null when net_sales is missing or total spend is zero.
      *
-     * We use net_sales (the ShopifyQL figure, channel = Online Store), NOT the
-     * gross `revenue` field. Gross revenue is order-based and filtered by
-     * source_name = 'web', which is empty for brands whose Online Store orders
-     * carry a different source_name (headless / custom storefronts) — that made
-     * ROAS show 0.00× for those brands (e.g. Meller, Nude Project). net_sales is
-     * channel-scoped, so it's populated for every brand and matches the
-     * dashboard's default metric.
+     * Numerator is net_sales (the ShopifyQL figure, channel = Online Store), NOT
+     * the gross `revenue` field — gross is order-based with a source_name='web'
+     * filter that's empty for headless storefronts (it made ROAS 0.00× for
+     * Meller / Nude). Denominator sums Meta + Google (+ TikTok once built).
+     *
+     * @param array<int, ?DailyMetric> $adRows one per ad platform
      */
-    private function roas(?DailyMetric $revRow, ?DailyMetric $adRow): ?float
+    private function roas(?DailyMetric $revRow, array $adRows): ?float
     {
-        if ($revRow === null || $adRow === null || $revRow->net_sales === null) {
+        if ($revRow === null || $revRow->net_sales === null) {
             return null;
         }
-        $spendUsd = (float) $adRow->spend * (float) ($adRow->fx_rate_to_usd ?? 1.0);
+        $spendUsd = 0.0;
+        foreach ($adRows as $adRow) {
+            if ($adRow !== null) {
+                $spendUsd += (float) $adRow->spend * (float) ($adRow->fx_rate_to_usd ?? 1.0);
+            }
+        }
         if ($spendUsd <= 0.0) {
             return null;
         }
         $revUsd = (float) $revRow->net_sales * (float) ($revRow->fx_rate_to_usd ?? 1.0);
 
         return round($revUsd / $spendUsd, 2);
+    }
+
+    /** Display-currency spend for one ad row (×fx in USD mode), or null. */
+    private function displaySpend(?DailyMetric $row, bool $usd): ?float
+    {
+        if ($row === null) {
+            return null;
+        }
+
+        return round((float) $row->spend * ($usd ? (float) ($row->fx_rate_to_usd ?? 1.0) : 1.0), 2);
+    }
+
+    /**
+     * Sum non-null display spends into one total; null when every platform is
+     * null (so "no ad platforms connected" renders N/A, not 0).
+     *
+     * @param array<int, ?float> $spends
+     */
+    private function sumSpend(array $spends): ?float
+    {
+        $present = array_filter($spends, static fn ($v) => $v !== null);
+
+        return $present === [] ? null : round(array_sum($present), 2);
     }
 
     /** @param array<string, mixed> $params */

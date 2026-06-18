@@ -6,21 +6,164 @@ namespace App\Platforms\Google;
 
 use App\Models\PlatformConnection;
 use App\Platforms\Contracts\MetricSnapshot;
+use App\Services\Currency\FxService;
 use Carbon\CarbonImmutable;
-use RuntimeException;
 
 /**
- * Pulls one day of Google Ads reporting metrics for a customer ID and
- * returns a MetricSnapshot.
+ * Pulls one day of Google Ads reporting metrics for a brand's connection and
+ * returns a single blended MetricSnapshot (platform = google).
+ *
+ * Mirrors the Meta InsightsFetcher: a brand stores one Google row but may have
+ * selected one or more customer accounts under the MCC
+ * (metadata.customer_ids). Each customer's day is pulled via GAQL, then blended
+ * into the one row daily_metrics allows per (brand, google, date): counts sum;
+ * money sums natively when every account shares a currency, else each is
+ * converted to USD first and the row is stamped USD.
+ *
+ * GAQL fields per docs/05-platforms/google.md. cost_micros is millionths of the
+ * account currency, so we divide by 1,000,000.
  */
 final class ReportsFetcher
 {
     public function __construct(
         private readonly GoogleAdsClient $client,
+        private readonly FxService $fx,
     ) {}
 
     public function fetch(PlatformConnection $conn, CarbonImmutable $date): MetricSnapshot
     {
-        throw new RuntimeException('Not yet implemented');
+        $customerIds  = $this->customerIdsFor($conn);
+        $day          = $date->toDateString();
+        $tz           = $conn->brand?->timezone ?: 'UTC';
+        $isComplete   = $date->startOfDay()->lessThan(CarbonImmutable::now($tz)->startOfDay());
+        $baseCurrency = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+        $brandId      = (int) $conn->brand_id;
+
+        if ($customerIds === []) {
+            // No customer selected yet — store a real zero row in the brand
+            // currency so the sync succeeds and the dashboard shows 0, not a fail.
+            return $this->snapshot($brandId, $date, $baseCurrency, 0.0, 0, 0, 0, 0.0, [], $isComplete);
+        }
+
+        // Account-level metrics for the day. FROM customer with segments.date
+        // yields one row per (customer, date).
+        $gaql = "SELECT customer.id, customer.currency_code, metrics.cost_micros, "
+            . "metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value "
+            . "FROM customer WHERE segments.date = '{$day}'";
+
+        $impressions = 0;
+        $clicks      = 0;
+        $conversions = 0.0;
+        $spendByCcy  = [];
+        $valueByCcy  = [];
+
+        foreach ($customerIds as $customerId) {
+            foreach ($this->client->search($customerId, $gaql) as $row) {
+                $metrics = $row->getMetrics();
+                if ($metrics === null) {
+                    continue;
+                }
+                $currency = strtoupper((string) ($row->getCustomer()?->getCurrencyCode() ?: $baseCurrency));
+
+                $impressions += (int) $metrics->getImpressions();
+                $clicks      += (int) $metrics->getClicks();
+                $conversions += (float) $metrics->getConversions();
+
+                $spendByCcy[$currency] = ($spendByCcy[$currency] ?? 0.0) + ((int) $metrics->getCostMicros()) / 1_000_000;
+                $valueByCcy[$currency] = ($valueByCcy[$currency] ?? 0.0) + (float) $metrics->getConversionsValue();
+            }
+        }
+
+        [$currency, $spend, $value] = $this->resolveMoney($spendByCcy, $valueByCcy, $baseCurrency, $date);
+
+        return $this->snapshot(
+            $brandId,
+            $date,
+            $currency,
+            $spend,
+            $impressions,
+            $clicks,
+            (int) round($conversions),
+            $value,
+            array_values($customerIds),
+            $isComplete,
+        );
+    }
+
+    /**
+     * The customer IDs to pull for this brand: the selected list when present,
+     * otherwise the single external_id.
+     *
+     * @return array<int, string>
+     */
+    private function customerIdsFor(PlatformConnection $conn): array
+    {
+        $ids = $conn->metadata['customer_ids'] ?? null;
+        if (is_array($ids) && $ids !== []) {
+            return array_values(array_map(static fn ($i) => (string) $i, $ids));
+        }
+
+        return $conn->external_id ? [(string) $conn->external_id] : [];
+    }
+
+    /**
+     * Collapse per-currency spend/value into one figure: native when every
+     * account shares a currency, else convert each to USD and stamp USD.
+     *
+     * @param array<string, float> $spendByCcy
+     * @param array<string, float> $valueByCcy
+     * @return array{0: string, 1: float, 2: float}
+     */
+    private function resolveMoney(array $spendByCcy, array $valueByCcy, string $baseCurrency, CarbonImmutable $date): array
+    {
+        $currencies = array_values(array_unique(array_merge(array_keys($spendByCcy), array_keys($valueByCcy))));
+
+        if ($currencies === []) {
+            return [$baseCurrency, 0.0, 0.0];
+        }
+        if (count($currencies) === 1) {
+            $ccy = $currencies[0];
+            return [$ccy, $spendByCcy[$ccy] ?? 0.0, $valueByCcy[$ccy] ?? 0.0];
+        }
+
+        $spend = 0.0;
+        $value = 0.0;
+        foreach ($currencies as $ccy) {
+            $rate   = $this->fx->toUsd($ccy, $date);
+            $spend += ($spendByCcy[$ccy] ?? 0.0) * $rate;
+            $value += ($valueByCcy[$ccy] ?? 0.0) * $rate;
+        }
+
+        return ['USD', $spend, $value];
+    }
+
+    /**
+     * @param array<int, string> $customerIds
+     */
+    private function snapshot(
+        int $brandId,
+        CarbonImmutable $date,
+        string $currency,
+        float $spend,
+        int $impressions,
+        int $clicks,
+        int $conversions,
+        float $conversionValue,
+        array $customerIds,
+        bool $isComplete,
+    ): MetricSnapshot {
+        return new MetricSnapshot(
+            brandId: $brandId,
+            platform: 'google',
+            date: $date,
+            currency: $currency,
+            spend: round($spend, 2),
+            impressions: $impressions,
+            clicks: $clicks,
+            conversions: $conversions,
+            conversionValue: round($conversionValue, 2),
+            metadata: ['customer_ids' => $customerIds],
+            isComplete: $isComplete,
+        );
     }
 }
