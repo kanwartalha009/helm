@@ -152,8 +152,11 @@ class ConnectionController extends Controller
             return response()->json(['message' => 'Provide account_ids[] or external_id.'], 422);
         }
 
+        // Any adapter exposing attachAccounts() supports the picker flow — Meta
+        // and Google today, TikTok once built. Others (e.g. Shopify, which is
+        // per-store OAuth) return 501 so the UI shows a clear "not available yet".
         $adapter = $this->registry->for($platform);
-        if (! $adapter instanceof MetaAdapter) {
+        if (! method_exists($adapter, 'attachAccounts')) {
             return response()->json([
                 'message' => ucfirst($platform) . ' account attach is not available yet.',
             ], 501);
