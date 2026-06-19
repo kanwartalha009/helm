@@ -20,14 +20,13 @@ import {
   Tag,
 } from '@/components/ui';
 import {
-  useAssignBrandUsers,
-  useBrandAccessUsers,
   useBrandDetail,
   useBrandMetrics,
-  useUsers,
+  useSyncStatus,
   type BrandMetricTile,
 } from '@/hooks/useApiData';
 import { useCurrentUser } from '@/hooks/useSettings';
+import { BrandAccessDrawer } from '@/components/team/BrandAccessDrawer';
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -60,6 +59,7 @@ export function BrandDetailPage() {
   const { data: currentUser } = useCurrentUser();
   const [searchParams, setSearchParams] = useSearchParams();
   const [installOpen, setInstallOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
   const [previewResult, setPreviewResult] = useState<ShopifyPreviewResponse | null>(null);
 
   // Shopify callback bounces us back here with ?connected=shopify&ok=1
@@ -129,6 +129,11 @@ export function BrandDetailPage() {
         }
         actions={
           <>
+            {canManageTeam && (
+              <Button size="sm" variant="ghost" onClick={() => setTeamOpen(true)}>
+                Manage team
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -208,12 +213,18 @@ export function BrandDetailPage() {
             ),
           },
           { id: 'syncs', label: 'Sync log', content: <SyncLogTab brand={brand} /> },
-          ...(canManageTeam
-            ? [{ id: 'team', label: 'Team', content: <TeamTab brand={brand} /> }]
-            : []),
           { id: 'settings', label: 'Settings', content: <SettingsTab brand={brand} /> },
         ]}
       />
+
+      {canManageTeam && (
+        <BrandAccessDrawer
+          mode="brand"
+          open={teamOpen}
+          onClose={() => setTeamOpen(false)}
+          brand={brand}
+        />
+      )}
 
       <ShopifyInstallDrawer
         open={installOpen}
@@ -1447,18 +1458,63 @@ function ShopifyInstallDrawer({
 /* ---------------------------- Sync log -------------------------------- */
 
 function SyncLogTab({ brand }: { brand: Brand }) {
-  // Real per-brand sync logs are a Phase 2 endpoint (`/api/brands/{slug}/syncs`).
-  // For now, link to /sync-health which renders the workspace-wide list.
+  // The workspace sync feed already carries each log's brand, so we filter to
+  // this brand client-side. A dedicated /brands/{slug}/syncs endpoint with the
+  // full 90-day history is a Phase 2 item; this covers the recent window.
+  const { data, isLoading } = useSyncStatus();
+  const logs = (data?.logs ?? []).filter((l) => l.brand?.id === brand.id);
+
+  if (isLoading) {
+    return <div className="muted" style={{ padding: 24 }}>Loading sync log…</div>;
+  }
+
+  if (logs.length === 0) {
+    return (
+      <EmptyState
+        title="No recent syncs for this brand"
+        description={`No sync attempts for ${brand.name} in the recent window. Trigger a sync from the Overview tab, or open the workspace-wide log for the full history.`}
+        action={
+          <Link to="/sync-health" className="btn btn-secondary">
+            Open sync health
+          </Link>
+        }
+      />
+    );
+  }
+
   return (
-    <EmptyState
-      title="Sync log lives on the workspace page"
-      description={`Per-brand sync history will land in Phase 2. For now the workspace-wide log shows every sync attempt for ${brand.name} along with the others.`}
-      action={
-        <Link to="/sync-health" className="btn btn-primary">
-          Open sync health
-        </Link>
-      }
-    />
+    <Card style={{ overflow: 'hidden' }}>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Platform</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th>Duration</th>
+            <th className="text-right" style={{ width: 180 }}>Completed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {logs.map((log) => (
+            <tr key={log.id}>
+              <td style={{ textTransform: 'capitalize' }}>{log.platform}</td>
+              <td className="mono">{log.targetDate}</td>
+              <td>
+                <span className={`status-pill ${log.status}`}>
+                  {log.status[0].toUpperCase() + log.status.slice(1)}
+                </span>
+              </td>
+              <td className="mono">
+                {log.durationMs ? `${(log.durationMs / 1000).toFixed(1)}s` : '—'}
+              </td>
+              <td className="text-right muted text-sm">
+                {log.completedAt ? new Date(log.completedAt).toLocaleString() : '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 
@@ -1495,83 +1551,6 @@ const CURRENCIES = [
   'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'AED', 'SAR', 'SEK', 'NOK', 'DKK',
   'CHF', 'JPY', 'SGD', 'HKD', 'INR', 'BRL', 'MXN', 'ZAR',
 ];
-
-function TeamTab({ brand }: { brand: Brand }) {
-  const { data: allUsers = [] } = useUsers(true);
-  const { data: access } = useBrandAccessUsers(brand.slug);
-  const assign = useAssignBrandUsers();
-  const [selected, setSelected] = useState<number[]>([]);
-
-  // Reseed when the brand or the server-side assignment set changes.
-  useEffect(() => {
-    setSelected(access?.userIds ?? []);
-  }, [brand.slug, (access?.userIds ?? []).join(',')]);
-
-  const activeUsers = allUsers.filter((u) => u.status === 'active');
-  const seen = [...(access?.userIds ?? [])].sort((a, b) => a - b).join(',');
-  const dirty = [...selected].sort((a, b) => a - b).join(',') !== seen;
-  const toggle = (id: number) =>
-    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-
-  return (
-    <Card style={{ padding: 24, maxWidth: 640 }}>
-      <p className="muted text-sm" style={{ marginBottom: 16 }}>
-        Users assigned here can access <strong>{brand.name}</strong>. Team members and brand users
-        see only their assigned brands; managers and admins see every brand, but assignments set
-        their default “My brands” dashboard view.
-      </p>
-
-      <div
-        style={{
-          maxHeight: 360,
-          overflowY: 'auto',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)',
-        }}
-      >
-        {activeUsers.length === 0 ? (
-          <div className="muted text-sm" style={{ padding: 16 }}>
-            No active users yet. Invite teammates from the Team page.
-          </div>
-        ) : (
-          activeUsers.map((u) => (
-            <label
-              key={u.id}
-              className="list-row"
-              style={{ cursor: 'pointer', gap: 12, alignItems: 'center' }}
-            >
-              <input
-                type="checkbox"
-                checked={selected.includes(u.id)}
-                onChange={() => toggle(u.id)}
-              />
-              <div className="list-row-main">
-                <div className="list-row-title">{u.name}</div>
-                <div className="list-row-sub">
-                  {u.email} · {u.role.replace('_', ' ')}
-                </div>
-              </div>
-            </label>
-          ))
-        )}
-      </div>
-
-      <div className="flex items-center gap-8 mt-16">
-        <Button
-          size="sm"
-          variant="primary"
-          type="button"
-          disabled={!dirty || assign.isPending}
-          onClick={() => assign.mutate({ slug: brand.slug, userIds: selected })}
-        >
-          {assign.isPending ? 'Saving…' : 'Save team'}
-        </Button>
-        <span className="muted text-sm">{selected.length} assigned</span>
-        {dirty && <span className="muted text-sm">· unsaved</span>}
-      </div>
-    </Card>
-  );
-}
 
 function SettingsTab({ brand }: { brand: Brand }) {
   // Controlled form state — diff against `brand` on submit so we only send

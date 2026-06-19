@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import {
@@ -14,6 +15,7 @@ import { useUsers } from '@/hooks/useApiData';
 import { useInvitations, useRevokeInvitation, type Invitation } from '@/hooks/useInvitations';
 import { useCurrentUser } from '@/hooks/useSettings';
 import { useUiStore } from '@/stores/uiStore';
+import { BrandAccessDrawer } from '@/components/team/BrandAccessDrawer';
 import type { User } from '@/types/domain';
 
 const ROLE_LABEL: Record<User['role'], string> = {
@@ -42,6 +44,7 @@ export function TeamPage() {
   const { data: invitations = [] } = useInvitations();
   const revokeInvitation = useRevokeInvitation();
   const openInvite = useUiStore((s) => s.setInviteUserDrawerOpen);
+  const [assignUser, setAssignUser] = useState<User | null>(null);
 
   if (isLoading) {
     return (
@@ -243,12 +246,20 @@ export function TeamPage() {
                           </td>
                           <td className="muted text-sm">{lastSeenLabel(u.lastLoginAt)}</td>
                           <td className="text-right">
-                            <Link
-                              to={isYou ? '/profile' : `/team/users/${u.id}`}
-                              className="btn btn-ghost btn-sm"
-                            >
-                              {isYou ? 'Open →' : 'Edit →'}
-                            </Link>
+                            <div className="flex items-center justify-end gap-8">
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => setAssignUser(u)}
+                              >
+                                Assign brands
+                              </button>
+                              <Link
+                                to={isYou ? '/profile' : `/team/users/${u.id}`}
+                                className="btn btn-ghost btn-sm"
+                              >
+                                {isYou ? 'Open →' : 'Edit →'}
+                              </Link>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -352,6 +363,15 @@ export function TeamPage() {
           },
         ]}
       />
+
+      {assignUser && (
+        <BrandAccessDrawer
+          mode="user"
+          open
+          onClose={() => setAssignUser(null)}
+          user={assignUser}
+        />
+      )}
     </AppLayout>
   );
 }

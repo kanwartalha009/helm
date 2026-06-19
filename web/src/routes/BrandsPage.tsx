@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import {
@@ -16,6 +17,7 @@ import { useUiStore } from '@/stores/uiStore';
 export function BrandsPage() {
   const { data: brands = [], isLoading, isError, error } = useBrandsLive();
   const openAddBrand = useUiStore((s) => s.setAddBrandDrawerOpen);
+  const [q, setQ] = useState('');
 
   if (isLoading) {
     return (
@@ -115,14 +117,28 @@ export function BrandsPage() {
     );
   }
 
+  const query = q.trim().toLowerCase();
+  const filtered = query
+    ? brands.filter(
+        (b) =>
+          b.name.toLowerCase().includes(query) ||
+          (b.shopDomain ?? '').toLowerCase().includes(query),
+      )
+    : brands;
+
   return (
     <AppLayout title="Brands" tag={`${brands.length} total`}>
       <PageHeader title="Brands" subtitle="Every store and ad account under your management." />
 
       <div className="filter-bar mb-16">
-        <div className="segmented">
-          <button className="active">All ({brands.length})</button>
-        </div>
+        <input
+          className="input"
+          type="search"
+          placeholder="Search brands…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{ maxWidth: 280 }}
+        />
         <span style={{ flex: 1 }} />
         <Chip>All groups</Chip>
         <Chip>All currencies</Chip>
@@ -142,7 +158,7 @@ export function BrandsPage() {
             </tr>
           </thead>
           <tbody>
-            {brands.map((brand) => (
+            {filtered.map((brand) => (
               <tr key={brand.id}>
                 <td>
                   <Link
@@ -173,13 +189,20 @@ export function BrandsPage() {
                 </td>
               </tr>
             ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={6} className="muted" style={{ padding: 16, textAlign: 'center' }}>
+                  No brands match “{q}”.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </Card>
 
       <div className="flex items-center justify-between mt-24">
         <div className="text-xs muted">
-          Showing {brands.length} {brands.length === 1 ? 'brand' : 'brands'}
+          Showing {filtered.length} of {brands.length} {brands.length === 1 ? 'brand' : 'brands'}
         </div>
         <div className="flex items-center gap-8">
           <Button size="sm" variant="secondary">
