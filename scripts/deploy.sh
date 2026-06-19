@@ -23,7 +23,16 @@ fi
 
 echo "==> [2/6] composer install (api)"
 cd "$ROOT/api"
-composer install --no-dev --optimize-autoloader --no-interaction
+# Self-heal a stale lock: if composer.lock predates a composer.json bump (e.g.
+# the google-ads-php ^33 upgrade) `composer install` aborts and, under set -e,
+# kills the whole deploy — silently shipping nothing. Fall back to updating that
+# one package so a deploy is never blocked by an un-committed lock. Once the
+# updated composer.lock is committed, the fast install path is used and this
+# fallback never runs.
+composer install --no-dev --optimize-autoloader --no-interaction || {
+  echo "    composer install failed — lock out of date, reconciling googleads/google-ads-php…"
+  composer update googleads/google-ads-php -W --no-dev --optimize-autoloader --no-interaction
+}
 
 echo "==> [3/6] build frontend — must succeed before we touch the live bundle"
 cd "$ROOT/web"
