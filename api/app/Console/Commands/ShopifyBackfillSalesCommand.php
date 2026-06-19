@@ -108,14 +108,26 @@ class ShopifyBackfillSalesCommand extends Command
     {
         $arg = $this->argument('brand');
 
-        if ($arg !== null) {
-            $brand = ctype_digit((string) $arg)
-                ? Brand::query()->with('connections')->find((int) $arg)
-                : Brand::query()->with('connections')->where('slug', $arg)->first();
-
-            return collect($brand ? [$brand] : []);
+        if ($arg === null) {
+            return Brand::query()->with('connections')->where('status', 'active')->orderBy('name')->get();
         }
 
-        return Brand::query()->with('connections')->where('status', 'active')->orderBy('name')->get();
+        // Match on id, exact slug/name (case-insensitive), or a partial name/slug
+        // — so "meller" finds the brand "Meller" without the generated slug.
+        $argStr = (string) $arg;
+        $lower  = strtolower(trim($argStr));
+
+        $brand = is_numeric($argStr)
+            ? Brand::query()->with('connections')->find((int) $argStr)
+            : (Brand::query()->with('connections')
+                ->whereRaw('LOWER(slug) = ?', [$lower])
+                ->orWhereRaw('LOWER(name) = ?', [$lower])
+                ->first()
+                ?: Brand::query()->with('connections')
+                    ->where('name', 'like', '%' . $argStr . '%')
+                    ->orWhere('slug', 'like', '%' . $argStr . '%')
+                    ->first());
+
+        return collect($brand ? [$brand] : []);
     }
 }
