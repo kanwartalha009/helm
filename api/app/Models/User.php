@@ -94,7 +94,14 @@ class User extends Authenticatable
     public function accessibleBrandIds(): array
     {
         try {
-            return $this->accessibleBrands()->pluck('brands.id')->all();
+            // Bypass the Brand 'access' global scope here. That scope calls THIS
+            // method to build its whereIn, so querying accessibleBrands() with the
+            // scope still attached recurses infinitely (caught by RbacAccessTest;
+            // would 500 every team_member / brand_user request in prod).
+            return $this->accessibleBrands()
+                ->withoutGlobalScope('access')
+                ->pluck('brands.id')
+                ->all();
         } catch (\Illuminate\Database\QueryException $e) {
             // 42P01 = undefined_table (Postgres). Anything else, surface.
             if (in_array($e->getCode(), ['42P01', '42S02'], true)) {
