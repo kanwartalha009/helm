@@ -385,6 +385,18 @@ GQL;
     }
 
     /**
+     * Public range pull of Shopify's daily net_sales + total_sales (ShopifyQL),
+     * for the historical sales backfill (shopify:backfill-sales) that powers the
+     * year-over-year comparison.
+     *
+     * @return array<string, array{net: float, total: ?float}>
+     */
+    public function salesByDayRange(PlatformConnection $conn, string $sinceStr, string $untilStr): array
+    {
+        return $this->netSalesByDay($this->makeClient($conn), $sinceStr, $untilStr);
+    }
+
+    /**
      * Net sales per day from Shopify's analytics engine (ShopifyQL) — the exact
      * "Net sales" figure behind Analytics > Reports, scoped to the Online Store
      * channel. Dates are grouped in the STORE timezone (ShopifyQL's native

@@ -25,9 +25,11 @@ interface Props {
   /** Revenue metric: 'net' = Net sales (default), 'total' = Total revenue (before returns, incl. shipping/tax). */
   metric?: 'net' | 'total';
   visibleAdPlatforms?: Set<Platform>;
+  /** Year-over-year comparison periods to append (yesterday|last7|last30|mtd). */
+  comparePeriods?: string[];
 }
 
-export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = 'net' }: Props) {
+export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = 'net', comparePeriods = [] }: Props) {
   const showMeta   = visibleAdPlatforms?.has('meta')   ?? false;
   const showGoogle = visibleAdPlatforms?.has('google') ?? false;
   const showTikTok = visibleAdPlatforms?.has('tiktok') ?? false;
@@ -66,11 +68,19 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
             {showTikTok && <th className="group-head group-start" colSpan={3}>TikTok inv.</th>}
             {showTotalSpend && <th className="group-head group-start" colSpan={3}>Total inv.</th>}
             <th className="group-head group-start" colSpan={3}>{revenueLabel} 7d</th>
+            {comparePeriods.map((p) => (
+              <th key={p} className="group-head group-start" colSpan={3}>
+                {revenueLabel} vs last year · {PERIOD_LABEL[p] ?? p}
+              </th>
+            ))}
           </tr>
-          {/* Sub-header — Y / Y-1 / Δ for each group */}
+          {/* Sub-header — Y / Y-1 / Δ for each group; This yr / Last yr / Δ for comparisons */}
           <tr>
             {Array.from({ length: groupCount }).map((_, i) => (
               <SubHeaders key={i} groupStart />
+            ))}
+            {comparePeriods.map((p) => (
+              <ComparisonSubHeaders key={p} />
             ))}
           </tr>
         </thead>
@@ -86,6 +96,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
               showTikTok={showTikTok}
               showTotalSpend={showTotalSpend}
               showAdRollup={showAdRollup}
+              comparePeriods={comparePeriods}
             />
           ))}
         </tbody>
@@ -104,6 +115,56 @@ function SubHeaders({ groupStart }: { groupStart?: boolean }) {
   );
 }
 
+const PERIOD_LABEL: Record<string, string> = {
+  yesterday: 'Yesterday',
+  last7: 'Last 7 days',
+  last30: 'Last 30 days',
+  mtd: 'Month to date',
+};
+
+function ComparisonSubHeaders() {
+  return (
+    <>
+      <th className="sub-head num group-start">This yr</th>
+      <th className="sub-head num">Last yr</th>
+      <th className="sub-head delta">Δ</th>
+    </>
+  );
+}
+
+function ComparisonCells({
+  row,
+  period,
+  currency,
+}: {
+  row: DashboardRow;
+  period: string;
+  currency: string;
+}) {
+  const c = row.comparison?.[period];
+  const thisYear = c?.thisYear ?? null;
+  const lastYear = c?.lastYear ?? null;
+  // % change vs last year; null when there's no last-year baseline (new brand)
+  // or last year was exactly zero (can't divide).
+  const pct =
+    thisYear !== null && lastYear !== null && lastYear !== 0
+      ? ((thisYear - lastYear) / lastYear) * 100
+      : null;
+  const direction: 'up' | 'down' | 'flat' | 'na' =
+    pct === null ? 'na' : pct > 0.05 ? 'up' : pct < -0.05 ? 'down' : 'flat';
+  const deltaLabel = pct === null ? '—' : `${pct > 0 ? '+' : ''}${pct.toFixed(0)}%`;
+
+  return (
+    <>
+      <td className="num group-start">{thisYear !== null ? formatMoney(thisYear, currency) : '—'}</td>
+      <td className="num prior">
+        {lastYear !== null ? formatMoney(lastYear, currency) : <span className="muted">new</span>}
+      </td>
+      <td className={cn('delta', direction)}>{deltaLabel}</td>
+    </>
+  );
+}
+
 function Row({
   row,
   displayCurrency,
@@ -113,6 +174,7 @@ function Row({
   showTikTok,
   showTotalSpend,
   showAdRollup,
+  comparePeriods,
 }: {
   row: DashboardRow;
   displayCurrency?: string;
@@ -122,6 +184,7 @@ function Row({
   showTikTok: boolean;
   showTotalSpend: boolean;
   showAdRollup: boolean;
+  comparePeriods: string[];
 }) {
   const { brand, yesterday, dayBefore, last7d } = row;
   const detailHref = `/brands/${brand.slug}`;
@@ -179,6 +242,9 @@ function Row({
           connected={connected}
           health={health}
         />
+      ))}
+      {comparePeriods.map((p) => (
+        <ComparisonCells key={p} row={row} period={p} currency={currency} />
       ))}
     </tr>
   );

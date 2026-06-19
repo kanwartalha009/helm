@@ -9,15 +9,27 @@ import type { DashboardRow } from '@/types/domain';
 // the DashboardPage renders an empty-state CTA in that case. The currency
 // mode is part of the query key so flipping the Native/USD toggle refetches;
 // the backend converts server-side when it receives ?currency=USD.
-export function useDashboardData(manager: string = 'me') {
+export function useDashboardData(
+  manager: string = 'me',
+  metric: 'net' | 'total' = 'total',
+  compare: string[] = [],
+) {
   const currency = useFiltersStore((s) => s.currency);
+  const compareKey = compare.join(',');
   return useQuery({
-    queryKey: ['dashboard', currency, manager],
+    // metric only affects the payload when comparison is on, so it's only in the
+    // key then — flipping Net/Total with comparison off stays an instant client swap.
+    queryKey: ['dashboard', currency, manager, compareKey, compareKey ? metric : ''],
     queryFn: async (): Promise<DashboardRow[]> => {
       const params: Record<string, string> = {};
       if (currency === 'usd') params.currency = 'USD';
       // 'me' is the backend default, so only send the param when it differs.
       if (manager && manager !== 'me') params.manager = manager;
+      // Year-over-year columns: sent only when the Comparison filter is on.
+      if (compareKey) {
+        params.compare = compareKey;
+        params.metric = metric;
+      }
       const { data } = await api.get<{ rows: DashboardRow[] }>('/dashboard', {
         params: Object.keys(params).length ? params : undefined,
       });

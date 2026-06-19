@@ -160,6 +160,11 @@ export interface DashboardRow {
     totalSalesPrior7d: number | null;
     isComplete: boolean;
   };
+  // Year-over-year comparison — present only when the Comparison filter is on.
+  // Keyed by period: yesterday | last7 | last30 | mtd. thisYear/lastYear are the
+  // selected metric (net or total) summed over the period vs the same dates a
+  // year earlier; lastYear is null for a brand with no history that far back.
+  comparison?: Record<string, { thisYear: number | null; lastYear: number | null }>;
 }
 
 export interface SyncLog {

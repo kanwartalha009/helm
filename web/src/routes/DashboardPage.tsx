@@ -18,6 +18,13 @@ import { useFiltersStore } from '@/stores/filtersStore';
 import { useUiStore } from '@/stores/uiStore';
 import type { DashboardRow, Platform } from '@/types/domain';
 
+const COMPARE_PERIODS = [
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: 'last7', label: 'Last 7 days' },
+  { key: 'last30', label: 'Last 30 days' },
+  { key: 'mtd', label: 'Month to date' },
+] as const;
+
 export function DashboardPage() {
   const { data: user } = useCurrentUser();
   const canFilterByManager = user?.role === 'master_admin' || user?.role === 'manager';
@@ -25,11 +32,19 @@ export function DashboardPage() {
   // | 'all' | a user id. Admin/manager only; limited roles are hard-scoped
   // server-side via the Brand global access scope.
   const [manager, setManager] = useState<string>('me');
-  const { data: rows = [], isLoading } = useDashboardData(manager);
-  const { data: managerUsers = [] } = useUsers(canFilterByManager);
-  const masterSync = useMasterSync();
   // Revenue metric: Total revenue (default — Shopify "Total sales") or Net sales.
   const [metric, setMetric] = useState<'net' | 'total'>('total');
+  // Year-over-year comparison: a toggle + multi-select periods. The comparison
+  // columns follow the metric toggle above; periods are only sent to the API
+  // (and computed) while the toggle is on.
+  const [comparisonOn, setComparisonOn] = useState(false);
+  const [comparePeriods, setComparePeriods] = useState<string[]>(['mtd']);
+  const activeCompare = comparisonOn ? comparePeriods : [];
+  const togglePeriod = (key: string) =>
+    setComparePeriods((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  const { data: rows = [], isLoading } = useDashboardData(manager, metric, activeCompare);
+  const { data: managerUsers = [] } = useUsers(canFilterByManager);
+  const masterSync = useMasterSync();
   // Sort control: best/worst performing (by the chosen metric, last 7 days) or A–Z.
   const [sortBy, setSortBy] = useState<'best' | 'worst' | 'name'>('best');
   const brandGroup = useFiltersStore((s) => s.brandGroup);
@@ -238,6 +253,17 @@ export function DashboardPage() {
           value={metric}
           onChange={setMetric}
         />
+        <button
+          className="filter-btn"
+          style={
+            comparisonOn
+              ? { background: 'var(--accent)', color: 'var(--accent-fg)', borderColor: 'var(--accent)' }
+              : undefined
+          }
+          onClick={() => setComparisonOn((v) => !v)}
+        >
+          Comparison
+        </button>
         <Popover
           trigger={
             <button className="filter-btn">
@@ -279,6 +305,26 @@ export function DashboardPage() {
         )}
       </div>
 
+      {comparisonOn && (
+        <div className="filter-bar mb-12" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <span className="text-xs muted">Compare vs last year:</span>
+          {COMPARE_PERIODS.map((p) => (
+            <button
+              key={p.key}
+              className="filter-btn"
+              style={
+                comparePeriods.includes(p.key)
+                  ? { background: 'var(--accent)', color: 'var(--accent-fg)', borderColor: 'var(--accent)' }
+                  : undefined
+              }
+              onClick={() => togglePeriod(p.key)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="compare-context">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
           <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -307,6 +353,7 @@ export function DashboardPage() {
           rows={sortedRows}
           metric={metric}
           visibleAdPlatforms={visibleAdPlatforms}
+          comparePeriods={activeCompare}
         />
       </div>
 

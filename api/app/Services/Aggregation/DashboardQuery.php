@@ -82,7 +82,17 @@ final class DashboardQuery
         $netExpr     = $usd ? 'net_sales * COALESCE(fx_rate_to_usd, 1)'      : 'net_sales';
         $totalExpr   = $usd ? 'total_sales * COALESCE(fx_rate_to_usd, 1)'    : 'total_sales';
 
-        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr, $totalExpr): array {
+        // Year-over-year comparison (Bosco, 2026-06-19). Only the periods the UI
+        // enabled are computed, so this is a no-op cost when Comparison is off.
+        // Metric follows the dashboard's Net/Total toggle.
+        $comparePeriods = array_values(array_intersect(
+            array_filter(array_map('trim', explode(',', (string) ($params['compare'] ?? '')))),
+            ['yesterday', 'last7', 'last30', 'mtd'],
+        ));
+        $compareCol  = (($params['metric'] ?? 'total') === 'net') ? 'net_sales' : 'total_sales';
+        $compareExpr = $usd ? "{$compareCol} * COALESCE(fx_rate_to_usd, 1)" : $compareCol;
+
+        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr, $totalExpr, $comparePeriods, $compareExpr): array {
             $tz             = $b->timezone ?: 'UTC';
             $yesterdayDate  = CarbonImmutable::now($tz)->subDay()->startOfDay()->toDateString();
             $dayBeforeDate  = CarbonImmutable::now($tz)->subDays(2)->startOfDay()->toDateString();
@@ -194,6 +204,21 @@ final class DashboardQuery
                 ->whereBetween('date', [$prior7dStart, $prior7dEnd])
                 ->count();
 
+            // Per selected period: this year vs the same calendar dates last year.
+            $comparison = [];
+            foreach ($comparePeriods as $period) {
+                [$start, $end] = $this->comparisonWindow($period, $tz);
+                if ($start === null || $end === null) {
+                    continue;
+                }
+                $lastStart = CarbonImmutable::parse($start)->subYear()->toDateString();
+                $lastEnd   = CarbonImmutable::parse($end)->subYear()->toDateString();
+                $comparison[$period] = [
+                    'thisYear' => $this->comparisonSum($b->id, $compareExpr, $start, $end),
+                    'lastYear' => $this->comparisonSum($b->id, $compareExpr, $lastStart, $lastEnd),
+                ];
+            }
+
             $health = $healthByBrand[$b->id] ?? [];
 
             return [
@@ -275,6 +300,7 @@ final class DashboardQuery
                     'totalSalesPrior7d'   => $prior7dCount > 0 ? round($prior7dTotalSales, 2) : null,
                     'isComplete'          => $last7dCount >= 7,
                 ],
+                'comparison' => $comparison,
             ];
         })->all();
 
@@ -355,6 +381,46 @@ final class DashboardQuery
 
         // Specific manager (or a limited user) with no brands → honest empty board.
         $query->whereIn('id', $assignedIds !== [] ? $assignedIds : [0]);
+    }
+
+    /**
+     * [start, end] date strings (brand tz) for a year-over-year period THIS year.
+     * Returns [null, null] when the window is empty (e.g. MTD on the 1st). Last
+     * year is the same window shifted back one year (handled by the caller).
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function comparisonWindow(string $period, string $tz): array
+    {
+        $now       = CarbonImmutable::now($tz);
+        $yesterday = $now->subDay()->startOfDay();
+
+        return match ($period) {
+            'yesterday' => [$yesterday->toDateString(), $yesterday->toDateString()],
+            'last7'     => [$now->subDays(7)->startOfDay()->toDateString(), $yesterday->toDateString()],
+            'last30'    => [$now->subDays(30)->startOfDay()->toDateString(), $yesterday->toDateString()],
+            'mtd'       => $yesterday->lessThan($now->startOfMonth())
+                ? [null, null]
+                : [$now->startOfMonth()->toDateString(), $yesterday->toDateString()],
+            default     => [null, null],
+        };
+    }
+
+    /**
+     * Sum the metric expression over [start, end] for a brand's Shopify rows.
+     * Returns null (not 0) when no rows landed in the window, so the UI can show
+     * "—" for a brand that didn't exist last year instead of a fake −100%.
+     */
+    private function comparisonSum(int $brandId, string $expr, string $start, string $end): ?float
+    {
+        $row = DailyMetric::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'shopify')
+            ->whereBetween('date', [$start, $end])
+            ->selectRaw("COALESCE(SUM({$expr}), 0) AS s, COUNT(*) AS c")
+            ->first();
+
+        return ((int) ($row->c ?? 0)) > 0 ? round((float) ($row->s ?? 0), 2) : null;
     }
 
     private function shopifyRow(int $brandId, string $date): ?DailyMetric

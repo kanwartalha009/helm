@@ -27,6 +27,9 @@ class DashboardController extends Controller
             'group_tag'       => ['nullable', 'string', 'max:60'],
             // Brand-manager filter: 'me' (default) | 'all' | a user id.
             'manager'         => ['nullable', 'string', 'max:20'],
+            // Year-over-year comparison: comma list of periods + the metric.
+            'compare'         => ['nullable', 'string', 'max:60'],
+            'metric'          => ['nullable', 'in:net,total'],
         ]);
 
         return response()->json([
