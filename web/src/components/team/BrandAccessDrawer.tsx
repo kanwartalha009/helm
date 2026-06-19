@@ -42,11 +42,27 @@ function UserBrandsDrawer({
   const { data: allBrands = [] } = useBrandsLive();
   const updateUser = useUpdateUser();
   const [brandIds, setBrandIds] = useState<number[]>(user.accessibleBrandIds ?? []);
+  const [q, setQ] = useState('');
 
-  // Reseed from the user each time the drawer opens.
+  // Reseed from the user each time the drawer opens; clear the search.
   useEffect(() => {
-    if (open) setBrandIds(user.accessibleBrandIds ?? []);
+    if (open) {
+      setBrandIds(user.accessibleBrandIds ?? []);
+      setQ('');
+    }
   }, [open, user.id, (user.accessibleBrandIds ?? []).join(',')]);
+
+  // Search filters what's shown; selection (brandIds) is the full set and
+  // persists across searches, so you can search → tick → search again.
+  const query = q.trim().toLowerCase();
+  const visibleBrands = query
+    ? allBrands.filter(
+        (b) =>
+          b.name.toLowerCase().includes(query) ||
+          (b.region ?? '').toLowerCase().includes(query) ||
+          (b.groupTag ?? '').toLowerCase().includes(query),
+      )
+    : allBrands;
 
   const seesAllByRole = user.role === 'master_admin' || user.role === 'manager';
   const allSelected = allBrands.length > 0 && brandIds.length === allBrands.length;
@@ -97,10 +113,23 @@ function UserBrandsDrawer({
         </Button>
       </div>
 
+      <input
+        className="input"
+        type="search"
+        placeholder="Search brands…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        style={{ marginBottom: 8 }}
+      />
+
       {allBrands.length === 0 ? (
         <div className="muted text-sm">No brands yet.</div>
+      ) : visibleBrands.length === 0 ? (
+        <div className="muted text-sm" style={{ padding: '8px 0' }}>
+          No brands match “{q}”.
+        </div>
       ) : (
-        allBrands.map((b) => (
+        visibleBrands.map((b) => (
           <label
             key={b.id}
             className="list-row"
@@ -140,12 +169,24 @@ function BrandUsersDrawer({
   const { data: access } = useBrandAccessUsers(open ? brand.slug : undefined);
   const assign = useAssignBrandUsers();
   const [selected, setSelected] = useState<number[]>([]);
+  const [q, setQ] = useState('');
 
   useEffect(() => {
-    if (open) setSelected(access?.userIds ?? []);
+    if (open) {
+      setSelected(access?.userIds ?? []);
+      setQ('');
+    }
   }, [open, brand.slug, (access?.userIds ?? []).join(',')]);
 
-  const activeUsers = allUsers.filter((u) => u.status === 'active');
+  const query = q.trim().toLowerCase();
+  const activeUsers = allUsers
+    .filter((u) => u.status === 'active')
+    .filter(
+      (u) =>
+        !query ||
+        u.name.toLowerCase().includes(query) ||
+        u.email.toLowerCase().includes(query),
+    );
   const toggle = (id: number) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
@@ -177,8 +218,21 @@ function BrandUsersDrawer({
         their default dashboard view.
       </p>
 
+      <input
+        className="input"
+        type="search"
+        placeholder="Search teammates…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        style={{ marginBottom: 8 }}
+      />
+
       {activeUsers.length === 0 ? (
-        <div className="muted text-sm">No active users yet. Invite teammates from the Team page.</div>
+        <div className="muted text-sm" style={{ padding: '8px 0' }}>
+          {query
+            ? `No teammates match “${q}”.`
+            : 'No active users yet. Invite teammates from the Team page.'}
+        </div>
       ) : (
         activeUsers.map((u) => (
           <label

@@ -19,9 +19,10 @@ return new class extends Migration {
             \Illuminate\Support\Facades\Schema::table('platform_connections', function (\Illuminate\Database\Schema\Blueprint $table) {
                 $table->text('credentials')->change();
             });
-        } else {
+        } elseif (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE platform_connections ALTER COLUMN credentials TYPE TEXT USING credentials::text');
         }
+        // sqlite (test DB): the column is already text-shaped, so nothing to do.
     }
 
     public function down(): void
@@ -30,7 +31,7 @@ return new class extends Migration {
             \Illuminate\Support\Facades\Schema::table('platform_connections', function (\Illuminate\Database\Schema\Blueprint $table) {
                 $table->json('credentials')->change();
             });
-        } else {
+        } elseif (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE platform_connections ALTER COLUMN credentials TYPE JSONB USING credentials::jsonb');
         }
     }

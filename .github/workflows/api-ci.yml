@@ -44,5 +44,5 @@ jobs:
       - name: Generate application key
         run: php artisan key:generate
 
-      - name: Run unit tests
-        run: vendor/bin/phpunit --testsuite=Unit
+      - name: Run tests (Unit + Feature)
+        run: php artisan test
