@@ -40,7 +40,7 @@ class DailyMetric extends Model
 
     protected $fillable = [
         'brand_id', 'platform', 'date',
-        'revenue', 'revenue_net', 'orders', 'refunds_amount', 'refunded_orders',
+        'revenue', 'revenue_net', 'net_sales', 'total_sales', 'orders', 'refunds_amount', 'refunded_orders',
         'spend', 'impressions', 'clicks', 'conversions', 'conversion_value',
         'currency', 'fx_rate_to_usd', 'metadata', 'is_complete', 'pulled_at',
     ];
@@ -49,6 +49,8 @@ class DailyMetric extends Model
         'date'             => 'date',
         'revenue'          => 'decimal:2',
         'revenue_net'      => 'decimal:2',
+        'net_sales'        => 'decimal:2',
+        'total_sales'      => 'decimal:2',
         'orders'           => 'integer',
         'refunds_amount'   => 'decimal:2',
         'refunded_orders'  => 'integer',

@@ -78,8 +78,9 @@ final class DashboardQuery
         $grossExpr   = $usd ? 'revenue * COALESCE(fx_rate_to_usd, 1)'        : 'revenue';
         $refundsExpr = $usd ? 'refunds_amount * COALESCE(fx_rate_to_usd, 1)' : 'refunds_amount';
         $netExpr     = $usd ? 'net_sales * COALESCE(fx_rate_to_usd, 1)'      : 'net_sales';
+        $totalExpr   = $usd ? 'total_sales * COALESCE(fx_rate_to_usd, 1)'    : 'total_sales';
 
-        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr): array {
+        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr, $totalExpr): array {
             $tz             = $b->timezone ?: 'UTC';
             $yesterdayDate  = CarbonImmutable::now($tz)->subDay()->startOfDay()->toDateString();
             $dayBeforeDate  = CarbonImmutable::now($tz)->subDays(2)->startOfDay()->toDateString();
@@ -121,8 +122,16 @@ final class DashboardQuery
             $yTotalSpend = $this->sumSpend([$yMetaSpend, $yGoogleSpend, $yTikTokSpend]);
             $dTotalSpend = $this->sumSpend([$dMetaSpend, $dGoogleSpend, $dTikTokSpend]);
 
-            $yRoas = $this->roas($yesterdayRow, [$yMeta, $yGoogle, $yTikTok]);
-            $dRoas = $this->roas($dayBeforeRow, [$dMeta, $dGoogle, $dTikTok]);
+            // Blended ad spend (USD) per day, then ROAS for BOTH revenue bases —
+            // net sales and total sales — so the dashboard renders ROAS against
+            // whichever the metric toggle selects (Bosco-approved: ROAS follows
+            // the filter).
+            $ySpendUsd  = $this->spendUsd([$yMeta, $yGoogle, $yTikTok]);
+            $dSpendUsd  = $this->spendUsd([$dMeta, $dGoogle, $dTikTok]);
+            $yRoasNet   = $this->ratio($yesterdayRow, 'net_sales',   $ySpendUsd);
+            $yRoasTotal = $this->ratio($yesterdayRow, 'total_sales', $ySpendUsd);
+            $dRoasNet   = $this->ratio($dayBeforeRow, 'net_sales',   $dSpendUsd);
+            $dRoasTotal = $this->ratio($dayBeforeRow, 'total_sales', $dSpendUsd);
 
             // Compute net = gross − refunds explicitly at read time. The
             // `revenue_net` column is also maintained at write time, but
@@ -136,14 +145,16 @@ final class DashboardQuery
                 ->selectRaw("
                     COALESCE(SUM({$grossExpr}), 0)   AS gross,
                     COALESCE(SUM({$refundsExpr}), 0) AS refunds,
-                    COALESCE(SUM({$netExpr}), 0)     AS net
+                    COALESCE(SUM({$netExpr}), 0)     AS net,
+                    COALESCE(SUM({$totalExpr}), 0)   AS total_sales
                 ")
                 ->first();
 
-            $last7dGross    = (float) ($last7dTotals->gross ?? 0);
-            $last7dRefunds  = (float) ($last7dTotals->refunds ?? 0);
-            $last7dNet      = $last7dGross - $last7dRefunds;
-            $last7dNetSales = (float) ($last7dTotals->net ?? 0);
+            $last7dGross      = (float) ($last7dTotals->gross ?? 0);
+            $last7dRefunds    = (float) ($last7dTotals->refunds ?? 0);
+            $last7dNet        = $last7dGross - $last7dRefunds;
+            $last7dNetSales   = (float) ($last7dTotals->net ?? 0);
+            $last7dTotalSales = (float) ($last7dTotals->total_sales ?? 0);
 
             $last7dCount = DailyMetric::query()
                 ->where('brand_id', $b->id)
@@ -164,14 +175,16 @@ final class DashboardQuery
                 ->selectRaw("
                     COALESCE(SUM({$grossExpr}), 0)   AS gross,
                     COALESCE(SUM({$refundsExpr}), 0) AS refunds,
-                    COALESCE(SUM({$netExpr}), 0)     AS net
+                    COALESCE(SUM({$netExpr}), 0)     AS net,
+                    COALESCE(SUM({$totalExpr}), 0)   AS total_sales
                 ")
                 ->first();
 
-            $prior7dGross    = (float) ($prior7dTotals->gross ?? 0);
-            $prior7dRefunds  = (float) ($prior7dTotals->refunds ?? 0);
-            $prior7dNet      = $prior7dGross - $prior7dRefunds;
-            $prior7dNetSales = (float) ($prior7dTotals->net ?? 0);
+            $prior7dGross      = (float) ($prior7dTotals->gross ?? 0);
+            $prior7dRefunds    = (float) ($prior7dTotals->refunds ?? 0);
+            $prior7dNet        = $prior7dGross - $prior7dRefunds;
+            $prior7dNetSales   = (float) ($prior7dTotals->net ?? 0);
+            $prior7dTotalSales = (float) ($prior7dTotals->total_sales ?? 0);
 
             $prior7dCount = DailyMetric::query()
                 ->where('brand_id', $b->id)
@@ -212,6 +225,9 @@ final class DashboardQuery
                     'netSales'    => ($yesterdayRow && $yesterdayRow->net_sales !== null)
                         ? round((float) $yesterdayRow->net_sales * $yMult, 2)
                         : null,
+                    'totalSales'  => ($yesterdayRow && $yesterdayRow->total_sales !== null)
+                        ? round((float) $yesterdayRow->total_sales * $yMult, 2)
+                        : null,
                     'refundsAmount' => $yesterdayRow
                         ? round((float) $yesterdayRow->refunds_amount * $yMult, 2)
                         : null,
@@ -219,7 +235,8 @@ final class DashboardQuery
                     'googleSpend' => $yGoogleSpend,
                     'tiktokSpend' => $yTikTokSpend,
                     'totalSpend'  => $yTotalSpend,
-                    'roas'        => $yRoas,
+                    'roas'        => $yRoasNet,
+                    'roasTotal'   => $yRoasTotal,
                     'isComplete'  => (bool) ($yesterdayRow?->is_complete ?? false),
                 ],
                 'dayBefore' => [
@@ -232,6 +249,9 @@ final class DashboardQuery
                     'netSales'    => ($dayBeforeRow && $dayBeforeRow->net_sales !== null)
                         ? round((float) $dayBeforeRow->net_sales * $dMult, 2)
                         : null,
+                    'totalSales'  => ($dayBeforeRow && $dayBeforeRow->total_sales !== null)
+                        ? round((float) $dayBeforeRow->total_sales * $dMult, 2)
+                        : null,
                     'refundsAmount' => $dayBeforeRow
                         ? round((float) $dayBeforeRow->refunds_amount * $dMult, 2)
                         : null,
@@ -239,15 +259,18 @@ final class DashboardQuery
                     'googleSpend' => $dGoogleSpend,
                     'tiktokSpend' => $dTikTokSpend,
                     'totalSpend'  => $dTotalSpend,
-                    'roas'        => $dRoas,
+                    'roas'        => $dRoasNet,
+                    'roasTotal'   => $dRoasTotal,
                 ],
                 'last7d' => [
-                    'revenue'             => $last7dCount > 0 ? round($last7dNet, 2)        : null,
-                    'revenueGross'        => $last7dCount > 0 ? round($last7dGross, 2)      : null,
-                    'netSales'            => $last7dCount > 0 ? round($last7dNetSales, 2)   : null,
-                    'revenuePrior7d'      => $prior7dCount > 0 ? round($prior7dNet, 2)      : null,
-                    'revenueGrossPrior7d' => $prior7dCount > 0 ? round($prior7dGross, 2)    : null,
-                    'netSalesPrior7d'     => $prior7dCount > 0 ? round($prior7dNetSales, 2) : null,
+                    'revenue'             => $last7dCount > 0 ? round($last7dNet, 2)          : null,
+                    'revenueGross'        => $last7dCount > 0 ? round($last7dGross, 2)        : null,
+                    'netSales'            => $last7dCount > 0 ? round($last7dNetSales, 2)     : null,
+                    'totalSales'          => $last7dCount > 0 ? round($last7dTotalSales, 2)   : null,
+                    'revenuePrior7d'      => $prior7dCount > 0 ? round($prior7dNet, 2)        : null,
+                    'revenueGrossPrior7d' => $prior7dCount > 0 ? round($prior7dGross, 2)      : null,
+                    'netSalesPrior7d'     => $prior7dCount > 0 ? round($prior7dNetSales, 2)   : null,
+                    'totalSalesPrior7d'   => $prior7dCount > 0 ? round($prior7dTotalSales, 2) : null,
                     'isComplete'          => $last7dCount >= 7,
                 ],
             ];
@@ -307,32 +330,38 @@ final class DashboardQuery
     }
 
     /**
-     * Blended ROAS = net sales / TOTAL ad spend across every platform, all
-     * normalized to USD via each row's stored fx_rate so the ratio holds in
-     * Native or USD mode. Null when net_sales is missing or total spend is zero.
-     *
-     * Numerator is net_sales (the ShopifyQL figure, channel = Online Store), NOT
-     * the gross `revenue` field — gross is order-based with a source_name='web'
-     * filter that's empty for headless storefronts (it made ROAS 0.00× for
-     * Meller / Nude). Denominator sums Meta + Google (+ TikTok once built).
+     * Blended ad spend across every platform, normalized to USD via each row's
+     * stored fx_rate so summing mixed-currency accounts is correct even in
+     * Native mode. This is the denominator for both ROAS variants.
      *
      * @param array<int, ?DailyMetric> $adRows one per ad platform
      */
-    private function roas(?DailyMetric $revRow, array $adRows): ?float
+    private function spendUsd(array $adRows): float
     {
-        if ($revRow === null || $revRow->net_sales === null) {
-            return null;
-        }
         $spendUsd = 0.0;
         foreach ($adRows as $adRow) {
             if ($adRow !== null) {
                 $spendUsd += (float) $adRow->spend * (float) ($adRow->fx_rate_to_usd ?? 1.0);
             }
         }
-        if ($spendUsd <= 0.0) {
+
+        return $spendUsd;
+    }
+
+    /**
+     * Blended ROAS = (revenue × fx) ÷ total ad spend (USD). `$field` picks the
+     * revenue base — 'net_sales' or 'total_sales' — so the dashboard renders ROAS
+     * against whichever metric the toggle has selected (Bosco-approved). Both are
+     * Shopify's own ShopifyQL figures (channel = Online Store), never the
+     * order-based gross `revenue`. Null when that revenue figure is missing or
+     * total spend is zero (a brand with no ad platforms renders N/A, not 0×).
+     */
+    private function ratio(?DailyMetric $revRow, string $field, float $spendUsd): ?float
+    {
+        if ($revRow === null || $revRow->{$field} === null || $spendUsd <= 0.0) {
             return null;
         }
-        $revUsd = (float) $revRow->net_sales * (float) ($revRow->fx_rate_to_usd ?? 1.0);
+        $revUsd = (float) $revRow->{$field} * (float) ($revRow->fx_rate_to_usd ?? 1.0);
 
         return round($revUsd / $spendUsd, 2);
     }

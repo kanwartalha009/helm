@@ -235,7 +235,15 @@ class BrandController extends Controller
         }
 
         // Shape rows for the SPA — same shape the dashboard table expects.
-        $daily = $rows->map(fn (DailyMetric $r) => [
+        // daily_metrics is polymorphic: one row per platform per date (the
+        // unique key brand_id+platform+date guarantees there are NO duplicate
+        // syncs). Only the Shopify row carries sales (net sales / orders /
+        // refunds); the Meta / Google / TikTok rows hold spend only and would
+        // show here as empty —/€0/0 rows that look like repeated syncs. Emit
+        // one row per date — the Shopify row — exactly as the tiles above filter.
+        $daily = $rows
+            ->where('platform', 'shopify')
+            ->map(fn (DailyMetric $r) => [
             'date'        => $r->date->toDateString(),
             'platform'    => $r->platform,
             'revenue'     => $r->revenue !== null ? (float) $r->revenue : null,

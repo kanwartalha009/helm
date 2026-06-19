@@ -207,8 +207,10 @@ GQL;
 
         // net_sales: Shopify's own figure via ShopifyQL (one-day window). Null
         // if ShopifyQL is unavailable — missing, not zero.
-        $netByDay = $this->netSalesByDay($client, $dateStr, $dateStr);
-        $netSales = $netByDay[$dateStr] ?? null;
+        $netByDay   = $this->netSalesByDay($client, $dateStr, $dateStr);
+        $dayFigures = $netByDay[$dateStr] ?? null;
+        $netSales   = $dayFigures['net'] ?? null;
+        $totalSales = $dayFigures['total'] ?? null;
 
         $todayLocal = CarbonImmutable::now($tz)->startOfDay();
         $isComplete = $date->setTimezone($tz)->startOfDay()->lessThan($todayLocal);
@@ -221,6 +223,7 @@ GQL;
             revenue:        round($revenue, 2),
             revenueNet:     $revenueNet,
             netSales:       $netSales,
+            totalSales:     $totalSales,
             orders:         $orders,
             refundsAmount:  round($refundsAmount, 2),
             refundedOrders: $refundedOrders,
@@ -346,7 +349,7 @@ GQL;
         // net for (e.g. a day of pure returns → negative net sales).
         $dates = array_keys($byDay);
         foreach (array_keys($netByDay) as $d) {
-            if (! isset($byDay[$d]) && ($netByDay[$d] ?? 0.0) != 0.0) {
+            if (! isset($byDay[$d]) && (($netByDay[$d]['net'] ?? 0.0) != 0.0)) {
                 $dates[] = $d;
             }
         }
@@ -367,7 +370,8 @@ GQL;
                 currency:       $currency,
                 revenue:        $revenue,
                 revenueNet:     $revenueNet,
-                netSales:       $netByDay[$date] ?? null,
+                netSales:       $netByDay[$date]['net'] ?? null,
+                totalSales:     $netByDay[$date]['total'] ?? null,
                 orders:         $totals['orders'],
                 refundsAmount:  $refunds,
                 refundedOrders: $totals['refunded'],
@@ -390,13 +394,13 @@ GQL;
      * Returns an empty map (so callers store net_sales = null, NOT zero) if
      * ShopifyQL errors, rather than failing the whole sync.
      *
-     * @return array<string, float>  [Y-m-d => net_sales]
+     * @return array<string, array{net: float, total: ?float}>  [Y-m-d => figures]
      */
     private function netSalesByDay(ShopifyClient $client, string $sinceStr, string $untilStr): array
     {
         // Strip quotes so the channel value can't break out of the WHERE literal.
         $channel = str_replace("'", '', $this->shopifyqlChannel());
-        $ql = "FROM sales SHOW net_sales GROUP BY day "
+        $ql = "FROM sales SHOW net_sales, total_sales GROUP BY day "
             . "SINCE {$sinceStr} UNTIL {$untilStr} "
             . "WHERE sales_channel = '{$channel}' ORDER BY day";
 
@@ -436,10 +440,11 @@ GQL;
         }
 
         // The grouping (day) column is the only non-metric column.
+        $metricCols = ['net_sales', 'total_sales'];
         $dayCol = null;
         foreach ($columns as $c) {
             $name = (string) ($c['name'] ?? '');
-            if ($name !== '' && $name !== 'net_sales') {
+            if ($name !== '' && ! in_array($name, $metricCols, true)) {
                 $dayCol = $name;
                 break;
             }
@@ -456,8 +461,12 @@ GQL;
                 continue;
             }
             // Normalise "2026-06-05T00:00:00" / "2026-06-05" → "2026-06-05".
-            $day       = substr((string) $rawDay, 0, 10);
-            $out[$day] = round((float) $ns, 2);
+            $day = substr((string) $rawDay, 0, 10);
+            $ts  = $row['total_sales'] ?? null;
+            $out[$day] = [
+                'net'   => round((float) $ns, 2),
+                'total' => $ts !== null ? round((float) $ts, 2) : null,
+            ];
         }
 
         return $out;

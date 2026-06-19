@@ -111,38 +111,47 @@ export interface DashboardRow {
   brand: DashboardRowBrand;
   yesterday: {
     // `revenue` = gross (before refunds). `revenueNet` = gross − refunds.
-    // The Gross/Net toggle on the dashboard swaps between them.
+    // `netSales` / `totalSales` are Shopify's own ShopifyQL figures (Online
+    // Store): net sales, and Total sales (net + shipping + tax + duties).
     revenue: number | null;
     revenueNet: number | null;
     netSales: number | null;
+    totalSales: number | null;
     refundsAmount: number | null;
     metaSpend: number | null;
     googleSpend: number | null;
     tiktokSpend: number | null;
     totalSpend: number | null;
+    // `roas` = net-sales ROAS, `roasTotal` = total-sales ROAS. The metric
+    // toggle selects which one is rendered (blended across all ad platforms).
     roas: number | null;
+    roasTotal: number | null;
     isComplete: boolean;
   };
   dayBefore: {
     revenue: number | null;
     revenueNet: number | null;
     netSales: number | null;
+    totalSales: number | null;
     refundsAmount: number | null;
     metaSpend: number | null;
     googleSpend: number | null;
     tiktokSpend: number | null;
     totalSpend: number | null;
     roas: number | null;
+    roasTotal: number | null;
   };
   last7d: {
     // `revenue` and `revenuePrior7d` are NET sums (gross − refunds).
-    // `revenueGross*` are the gross variants the toggle reaches for.
+    // `revenueGross*` are the gross variants; `totalSales*` are Shopify Total sales.
     revenue: number | null;
     revenueGross: number | null;
     netSales: number | null;
+    totalSales: number | null;
     revenuePrior7d: number | null;
     revenueGrossPrior7d: number | null;
     netSalesPrior7d: number | null;
+    totalSalesPrior7d: number | null;
     isComplete: boolean;
   };
 }

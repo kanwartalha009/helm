@@ -21,8 +21,8 @@ export function DashboardPage() {
   const { data: rows = [], isLoading } = useDashboardData();
   const { data: user } = useCurrentUser();
   const masterSync = useMasterSync();
-  // Revenue metric: Net sales (default) or Total revenue (before returns).
-  const [metric, setMetric] = useState<'net' | 'total'>('net');
+  // Revenue metric: Total revenue (default — Shopify "Total sales") or Net sales.
+  const [metric, setMetric] = useState<'net' | 'total'>('total');
   // Sort control: best/worst performing (by the chosen metric, last 7 days) or A–Z.
   const [sortBy, setSortBy] = useState<'best' | 'worst' | 'name'>('best');
   const brandGroup = useFiltersStore((s) => s.brandGroup);
@@ -73,10 +73,10 @@ export function DashboardPage() {
   // (including "worst performing", where we want the worst *active* brands, not
   // empty ones). Ties fall back to name.
   const sortedRows: DashboardRow[] = useMemo(() => {
-    // Both toggle options surface net sales (see BrandsTableWide), so rank by it
-    // regardless of the metric — keeps the sort consistent with what's shown.
-    const yVal = (r: DashboardRow) => r.yesterday.netSales;
-    const wVal = (r: DashboardRow) => r.last7d.netSales;
+    const yVal = (r: DashboardRow) =>
+      metric === 'net' ? r.yesterday.netSales : r.yesterday.totalSales;
+    const wVal = (r: DashboardRow) =>
+      metric === 'net' ? r.last7d.netSales : r.last7d.totalSales;
     const isDead = (v: number | null) => v == null || v === 0;
     const isInactive = (r: DashboardRow) => isDead(yVal(r)) || isDead(wVal(r));
 
@@ -244,7 +244,7 @@ export function DashboardPage() {
           </svg>
         }
       >
-        Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Default is <strong>net sales</strong> (after discounts and returns, excl. shipping, tax, and duties); switch to <strong>total revenue</strong> with the toggle. Online Store channel only.
+        Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Default is <strong>total revenue</strong> (Shopify’s Total sales — net sales plus shipping, tax, and duties); switch to <strong>net sales</strong> with the toggle. Blended ROAS uses whichever metric is selected. Online Store channel only.
       </Banner>
 
       <div style={{ marginTop: 16 }}>

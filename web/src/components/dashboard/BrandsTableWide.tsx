@@ -60,11 +60,11 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
               Brand
             </th>
             <th className="group-head group-start" colSpan={3}>{revenueLabel}</th>
+            {showAdRollup && <th className="group-head group-start" colSpan={3}>Blended ROAS</th>}
             {showMeta   && <th className="group-head group-start" colSpan={3}>Meta inv.</th>}
             {showGoogle && <th className="group-head group-start" colSpan={3}>Google inv.</th>}
             {showTikTok && <th className="group-head group-start" colSpan={3}>TikTok inv.</th>}
             {showTotalSpend && <th className="group-head group-start" colSpan={3}>Total inv.</th>}
-            {showAdRollup && <th className="group-head group-start" colSpan={3}>ROAS</th>}
             <th className="group-head group-start" colSpan={3}>{revenueLabel} 7d</th>
           </tr>
           {/* Sub-header — Y / Y-1 / Δ for each group */}
@@ -131,27 +131,28 @@ function Row({
   // brand renders in its own native currency.
   const currency = displayCurrency || brand.baseCurrency || 'USD';
 
-  // Both toggle options surface net sales — Shopify's exact ShopifyQL figure.
-  // The old gross "Total revenue" was order-based and unreliable (0 for
-  // high-volume brands like Meller), so per the client it shows net sales too.
-  // `metric` still drives the column header label in the parent component.
-  void metric;
-  const yRev   = yesterday.netSales;
-  const dbRev  = dayBefore.netSales;
-  const l7Rev  = last7d.netSales;
-  const l7Prev = last7d.netSalesPrior7d;
+  // Net sales or Total revenue (Shopify "Total sales", Online Store) per the
+  // toggle — both Shopify's own ShopifyQL figures.
+  const yRev   = metric === 'net' ? yesterday.netSales : yesterday.totalSales;
+  const dbRev  = metric === 'net' ? dayBefore.netSales : dayBefore.totalSales;
+  const l7Rev  = metric === 'net' ? last7d.netSales : last7d.totalSales;
+  const l7Prev = metric === 'net' ? last7d.netSalesPrior7d : last7d.totalSalesPrior7d;
+  // Blended ROAS follows the same toggle: net-sales ROAS or total-sales ROAS.
+  const yRoas  = metric === 'net' ? yesterday.roas : yesterday.roasTotal;
+  const dbRoas = metric === 'net' ? dayBefore.roas : dayBefore.roasTotal;
 
   const groups: MetricGroup[] = [
     { label: 'Revenue', yesterday: yRev, dayBefore: dbRev, kind: 'money', platform: 'shopify' },
   ];
+  // Blended ROAS sits right next to the revenue it's measured against.
+  if (showAdRollup) {
+    groups.push({ label: 'Blended ROAS', yesterday: yRoas, dayBefore: dbRoas, kind: 'roas' });
+  }
   if (showMeta)   groups.push({ label: 'Meta',   yesterday: yesterday.metaSpend,   dayBefore: dayBefore.metaSpend,   kind: 'money', platform: 'meta'   });
   if (showGoogle) groups.push({ label: 'Google', yesterday: yesterday.googleSpend, dayBefore: dayBefore.googleSpend, kind: 'money', platform: 'google' });
   if (showTikTok) groups.push({ label: 'TikTok', yesterday: yesterday.tiktokSpend, dayBefore: dayBefore.tiktokSpend, kind: 'money', platform: 'tiktok' });
   if (showTotalSpend) {
     groups.push({ label: 'Total', yesterday: yesterday.totalSpend, dayBefore: dayBefore.totalSpend, kind: 'money' });
-  }
-  if (showAdRollup) {
-    groups.push({ label: 'ROAS',  yesterday: yesterday.roas, dayBefore: dayBefore.roas, kind: 'roas' });
   }
   groups.push({ label: 'L7d', yesterday: l7Rev, dayBefore: l7Prev, kind: 'money', platform: 'shopify' });
 
