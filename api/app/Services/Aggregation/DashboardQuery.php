@@ -7,7 +7,10 @@ namespace App\Services\Aggregation;
 use App\Models\Brand;
 use App\Models\DailyMetric;
 use App\Models\PlatformConnection;
+use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Assembles the data the dashboard table reads. Phase 1: Shopify revenue only
@@ -27,10 +30,9 @@ final class DashboardQuery
         // Pull alphabetically for deterministic tie-breaks. The final order
         // the dashboard renders is set by the revenue sort at the bottom of
         // this method — best-performing brands first, zero/missing last.
-        $brands = Brand::query()
-            ->where('status', 'active')
-            ->orderBy('name')
-            ->get();
+        $brandQuery = Brand::query()->where('status', 'active');
+        $this->applyManagerScope($brandQuery, $params);
+        $brands = $brandQuery->orderBy('name')->get();
 
         if ($brands->isEmpty()) {
             return [];
@@ -309,6 +311,50 @@ final class DashboardQuery
         });
 
         return $rows;
+    }
+
+    /**
+     * Scope the dashboard's brand set by the "Brand manager" filter. Spec §08
+     * keeps limited roles hard-scoped via the Brand global access scope; this
+     * adds the admin/manager soft default + filter on top:
+     *
+     *   manager = 'me' (default) → the signed-in user's assigned brands
+     *   manager = 'all'          → every brand (privileged only; limited roles
+     *                              stay confined by the global access scope)
+     *   manager = <user id>      → that user's assigned brands
+     *
+     * Soft default: a privileged user defaulting to "my brands" who has no
+     * assignments yet sees everything rather than an empty board.
+     */
+    private function applyManagerScope(Builder $query, array $params): void
+    {
+        $me           = Auth::user();
+        $isPrivileged = $me !== null && in_array($me->role, ['master_admin', 'manager'], true);
+
+        $manager = (string) ($params['manager'] ?? 'me');
+        if ($manager === '') {
+            $manager = 'me';
+        }
+        if ($manager === 'all') {
+            return;
+        }
+
+        $scopeUserId = $manager === 'me'
+            ? $me?->id
+            : (ctype_digit($manager) ? (int) $manager : null);
+        if ($scopeUserId === null) {
+            return; // unknown value → treat as 'all' (limited roles still globally scoped)
+        }
+
+        $scopeUser   = ($me && $scopeUserId === $me->id) ? $me : User::find($scopeUserId);
+        $assignedIds = $scopeUser?->accessibleBrandIds() ?? [];
+
+        if ($assignedIds === [] && $manager === 'me' && $isPrivileged) {
+            return; // soft default, no assignments → show all
+        }
+
+        // Specific manager (or a limited user) with no brands → honest empty board.
+        $query->whereIn('id', $assignedIds !== [] ? $assignedIds : [0]);
     }
 
     private function shopifyRow(int $brandId, string $date): ?DailyMetric

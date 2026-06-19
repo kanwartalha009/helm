@@ -25,6 +25,8 @@ class DashboardController extends Controller
             'currency'        => ['nullable', 'string', 'size:3'],
             'include_returns' => ['nullable', 'boolean'],
             'group_tag'       => ['nullable', 'string', 'max:60'],
+            // Brand-manager filter: 'me' (default) | 'all' | a user id.
+            'manager'         => ['nullable', 'string', 'max:20'],
         ]);
 
         return response()->json([

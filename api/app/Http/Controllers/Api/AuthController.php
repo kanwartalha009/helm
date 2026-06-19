@@ -268,11 +268,15 @@ class AuthController extends Controller
         $user->onboarding_completed_at = now();
         $user->save();
 
-        if (isset($data['workspace_name'])) {
-            WorkspaceSetting::setValue('workspace_name', $data['workspace_name']);
-        }
-        if (isset($data['primary_currency'])) {
-            WorkspaceSetting::setValue('primary_currency', $data['primary_currency']);
+        // Only the founding admin sets workspace-level details during onboarding;
+        // invited users join an existing workspace and must never overwrite it.
+        if ($user->role === 'master_admin') {
+            if (isset($data['workspace_name'])) {
+                WorkspaceSetting::setValue('workspace_name', $data['workspace_name']);
+            }
+            if (isset($data['primary_currency'])) {
+                WorkspaceSetting::setValue('primary_currency', $data['primary_currency']);
+            }
         }
 
         AuditLog::create([

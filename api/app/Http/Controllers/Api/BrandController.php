@@ -9,8 +9,10 @@ use App\Http\Requests\StoreBrandRequest;
 use App\Http\Requests\UpdateBrandRequest;
 use App\Http\Resources\BrandResource;
 use App\Http\Resources\PlatformConnectionResource;
+use App\Models\AuditLog;
 use App\Models\Brand;
 use App\Models\DailyMetric;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -134,6 +136,79 @@ class BrandController extends Controller
      * tab on the brand detail page so a freshly synced store shows real
      * numbers without an additional client-side reduction.
      */
+    /**
+     * GET /api/brands/{brand}/users — users assigned to this brand via
+     * brand_user_access. Admin/manager only (BrandPolicy::update).
+     */
+    public function users(Brand $brand): JsonResponse
+    {
+        $this->authorize('update', $brand);
+
+        $users = $brand->users()->orderBy('name')->get();
+
+        return response()->json([
+            'userIds' => $users->pluck('id')->all(),
+            'users'   => $users->map(fn (User $u) => [
+                'id'     => $u->id,
+                'name'   => $u->name,
+                'email'  => $u->email,
+                'role'   => $u->role,
+                'status' => $u->status,
+            ])->values()->all(),
+        ]);
+    }
+
+    /**
+     * PUT /api/brands/{brand}/users — replace the brand's assigned users with the
+     * given set. Writes brand_access.granted / brand_access.revoked audit rows for
+     * the diff (spec §08). Admin/manager only.
+     */
+    public function syncUsers(Request $request, Brand $brand): JsonResponse
+    {
+        $this->authorize('update', $brand);
+
+        $data = $request->validate([
+            'user_ids'   => ['present', 'array'],
+            'user_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        $newIds     = array_values(array_unique(array_map('intval', $data['user_ids'])));
+        $currentIds = $brand->users()->pluck('users.id')->all();
+        $added      = array_values(array_diff($newIds, $currentIds));
+        $removed    = array_values(array_diff($currentIds, $newIds));
+
+        $payload = [];
+        foreach ($newIds as $uid) {
+            $payload[$uid] = ['granted_by_user_id' => $request->user()?->id];
+        }
+        $brand->users()->sync($payload);
+
+        foreach ($added as $uid) {
+            AuditLog::create([
+                'actor_user_id' => $request->user()?->id,
+                'action'        => 'brand_access.granted',
+                'target_type'   => 'brand',
+                'target_id'     => $brand->id,
+                'metadata'      => ['user_id' => $uid],
+                'ip'            => $request->ip(),
+                'user_agent'    => $request->userAgent(),
+            ]);
+        }
+        foreach ($removed as $uid) {
+            AuditLog::create([
+                'actor_user_id' => $request->user()?->id,
+                'action'        => 'brand_access.revoked',
+                'target_type'   => 'brand',
+                'target_id'     => $brand->id,
+                'metadata'      => ['user_id' => $uid],
+                'ip'            => $request->ip(),
+                'user_agent'    => $request->userAgent(),
+            ]);
+        }
+
+        return response()->json(['userIds' => $newIds]);
+    }
+
     public function metrics(Brand $brand): JsonResponse
     {
         $this->authorize('view', $brand);
@@ -234,28 +309,52 @@ class BrandController extends Controller
             }
         }
 
-        // Shape rows for the SPA — same shape the dashboard table expects.
-        // daily_metrics is polymorphic: one row per platform per date (the
-        // unique key brand_id+platform+date guarantees there are NO duplicate
-        // syncs). Only the Shopify row carries sales (net sales / orders /
-        // refunds); the Meta / Google / TikTok rows hold spend only and would
-        // show here as empty —/€0/0 rows that look like repeated syncs. Emit
-        // one row per date — the Shopify row — exactly as the tiles above filter.
-        $daily = $rows
-            ->where('platform', 'shopify')
-            ->map(fn (DailyMetric $r) => [
-            'date'        => $r->date->toDateString(),
-            'platform'    => $r->platform,
-            'revenue'     => $r->revenue !== null ? (float) $r->revenue : null,
-            'revenueNet'  => $r->revenue_net !== null ? (float) $r->revenue_net : null,
-            'netSales'    => $r->net_sales !== null ? (float) $r->net_sales : null,
-            'orders'      => $r->orders,
-            'refunds'     => $r->refunds_amount !== null ? (float) $r->refunds_amount : null,
-            'currency'    => $r->currency,
-            'fxRateToUsd' => (float) $r->fx_rate_to_usd,
-            'isComplete'  => (bool) $r->is_complete,
-            'pulledAt'    => $r->pulled_at?->toIso8601String(),
-        ])->values()->all();
+        // One row per date. Shopify carries sales (net sales, Total revenue =
+        // Shopify total_sales, orders, refunds); the polymorphic Meta/Google/
+        // TikTok rows carry spend, which we blend into one figure plus a Blended
+        // ROAS (Total revenue ÷ spend) in the brand's native currency. $rows is
+        // date-desc, so first-seen order keeps the table newest-first.
+        $daily     = [];
+        $idxByDate = [];
+        foreach ($rows as $r) {
+            $d = $r->date->toDateString();
+            if (! isset($idxByDate[$d])) {
+                $idxByDate[$d] = count($daily);
+                $daily[] = [
+                    'date'       => $d,
+                    'netSales'   => null,
+                    'totalSales' => null,
+                    'orders'     => null,
+                    'refunds'    => null,
+                    'spend'      => null,
+                    'roas'       => null,
+                    'currency'   => $brand->base_currency,
+                    'isComplete' => false,
+                    'pulledAt'   => null,
+                ];
+            }
+            $i = $idxByDate[$d];
+
+            if ($r->platform === 'shopify') {
+                $daily[$i]['netSales']   = $r->net_sales !== null ? (float) $r->net_sales : null;
+                $daily[$i]['totalSales'] = $r->total_sales !== null ? (float) $r->total_sales : null;
+                $daily[$i]['orders']     = $r->orders;
+                $daily[$i]['refunds']    = $r->refunds_amount !== null ? (float) $r->refunds_amount : null;
+                $daily[$i]['currency']   = $r->currency;
+                $daily[$i]['isComplete'] = (bool) $r->is_complete;
+                $daily[$i]['pulledAt']   = $r->pulled_at?->toIso8601String();
+            } elseif ($r->spend !== null) {
+                $daily[$i]['spend'] = round((float) ($daily[$i]['spend'] ?? 0) + (float) $r->spend, 2);
+            }
+        }
+
+        // Blended ROAS per day = Total revenue ÷ blended spend (native currency).
+        foreach ($daily as &$dayRow) {
+            if ($dayRow['spend'] !== null && $dayRow['spend'] > 0 && $dayRow['totalSales'] !== null) {
+                $dayRow['roas'] = round($dayRow['totalSales'] / $dayRow['spend'], 2);
+            }
+        }
+        unset($dayRow);
 
         return response()->json([
             'currency' => $brand->base_currency,

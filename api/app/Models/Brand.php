@@ -7,6 +7,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Auth;
 
@@ -98,6 +99,17 @@ class Brand extends Model
     public function syncLogs(): HasMany
     {
         return $this->hasMany(SyncLog::class);
+    }
+
+    /**
+     * Users granted access to this brand via brand_user_access — the inverse of
+     * User::accessibleBrands. For team_member / brand_user this gates visibility;
+     * for master_admin / manager it sets their default dashboard view. Same pivot
+     * config as the User side.
+     */
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'brand_user_access')->withTimestamps();
     }
 
     /**

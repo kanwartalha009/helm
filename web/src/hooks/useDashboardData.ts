@@ -9,13 +9,18 @@ import type { DashboardRow } from '@/types/domain';
 // the DashboardPage renders an empty-state CTA in that case. The currency
 // mode is part of the query key so flipping the Native/USD toggle refetches;
 // the backend converts server-side when it receives ?currency=USD.
-export function useDashboardData() {
+export function useDashboardData(manager: string = 'me') {
   const currency = useFiltersStore((s) => s.currency);
   return useQuery({
-    queryKey: ['dashboard', currency],
+    queryKey: ['dashboard', currency, manager],
     queryFn: async (): Promise<DashboardRow[]> => {
-      const params = currency === 'usd' ? { currency: 'USD' } : undefined;
-      const { data } = await api.get<{ rows: DashboardRow[] }>('/dashboard', { params });
+      const params: Record<string, string> = {};
+      if (currency === 'usd') params.currency = 'USD';
+      // 'me' is the backend default, so only send the param when it differs.
+      if (manager && manager !== 'me') params.manager = manager;
+      const { data } = await api.get<{ rows: DashboardRow[] }>('/dashboard', {
+        params: Object.keys(params).length ? params : undefined,
+      });
       return Array.isArray(data) ? data : data.rows ?? [];
     },
   });

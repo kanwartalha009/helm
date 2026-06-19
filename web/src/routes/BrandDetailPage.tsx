@@ -19,8 +19,16 @@ import {
   Tabs,
   Tag,
 } from '@/components/ui';
-import { useBrandDetail, useBrandMetrics, type BrandMetricTile } from '@/hooks/useApiData';
-import { formatMoney } from '@/lib/formatters';
+import {
+  useAssignBrandUsers,
+  useBrandAccessUsers,
+  useBrandDetail,
+  useBrandMetrics,
+  useUsers,
+  type BrandMetricTile,
+} from '@/hooks/useApiData';
+import { useCurrentUser } from '@/hooks/useSettings';
+import { formatMoney, formatRoas } from '@/lib/formatters';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   getShopifyInstallStatus,
@@ -49,6 +57,7 @@ export function BrandDetailPage() {
   const triggerSync = useTriggerSync();
   const deleteBrand = useDeleteBrand();
   const previewShopify = useShopifyPreview();
+  const { data: currentUser } = useCurrentUser();
   const [searchParams, setSearchParams] = useSearchParams();
   const [installOpen, setInstallOpen] = useState(false);
   const [previewResult, setPreviewResult] = useState<ShopifyPreviewResponse | null>(null);
@@ -99,6 +108,7 @@ export function BrandDetailPage() {
   const { brand, connections } = data;
   const shopify = connections.find((c) => c.platform === 'shopify');
   const shopifyConnected = shopify?.status === 'active';
+  const canManageTeam = currentUser?.role === 'master_admin' || currentUser?.role === 'manager';
 
   return (
     <AppLayout title={brand.name}>
@@ -198,6 +208,9 @@ export function BrandDetailPage() {
             ),
           },
           { id: 'syncs', label: 'Sync log', content: <SyncLogTab brand={brand} /> },
+          ...(canManageTeam
+            ? [{ id: 'team', label: 'Team', content: <TeamTab brand={brand} /> }]
+            : []),
           { id: 'settings', label: 'Settings', content: <SettingsTab brand={brand} /> },
         ]}
       />
@@ -381,6 +394,7 @@ function OverviewTab({
   const daily = metrics?.daily ?? [];
   const currency = metrics?.currency ?? brand.baseCurrency;
   const noData = !tiles || tiles.allTime.days === 0;
+  const hasSpend = daily.some((r) => r.spend !== null);
 
   if (noData) {
     return (
@@ -421,6 +435,8 @@ function OverviewTab({
               <th style={{ width: 130 }}>Date</th>
               <th className="num">Net sales</th>
               <th className="num">Total revenue</th>
+              {hasSpend && <th className="num">Spend</th>}
+              {hasSpend && <th className="num">Blended ROAS</th>}
               <th className="num">Orders</th>
               <th className="num">Refunds</th>
               <th>Status</th>
@@ -429,10 +445,16 @@ function OverviewTab({
           </thead>
           <tbody>
             {daily.map((row) => (
-              <tr key={`${row.platform}-${row.date}`}>
+              <tr key={row.date}>
                 <td className="mono">{row.date}</td>
                 <td className="num">{row.netSales !== null ? formatMoney(row.netSales, currency) : '—'}</td>
-                <td className="num muted">{formatMoney(row.revenue ?? 0, currency)}</td>
+                <td className="num">{row.totalSales !== null ? formatMoney(row.totalSales, currency) : '—'}</td>
+                {hasSpend && (
+                  <td className="num muted">{row.spend !== null ? formatMoney(row.spend, currency) : '—'}</td>
+                )}
+                {hasSpend && (
+                  <td className="num">{row.roas !== null ? formatRoas(row.roas) : '—'}</td>
+                )}
                 <td className="num">{row.orders ?? 0}</td>
                 <td className="num muted">{formatMoney(row.refunds ?? 0, currency)}</td>
                 <td>
@@ -1473,6 +1495,83 @@ const CURRENCIES = [
   'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'AED', 'SAR', 'SEK', 'NOK', 'DKK',
   'CHF', 'JPY', 'SGD', 'HKD', 'INR', 'BRL', 'MXN', 'ZAR',
 ];
+
+function TeamTab({ brand }: { brand: Brand }) {
+  const { data: allUsers = [] } = useUsers(true);
+  const { data: access } = useBrandAccessUsers(brand.slug);
+  const assign = useAssignBrandUsers();
+  const [selected, setSelected] = useState<number[]>([]);
+
+  // Reseed when the brand or the server-side assignment set changes.
+  useEffect(() => {
+    setSelected(access?.userIds ?? []);
+  }, [brand.slug, (access?.userIds ?? []).join(',')]);
+
+  const activeUsers = allUsers.filter((u) => u.status === 'active');
+  const seen = [...(access?.userIds ?? [])].sort((a, b) => a - b).join(',');
+  const dirty = [...selected].sort((a, b) => a - b).join(',') !== seen;
+  const toggle = (id: number) =>
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  return (
+    <Card style={{ padding: 24, maxWidth: 640 }}>
+      <p className="muted text-sm" style={{ marginBottom: 16 }}>
+        Users assigned here can access <strong>{brand.name}</strong>. Team members and brand users
+        see only their assigned brands; managers and admins see every brand, but assignments set
+        their default “My brands” dashboard view.
+      </p>
+
+      <div
+        style={{
+          maxHeight: 360,
+          overflowY: 'auto',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)',
+        }}
+      >
+        {activeUsers.length === 0 ? (
+          <div className="muted text-sm" style={{ padding: 16 }}>
+            No active users yet. Invite teammates from the Team page.
+          </div>
+        ) : (
+          activeUsers.map((u) => (
+            <label
+              key={u.id}
+              className="list-row"
+              style={{ cursor: 'pointer', gap: 12, alignItems: 'center' }}
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(u.id)}
+                onChange={() => toggle(u.id)}
+              />
+              <div className="list-row-main">
+                <div className="list-row-title">{u.name}</div>
+                <div className="list-row-sub">
+                  {u.email} · {u.role.replace('_', ' ')}
+                </div>
+              </div>
+            </label>
+          ))
+        )}
+      </div>
+
+      <div className="flex items-center gap-8 mt-16">
+        <Button
+          size="sm"
+          variant="primary"
+          type="button"
+          disabled={!dirty || assign.isPending}
+          onClick={() => assign.mutate({ slug: brand.slug, userIds: selected })}
+        >
+          {assign.isPending ? 'Saving…' : 'Save team'}
+        </Button>
+        <span className="muted text-sm">{selected.length} assigned</span>
+        {dirty && <span className="muted text-sm">· unsaved</span>}
+      </div>
+    </Card>
+  );
+}
 
 function SettingsTab({ brand }: { brand: Brand }) {
   // Controlled form state — diff against `brand` on submit so we only send

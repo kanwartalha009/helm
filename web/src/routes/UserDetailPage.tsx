@@ -11,7 +11,7 @@ import {
   PageHeader,
   Tag,
 } from '@/components/ui';
-import { useUser } from '@/hooks/useApiData';
+import { useBrandsLive, useUser } from '@/hooks/useApiData';
 import { useDisableUser, useUpdateUser } from '@/hooks/useInvitations';
 import { useCurrentUser } from '@/hooks/useSettings';
 import type { User } from '@/types/domain';
@@ -41,6 +41,8 @@ export function UserDetailPage() {
 
   const [name, setName] = useState('');
   const [role, setRole] = useState<User['role']>('manager');
+  const [brandIds, setBrandIds] = useState<number[]>([]);
+  const { data: allBrands = [] } = useBrandsLive();
 
   // Seed local form state from the loaded user; reseed on refetch.
   useEffect(() => {
@@ -48,6 +50,12 @@ export function UserDetailPage() {
     setName(user.name);
     setRole(user.role);
   }, [user?.id, user?.name, user?.role]);
+
+  // Seed brand-access selection separately so it reseeds when the server set
+  // changes (e.g. after a save refetch), not just on id/name/role.
+  useEffect(() => {
+    if (user) setBrandIds(user.accessibleBrandIds ?? []);
+  }, [user?.id, (user?.accessibleBrandIds ?? []).join(',')]);
 
   if (isLoading) {
     return (
@@ -93,6 +101,22 @@ export function UserDetailPage() {
     disableUser.mutate(user.id, {
       onSuccess: () => navigate('/team'),
     });
+  };
+
+  // --- brand access ---------------------------------------------------
+  // Assigning brands to ANY user records the brand_user_access pivot. For
+  // team_member / brand_user it also restricts what they can see (global
+  // scope); for master_admin / manager it doesn't restrict (they see all by
+  // role) but sets their default "My brands" dashboard view + manager filter.
+  const seenBrandIds = [...(user.accessibleBrandIds ?? [])].sort((a, b) => a - b).join(',');
+  const brandsDirty = [...brandIds].sort((a, b) => a - b).join(',') !== seenBrandIds;
+  const allSelected = allBrands.length > 0 && brandIds.length === allBrands.length;
+  const seesAllByRole = user.role === 'master_admin' || user.role === 'manager';
+  const toggleBrand = (id: number) =>
+    setBrandIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const onSaveBrands = () => {
+    if (!brandsDirty) return;
+    updateUser.mutate({ id: user.id, patch: { brand_ids: brandIds } });
   };
 
   return (
@@ -217,6 +241,87 @@ export function UserDetailPage() {
         </form>
       </Card>
 
+      <h3 className="section-title mt-32">Brand access</h3>
+      <Card style={{ padding: 24, maxWidth: 640 }}>
+        <p className="muted text-sm" style={{ marginBottom: 16 }}>
+          {seesAllByRole
+            ? 'This role sees every brand. Assignments here set this user’s default “My brands” dashboard view and power the brand-manager filter.'
+            : 'This user can only see the brands assigned here.'}
+        </p>
+
+        <div className="flex items-center gap-8" style={{ marginBottom: 12 }}>
+          <Button
+            size="sm"
+            variant="secondary"
+            type="button"
+            disabled={allSelected || allBrands.length === 0}
+            onClick={() => setBrandIds(allBrands.map((b) => b.id))}
+          >
+            Assign all brands
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            type="button"
+            disabled={brandIds.length === 0}
+            onClick={() => setBrandIds([])}
+          >
+            Clear
+          </Button>
+          <span className="muted text-sm" style={{ marginLeft: 'auto' }}>
+            {brandIds.length} of {allBrands.length} selected
+          </span>
+        </div>
+
+        <div
+          style={{
+            maxHeight: 320,
+            overflowY: 'auto',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)',
+          }}
+        >
+          {allBrands.length === 0 ? (
+            <div className="muted text-sm" style={{ padding: 16 }}>
+              No brands yet. Add a brand first, then assign it here.
+            </div>
+          ) : (
+            allBrands.map((b) => (
+              <label
+                key={b.id}
+                className="list-row"
+                style={{ cursor: 'pointer', gap: 12, alignItems: 'center' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={brandIds.includes(b.id)}
+                  onChange={() => toggleBrand(b.id)}
+                />
+                <div className="list-row-main">
+                  <div className="list-row-title">{b.name}</div>
+                  <div className="list-row-sub">
+                    {b.region ?? b.groupTag ?? '—'} · {b.baseCurrency}
+                  </div>
+                </div>
+              </label>
+            ))
+          )}
+        </div>
+
+        <div className="flex items-center gap-8 mt-16">
+          <Button
+            size="sm"
+            variant="primary"
+            type="button"
+            disabled={!brandsDirty || updateUser.isPending}
+            onClick={onSaveBrands}
+          >
+            {updateUser.isPending ? 'Saving…' : 'Save brand access'}
+          </Button>
+          {brandsDirty && <span className="muted text-sm">Unsaved changes</span>}
+        </div>
+      </Card>
+
       <h3 className="section-title mt-32">Security</h3>
       <Card style={{ overflow: 'hidden' }}>
         <div className="list-row">
@@ -252,7 +357,7 @@ export function UserDetailPage() {
       </Card>
 
       <Banner variant="info" className="mt-24">
-        Per-user audit trail and impersonation land alongside the rest of Phase 1.5 RBAC. The role + name edits above persist now.
+        Per-user audit trail and impersonation are still on the Phase 1.5 list. Profile, role, and brand access above all persist now.
       </Banner>
     </AppLayout>
   );

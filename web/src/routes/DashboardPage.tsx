@@ -12,14 +12,21 @@ import {
   Segmented,
 } from '@/components/ui';
 import { useDashboardData, useMasterSync } from '@/hooks/useDashboardData';
+import { useUsers } from '@/hooks/useApiData';
 import { useCurrentUser } from '@/hooks/useSettings';
 import { useFiltersStore } from '@/stores/filtersStore';
 import { useUiStore } from '@/stores/uiStore';
 import type { DashboardRow, Platform } from '@/types/domain';
 
 export function DashboardPage() {
-  const { data: rows = [], isLoading } = useDashboardData();
   const { data: user } = useCurrentUser();
+  const canFilterByManager = user?.role === 'master_admin' || user?.role === 'manager';
+  // Brand-manager filter: 'me' (default — the signed-in user's assigned brands)
+  // | 'all' | a user id. Admin/manager only; limited roles are hard-scoped
+  // server-side via the Brand global access scope.
+  const [manager, setManager] = useState<string>('me');
+  const { data: rows = [], isLoading } = useDashboardData(manager);
+  const { data: managerUsers = [] } = useUsers(canFilterByManager);
   const masterSync = useMasterSync();
   // Revenue metric: Total revenue (default — Shopify "Total sales") or Net sales.
   const [metric, setMetric] = useState<'net' | 'total'>('total');
@@ -105,7 +112,17 @@ export function DashboardPage() {
   const sortLabel =
     sortBy === 'best' ? 'Best performing' : sortBy === 'worst' ? 'Worst performing' : 'Name';
 
-  if (!isLoading && rows.length === 0) {
+  const managerLabel =
+    manager === 'me'
+      ? 'My brands'
+      : manager === 'all'
+      ? 'All brands'
+      : managerUsers.find((u) => String(u.id) === manager)?.name ?? 'Manager';
+
+  // Only show the full "add your first brand" CTA for the default view. When a
+  // brand-manager filter is active and returns nothing, keep the page (and its
+  // filter bar) so the user can switch back instead of being trapped.
+  if (!isLoading && rows.length === 0 && manager === 'me') {
     return (
       <AppLayout title="Dashboard">
         <DashboardEmptyState />
@@ -172,6 +189,44 @@ export function DashboardPage() {
           <PopoverLabel>Status</PopoverLabel>
           <PopoverItem active meta={String(rows.length)}>Active only</PopoverItem>
         </Popover>
+
+        {canFilterByManager && (
+          <Popover
+            trigger={
+              <button className="filter-btn">
+                Manager: <strong style={{ fontWeight: 500 }}>{managerLabel}</strong>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+            }
+          >
+            <PopoverLabel>Brand manager</PopoverLabel>
+            <PopoverItem active={manager === 'me'} onClick={() => setManager('me')}>
+              My brands
+            </PopoverItem>
+            <PopoverItem active={manager === 'all'} onClick={() => setManager('all')}>
+              All brands
+            </PopoverItem>
+            {managerUsers.filter((u) => u.status === 'active').length > 0 && (
+              <>
+                <PopoverDivider />
+                <PopoverLabel>By user</PopoverLabel>
+                {managerUsers
+                  .filter((u) => u.status === 'active')
+                  .map((u) => (
+                    <PopoverItem
+                      key={u.id}
+                      active={manager === String(u.id)}
+                      onClick={() => setManager(String(u.id))}
+                    >
+                      {u.name}
+                    </PopoverItem>
+                  ))}
+              </>
+            )}
+          </Popover>
+        )}
 
         <span style={{ flex: 1 }} />
 

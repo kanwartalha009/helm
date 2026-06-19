@@ -75,22 +75,36 @@ export function OnboardingPage() {
     );
   }
 
+  // Invited users join an existing workspace — only the founding admin (the
+  // first user, before any workspace name is set) fills out the workspace step.
+  const showWorkspace = !user?.workspaceConfigured;
+
   const initials = (
     form.display_initials ||
     (form.name || '').slice(0, 1) ||
     '?'
   ).toUpperCase();
 
+  const stepperSteps: Array<{ label: string; state: 'active' | 'pending' | 'done' }> = [
+    { label: 'Your profile', state: step === 1 ? 'active' : 'done' },
+    ...(showWorkspace
+      ? [
+          {
+            label: 'Workspace',
+            state: (step === 1 ? 'pending' : step === 2 ? 'active' : 'done') as
+              | 'active'
+              | 'pending'
+              | 'done',
+          },
+        ]
+      : []),
+    { label: 'You’re in', state: step === 3 ? 'active' : 'pending' },
+  ];
+
   return (
     <Shell>
       <div style={{ marginBottom: 32 }}>
-        <Stepper
-          steps={[
-            { label: 'Your profile',  state: step === 1 ? 'active' : 'done' },
-            { label: 'Workspace',     state: step === 1 ? 'pending' : step === 2 ? 'active' : 'done' },
-            { label: 'You’re in', state: step === 3 ? 'active' : 'pending' },
-          ]}
-        />
+        <Stepper steps={stepperSteps} />
       </div>
 
       {step === 1 && (
@@ -104,7 +118,7 @@ export function OnboardingPage() {
               toast.error('Name is required');
               return;
             }
-            setStep(2);
+            setStep(showWorkspace ? 2 : 3);
           }}
         />
       )}
@@ -128,7 +142,8 @@ export function OnboardingPage() {
         <Step3
           form={form}
           submitting={onboardMutation.isPending}
-          onBack={() => setStep(2)}
+          showWorkspace={showWorkspace}
+          onBack={() => setStep(showWorkspace ? 2 : 1)}
           onFinish={async () => {
             try {
               await onboardMutation.mutateAsync(form);
@@ -306,11 +321,13 @@ function Step2({
 function Step3({
   form,
   submitting,
+  showWorkspace,
   onBack,
   onFinish,
 }: {
   form: any;
   submitting: boolean;
+  showWorkspace: boolean;
   onBack: () => void;
   onFinish: () => void;
 }) {
@@ -327,8 +344,12 @@ function Step3({
         <Row label="Your name"      value={form.name} />
         <Row label="Initials"       value={form.display_initials || form.name.slice(0, 1)} />
         <Row label="Timezone"       value={form.timezone} />
-        <hr className="divider" style={{ margin: '16px 0' }} />
-        <Row label="Workspace"      value={form.workspace_name} />
+        {showWorkspace && (
+          <>
+            <hr className="divider" style={{ margin: '16px 0' }} />
+            <Row label="Workspace"      value={form.workspace_name} />
+          </>
+        )}
 
         <Banner
           variant="info"

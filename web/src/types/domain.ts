@@ -36,6 +36,9 @@ export interface User {
   avatarUrl: string | null;
   onboardingCompletedAt: string | null;
   onboardingComplete: boolean;
+  // True once the founding admin has named the workspace. Drives whether the
+  // onboarding wizard shows the workspace step (invited users skip it).
+  workspaceConfigured?: boolean;
   lastLoginAt: string | null;
 }
 

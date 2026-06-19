@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { toast } from '@/stores/toastStore';
 import type {
   AuditLogEntry,
   Brand,
@@ -57,14 +58,15 @@ export interface BrandMetricTile {
 
 export interface BrandDailyMetricRow {
   date: string;
-  platform: string;
-  revenue: number | null;
-  revenueNet: number | null;
   netSales: number | null;
+  totalSales: number | null;
   orders: number | null;
   refunds: number | null;
+  // Blended ad spend across Meta/Google/TikTok and Blended ROAS (Total revenue
+  // ÷ spend), both in the brand's native currency. Null when no ad data.
+  spend: number | null;
+  roas: number | null;
   currency: string;
-  fxRateToUsd: number;
   isComplete: boolean;
   pulledAt: string | null;
 }
@@ -100,12 +102,51 @@ export function useBrandMetrics(slug: string | undefined) {
 
 /* ---- Users (Team page) ---------------------------------------------- */
 
-export function useUsers() {
+export function useUsers(enabled = true) {
   return useQuery({
     queryKey: ['users'],
+    enabled,
     queryFn: async () => {
       const { data } = await api.get<User[] | { data: User[] }>('/users');
       return Array.isArray(data) ? data : data.data;
+    },
+  });
+}
+
+/* ---- Brand team access (brand_user_access) -------------------------- */
+
+export interface BrandAccessUsersResponse {
+  userIds: number[];
+  users: { id: number; name: string; email: string; role: string; status: string }[];
+}
+
+/** GET /api/brands/{slug}/users — users assigned to a brand. Admin/manager only. */
+export function useBrandAccessUsers(slug: string | undefined) {
+  return useQuery({
+    queryKey: ['brand-users', slug],
+    enabled: !!slug,
+    queryFn: async (): Promise<BrandAccessUsersResponse> => {
+      const { data } = await api.get<BrandAccessUsersResponse>(`/brands/${slug}/users`);
+      return data;
+    },
+  });
+}
+
+/** PUT /api/brands/{slug}/users — replace the brand's assigned users. */
+export function useAssignBrandUsers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { slug: string; userIds: number[] }) => {
+      const { data } = await api.put(`/brands/${input.slug}/users`, { user_ids: input.userIds });
+      return data;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['brand-users', vars.slug] });
+      qc.invalidateQueries({ queryKey: ['users'] });
+      toast.success('Team updated', 'Brand access saved.');
+    },
+    onError: (err: any) => {
+      toast.error("Couldn't update team", err?.response?.data?.message ?? err.message);
     },
   });
 }

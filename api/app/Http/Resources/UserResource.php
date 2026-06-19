@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Models\User;
+use App\Models\WorkspaceSetting;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Storage;
@@ -34,7 +35,20 @@ class UserResource extends JsonResource
             'avatarUrl'              => $this->avatar_path ? Storage::disk('public')->url($this->avatar_path) : null,
             'onboardingCompletedAt'  => $this->onboarding_completed_at?->toIso8601String(),
             'onboardingComplete'     => (bool) $this->onboarding_completed_at,
+            // Has the founding admin already named the workspace? Lets the
+            // onboarding wizard skip the workspace step for invited users.
+            'workspaceConfigured'    => self::workspaceConfigured(),
             'lastLoginAt'            => $this->last_login_at?->toIso8601String(),
         ];
+    }
+
+    /** Memoised per request so the team list doesn't N+1 this tiny lookup. */
+    private static ?bool $workspaceConfigured = null;
+
+    private static function workspaceConfigured(): bool
+    {
+        return self::$workspaceConfigured ??= WorkspaceSetting::query()
+            ->where('key', 'workspace_name')
+            ->exists();
     }
 }

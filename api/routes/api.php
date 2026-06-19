@@ -74,6 +74,11 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         Route::get('brands/{brand}/trend',   [DashboardController::class, 'trend']);
         Route::get('brands/{brand}/metrics', [BrandController::class, 'metrics']);
 
+        // Brand-level team assignment (brand_user_access). Admin/manager only —
+        // gated by BrandPolicy::update inside the controller.
+        Route::get('brands/{brand}/users',  [BrandController::class, 'users']);
+        Route::put('brands/{brand}/users',  [BrandController::class, 'syncUsers']);
+
         // Platform connections (scoped to a brand)
         Route::get('brands/{brand}/connections',                          [ConnectionController::class, 'index']);
         // Lightweight install status — used by the SPA to poll after the OAuth

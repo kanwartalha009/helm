@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import {
@@ -7,6 +8,9 @@ import {
   EmptyState,
   PageEmptyState,
   PageHeader,
+  Popover,
+  PopoverItem,
+  PopoverLabel,
   Tabs,
 } from '@/components/ui';
 import { useRetrySyncLog, useSyncStatus } from '@/hooks/useApiData';
@@ -44,6 +48,7 @@ function whenLabel(iso: string | null): string {
 export function SyncHealthPage() {
   const { data, isLoading, isError, error } = useSyncStatus();
   const openAddBrand = useUiStore((s) => s.setAddBrandDrawerOpen);
+  const [brandFilter, setBrandFilter] = useState<number | 'all'>('all');
   const logs = data?.logs ?? [];
   const counts =
     data?.counts ?? { successful: 0, failed: 0, running: 0, queued: 0 };
@@ -144,8 +149,21 @@ export function SyncHealthPage() {
     );
   }
 
-  const failed = logs.filter((l) => l.status === 'failed');
-  const recent = logs.slice(0, 50);
+  // Per-brand filter for the log tables. Options are the brands present in the
+  // current log window, so the dropdown only lists brands that actually synced.
+  const brandOptions = Array.from(
+    new Map(logs.filter((l) => l.brand).map((l) => [l.brand!.id, l.brand!.name])).entries(),
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+  const filteredLogs =
+    brandFilter === 'all' ? logs : logs.filter((l) => l.brand?.id === brandFilter);
+  const selectedBrandName =
+    brandFilter === 'all'
+      ? 'All brands'
+      : brandOptions.find(([id]) => id === brandFilter)?.[1] ?? 'Brand';
+
+  const failed = filteredLogs.filter((l) => l.status === 'failed');
+  const recent = filteredLogs.slice(0, 50);
+  const allRows = filteredLogs.slice(0, 200);
 
   return (
     <AppLayout title="Sync health">
@@ -153,28 +171,56 @@ export function SyncHealthPage() {
         title="Sync health"
         subtitle="Last 24 hours across all brands and platforms."
         actions={
-          <a
-            href="/api/sync/status/export.csv"
-            onClick={(e) => {
-              e.preventDefault();
-              const token = localStorage.getItem('helm.auth.token');
-              fetch('/api/sync/status/export.csv', {
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-              })
-                .then((r) => r.blob())
-                .then((blob) => {
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `helm-sync-log-${new Date().toISOString().slice(0, 19)}.csv`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                });
-            }}
-            className="btn btn-secondary btn-sm"
-          >
-            Export CSV
-          </a>
+          <div className="flex items-center gap-8">
+            {brandOptions.length > 0 && (
+              <Popover
+                trigger={
+                  <button className="filter-btn">
+                    Brand: <strong style={{ fontWeight: 500 }}>{selectedBrandName}</strong>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+                }
+              >
+                <PopoverLabel>Filter by brand</PopoverLabel>
+                <PopoverItem active={brandFilter === 'all'} onClick={() => setBrandFilter('all')}>
+                  All brands
+                </PopoverItem>
+                {brandOptions.map(([id, name]) => (
+                  <PopoverItem
+                    key={id}
+                    active={brandFilter === id}
+                    onClick={() => setBrandFilter(id)}
+                  >
+                    {name}
+                  </PopoverItem>
+                ))}
+              </Popover>
+            )}
+            <a
+              href="/api/sync/status/export.csv"
+              onClick={(e) => {
+                e.preventDefault();
+                const token = localStorage.getItem('helm.auth.token');
+                fetch('/api/sync/status/export.csv', {
+                  headers: token ? { Authorization: `Bearer ${token}` } : {},
+                })
+                  .then((r) => r.blob())
+                  .then((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `helm-sync-log-${new Date().toISOString().slice(0, 19)}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  });
+              }}
+              className="btn btn-secondary btn-sm"
+            >
+              Export CSV
+            </a>
+          </div>
         }
       />
 
@@ -298,18 +344,47 @@ export function SyncHealthPage() {
           },
           {
             id: 'all',
-            label: 'All',
-            content: (
-              <EmptyState
-                title="Full log"
-                description="The full 90-day sync log lives here. Filterable by brand, platform, status, and date range."
-                action={
-                  <Button size="sm" variant="secondary">
-                    Export CSV
-                  </Button>
-                }
-              />
-            ),
+            label: `All (${allRows.length})`,
+            content:
+              allRows.length === 0 ? (
+                <EmptyState
+                  title="No sync logs"
+                  description="No sync activity for this filter in the current window."
+                />
+              ) : (
+                <Card style={{ overflow: 'hidden' }}>
+                  <table className="log-table">
+                    <thead>
+                      <tr>
+                        <th>Brand</th>
+                        <th>Platform</th>
+                        <th>Date</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Completed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allRows.map((log) => (
+                        <tr key={log.id}>
+                          <td>{log.brand?.name ?? 'unknown brand'}</td>
+                          <td style={{ textTransform: 'capitalize' }}>{log.platform}</td>
+                          <td className="mono">{log.targetDate}</td>
+                          <td>
+                            <span className={`status-pill ${log.status}`}>
+                              {log.status[0].toUpperCase() + log.status.slice(1)}
+                            </span>
+                          </td>
+                          <td className="mono">
+                            {log.durationMs ? `${(log.durationMs / 1000).toFixed(1)}s` : '—'}
+                          </td>
+                          <td className="muted">{whenLabel(log.completedAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Card>
+              ),
           },
         ]}
       />
