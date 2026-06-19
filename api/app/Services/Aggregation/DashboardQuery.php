@@ -107,18 +107,22 @@ final class DashboardQuery
             $dMeta   = $this->adRow($b->id, 'meta', $dayBeforeDate);
             $yGoogle = $this->adRow($b->id, 'google', $yesterdayDate);
             $dGoogle = $this->adRow($b->id, 'google', $dayBeforeDate);
+            $yTikTok = $this->adRow($b->id, 'tiktok', $yesterdayDate);
+            $dTikTok = $this->adRow($b->id, 'tiktok', $dayBeforeDate);
 
             $yMetaSpend   = $this->displaySpend($yMeta, $usd);
             $dMetaSpend   = $this->displaySpend($dMeta, $usd);
             $yGoogleSpend = $this->displaySpend($yGoogle, $usd);
             $dGoogleSpend = $this->displaySpend($dGoogle, $usd);
+            $yTikTokSpend = $this->displaySpend($yTikTok, $usd);
+            $dTikTokSpend = $this->displaySpend($dTikTok, $usd);
 
-            // Blended total ad spend = Meta + Google (TikTok joins when built).
-            $yTotalSpend = $this->sumSpend([$yMetaSpend, $yGoogleSpend]);
-            $dTotalSpend = $this->sumSpend([$dMetaSpend, $dGoogleSpend]);
+            // Blended total ad spend = Meta + Google + TikTok.
+            $yTotalSpend = $this->sumSpend([$yMetaSpend, $yGoogleSpend, $yTikTokSpend]);
+            $dTotalSpend = $this->sumSpend([$dMetaSpend, $dGoogleSpend, $dTikTokSpend]);
 
-            $yRoas = $this->roas($yesterdayRow, [$yMeta, $yGoogle]);
-            $dRoas = $this->roas($dayBeforeRow, [$dMeta, $dGoogle]);
+            $yRoas = $this->roas($yesterdayRow, [$yMeta, $yGoogle, $yTikTok]);
+            $dRoas = $this->roas($dayBeforeRow, [$dMeta, $dGoogle, $dTikTok]);
 
             // Compute net = gross − refunds explicitly at read time. The
             // `revenue_net` column is also maintained at write time, but
@@ -213,7 +217,7 @@ final class DashboardQuery
                         : null,
                     'metaSpend'   => $yMetaSpend,
                     'googleSpend' => $yGoogleSpend,
-                    'tiktokSpend' => null,
+                    'tiktokSpend' => $yTikTokSpend,
                     'totalSpend'  => $yTotalSpend,
                     'roas'        => $yRoas,
                     'isComplete'  => (bool) ($yesterdayRow?->is_complete ?? false),
@@ -233,7 +237,7 @@ final class DashboardQuery
                         : null,
                     'metaSpend'   => $dMetaSpend,
                     'googleSpend' => $dGoogleSpend,
-                    'tiktokSpend' => null,
+                    'tiktokSpend' => $dTikTokSpend,
                     'totalSpend'  => $dTotalSpend,
                     'roas'        => $dRoas,
                 ],

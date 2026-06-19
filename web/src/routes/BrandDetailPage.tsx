@@ -26,11 +26,13 @@ import {
   getShopifyInstallStatus,
   useAttachGoogleAccounts,
   useAttachMetaAccounts,
+  useAttachTikTokAccounts,
   useConnectShopifyToken,
   useDeleteBrand,
   useDisconnectConnection,
   useGoogleAvailableAccounts,
   useMetaAvailableAccounts,
+  useTikTokAvailableAccounts,
   useShopifyInstallUrl,
   useShopifyPreview,
   useTriggerSync,
@@ -513,7 +515,7 @@ function ConnectionsTab({
         <ShopifyCard brand={brand} conn={shopify} onInstall={onInstall} />
         <MetaConnectCard brand={brand} conn={meta} />
         <GoogleConnectCard brand={brand} conn={google} />
-        <AdPlatformCard label="TikTok Ads" logo="T" conn={tiktok} />
+        <TikTokConnectCard brand={brand} conn={tiktok} />
       </div>
     </>
   );
@@ -922,6 +924,154 @@ function GoogleConnectCard({ brand, conn }: { brand: Brand; conn: PlatformConnec
             <div className="text-sm muted">
               {(available.error as any)?.response?.data?.message ??
                 'Could not load accounts. Is the Google MCC token set in Settings → Platform keys?'}
+            </div>
+          )}
+          {!available.isLoading && !available.isError && filtered.length === 0 && (
+            <div className="text-sm muted">No accounts found.</div>
+          )}
+          {filtered.map((a) => (
+            <label
+              key={a.external_id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '8px 4px',
+                borderBottom: '1px solid var(--border)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(a.external_id)}
+                onChange={() => toggle(a.external_id)}
+              />
+              <span style={{ flex: 1 }}>
+                <span style={{ fontWeight: 500 }}>{a.name}</span>
+                <span className="text-xs muted" style={{ marginLeft: 8 }}>
+                  {a.external_id}
+                  {a.currency ? ` · ${a.currency}` : ''}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+/* ----------------------- TikTok account picker ------------------------ */
+
+/**
+ * TikTok connects at the org level (Business Center token in Settings); here the
+ * brand selects which advertiser account(s) under that BC belong to it. Multiple
+ * blend into one brand-level TikTok row at sync time. Mirrors Google/Meta —
+ * attached IDs live in metadata.advertiser_ids.
+ */
+function TikTokConnectCard({ brand, conn }: { brand: Brand; conn: PlatformConnection | undefined }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+
+  const attachedIds = Array.isArray(conn?.metadata?.advertiser_ids)
+    ? (conn!.metadata!.advertiser_ids as string[])
+    : [];
+  const accountNames = (conn?.metadata?.account_names as Record<string, string> | undefined) ?? {};
+  const connected = !!conn && conn.status === 'active' && attachedIds.length > 0;
+
+  const available = useTikTokAvailableAccounts(brand.slug, open);
+  const attach = useAttachTikTokAccounts();
+
+  const openPicker = () => {
+    setSelected(attachedIds);
+    setSearch('');
+    setOpen(true);
+  };
+
+  const toggle = (id: string) =>
+    setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+
+  const save = () =>
+    attach.mutate(
+      { brandSlug: brand.slug, accountIds: selected },
+      { onSuccess: () => setOpen(false) }
+    );
+
+  const accounts = available.data ?? [];
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? accounts.filter(
+        (a) => a.name.toLowerCase().includes(q) || a.external_id.toLowerCase().includes(q)
+      )
+    : accounts;
+
+  return (
+    <div className="platform-card">
+      <div className="platform-card-head">
+        <span className="platform-logo">T</span>
+        <div>
+          <div style={{ fontWeight: 500 }}>TikTok Ads</div>
+          <div className="text-xs muted">
+            {connected
+              ? `${attachedIds.length} advertiser${attachedIds.length === 1 ? '' : 's'}`
+              : 'Not connected'}
+          </div>
+        </div>
+        <Tag variant={connected ? 'success' : 'default'} style={{ marginLeft: 'auto' }}>
+          <Dot variant={connected ? 'success' : 'muted'} />
+          {connected ? 'Connected' : 'Not connected'}
+        </Tag>
+      </div>
+
+      <div className="platform-card-status">
+        {connected
+          ? `Blending spend from ${attachedIds.map((id) => accountNames[id] ?? id).join(', ')}.`
+          : 'Pick the advertiser account(s) under your Business Center that belong to this brand.'}
+      </div>
+
+      <div className="flex items-center gap-8">
+        <Button size="sm" variant={connected ? 'secondary' : 'primary'} onClick={openPicker}>
+          {connected ? 'Manage accounts' : 'Connect'}
+        </Button>
+      </div>
+
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Select TikTok advertisers"
+        size="lg"
+        footer={
+          <div className="flex items-center justify-between" style={{ width: '100%' }}>
+            <span className="text-xs muted">{selected.length} selected</span>
+            <div className="flex items-center gap-8">
+              <Button size="sm" variant="secondary" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button size="sm" variant="primary" onClick={save} disabled={attach.isPending}>
+                {attach.isPending ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <p className="text-sm muted mb-12">
+          Every advertiser under your agency&rsquo;s TikTok Business Center. Tick the ones that
+          belong to {brand.name}; their daily spend is blended into this brand.
+        </p>
+
+        <Input
+          placeholder="Search by name or advertiser ID…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
+        <div style={{ marginTop: 12, maxHeight: 320, overflowY: 'auto' }}>
+          {available.isLoading && <div className="text-sm muted">Loading accounts…</div>}
+          {available.isError && (
+            <div className="text-sm muted">
+              {(available.error as any)?.response?.data?.message ??
+                'Could not load accounts. Is the TikTok BC token set in Settings → Platform keys?'}
             </div>
           )}
           {!available.isLoading && !available.isError && filtered.length === 0 && (

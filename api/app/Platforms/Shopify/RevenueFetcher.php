@@ -150,9 +150,16 @@ GQL;
         $cursor         = null;
         $pages          = 0;
 
+        // status:any counts open + closed + archived + cancelled orders. Without
+        // it Shopify defaults to status:open, so established brands whose orders
+        // archive within a day (e.g. Meller) return ~0 here and gross revenue
+        // collapses to 0 — even though net_sales (ShopifyQL) is correct. This
+        // matches fetchAllSince() and shopify:diagnose.
+        $dayQuery = "status:any AND created_at:>='{$startUtc}' AND created_at:<='{$endUtc}'";
+
         do {
             $data = $client->graphql($gql, [
-                'q'     => "created_at:>='{$startUtc}' AND created_at:<='{$endUtc}'",
+                'q'     => $dayQuery,
                 'first' => self::HISTORY_PAGE_SIZE,
                 'after' => $cursor,
             ]);

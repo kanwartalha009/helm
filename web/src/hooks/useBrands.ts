@@ -284,6 +284,53 @@ export function useAttachGoogleAccounts() {
   });
 }
 
+/* ---- TikTok ad-account connection (Phase 2) ----------------------- */
+
+/**
+ * GET /api/brands/{slug}/connections/tiktok/available — every advertiser under
+ * the agency Business Center the BC token can see. Fetched only when the picker
+ * is open.
+ */
+export function useTikTokAvailableAccounts(brandSlug: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ['tiktok-available', brandSlug],
+    enabled: !!brandSlug && enabled,
+    staleTime: 5 * 60_000,
+    queryFn: async (): Promise<MetaAdAccount[]> => {
+      const { data } = await api.get<{ accounts: MetaAdAccount[] }>(
+        `/brands/${brandSlug}/connections/tiktok/available`
+      );
+      return data.accounts ?? [];
+    },
+  });
+}
+
+/**
+ * POST /api/brands/{slug}/connections/tiktok/attach — saves the selected
+ * advertiser IDs onto the brand's single TikTok connection. Spend is blended at
+ * sync time (see TikTok ReportsFetcher).
+ */
+export function useAttachTikTokAccounts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { brandSlug: string; accountIds: string[] }) => {
+      const { data } = await api.post(
+        `/brands/${input.brandSlug}/connections/tiktok/attach`,
+        { account_ids: input.accountIds }
+      );
+      return data;
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['brand', vars.brandSlug] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      toast.success('TikTok accounts saved', 'Run a sync to pull spend for the selected advertisers.');
+    },
+    onError: (err: any) => {
+      toast.error("Couldn't save accounts", err?.response?.data?.message ?? err.message);
+    },
+  });
+}
+
 /**
  * PATCH /api/brands/{slug} — partial update. Server validates each field
  * with `sometimes`, so we only send what changed.
