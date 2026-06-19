@@ -26,6 +26,9 @@ export interface User {
   displayInitials: string;
   timezone: string;
   mfaEnabled: boolean;
+  // True for a master_admin who hasn't enrolled MFA yet — AuthGate forces
+  // them to /mfa/setup before any app route renders.
+  mfaRequired?: boolean;
   accessibleBrandIds: number[];
   notificationPrefs: {
     daily_sync_digest: boolean;

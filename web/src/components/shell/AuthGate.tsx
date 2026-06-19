@@ -42,6 +42,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return <Navigate to="/dashboard" replace />;
   }
 
+  // Mandatory MFA for master_admin (spec §08) — force enrollment once
+  // onboarding is done. /mfa/setup is an un-gated route, so this never loops.
+  if (user.onboardingComplete && user.mfaRequired && location.pathname !== '/mfa/setup') {
+    return <Navigate to="/mfa/setup" replace />;
+  }
+
   return <>{children}</>;
 }
 

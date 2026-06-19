@@ -27,6 +27,9 @@ class UserResource extends JsonResource
             'displayInitials'        => $this->display_initials ?: mb_substr($this->name ?: '?', 0, 1),
             'timezone'               => $this->timezone ?? 'UTC',
             'mfaEnabled'             => (bool) $this->mfa_secret,
+            // Spec §08: MFA is mandatory for master_admin. AuthGate forces
+            // enrollment when this is true (post-onboarding).
+            'mfaRequired'            => $this->role === 'master_admin' && ! $this->mfa_secret,
             'accessibleBrandIds'     => $this->accessibleBrandIds(),
             'notificationPrefs'      => array_merge(
                 User::DEFAULT_NOTIFICATION_PREFS,

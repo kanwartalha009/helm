@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/shell/AuthLayout';
 import { Banner, Button, Input, Tag } from '@/components/ui';
 import { mfaSetup, mfaVerifyEnrollment, type MfaSetupResponse } from '@/lib/auth';
+import { queryClient } from '@/lib/queryClient';
 import { toast } from '@/stores/toastStore';
 
 /**
@@ -46,7 +47,10 @@ export function MfaSetupPage() {
     setVerifyError(null);
     setSubmitting(true);
     try {
-      await mfaVerifyEnrollment(code);
+      const { user } = await mfaVerifyEnrollment(code);
+      // Refresh the cached current user so AuthGate's MFA gate releases
+      // immediately (mfaRequired flips false) instead of bouncing back here.
+      queryClient.setQueryData(['auth', 'me'], user);
       toast.success('MFA enabled', 'You’ll be asked for a code on your next sign-in.');
       navigate('/profile', { replace: true });
     } catch (err: any) {

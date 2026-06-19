@@ -114,4 +114,22 @@ final class RbacAccessTest extends TestCase
         $this->getJson("/api/brands/{$other->slug}")->assertNotFound();
         $this->getJson("/api/brands/{$assigned->slug}")->assertOk();
     }
+
+    public function test_master_admin_without_mfa_is_flagged_required(): void
+    {
+        Sanctum::actingAs(User::factory()->masterAdmin()->create());
+
+        $this->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('mfaRequired', true);
+    }
+
+    public function test_non_admin_is_not_mfa_required(): void
+    {
+        Sanctum::actingAs(User::factory()->manager()->create());
+
+        $this->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('mfaRequired', false);
+    }
 }
