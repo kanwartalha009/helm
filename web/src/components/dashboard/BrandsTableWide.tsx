@@ -131,11 +131,15 @@ function Row({
   // brand renders in its own native currency.
   const currency = displayCurrency || brand.baseCurrency || 'USD';
 
-  // Net sales (default) or Total revenue (before returns) per the toggle.
-  const yRev   = metric === 'net' ? yesterday.netSales : yesterday.revenue;
-  const dbRev  = metric === 'net' ? dayBefore.netSales : dayBefore.revenue;
-  const l7Rev  = metric === 'net' ? last7d.netSales : last7d.revenueGross;
-  const l7Prev = metric === 'net' ? last7d.netSalesPrior7d : last7d.revenueGrossPrior7d;
+  // Both toggle options surface net sales — Shopify's exact ShopifyQL figure.
+  // The old gross "Total revenue" was order-based and unreliable (0 for
+  // high-volume brands like Meller), so per the client it shows net sales too.
+  // `metric` still drives the column header label in the parent component.
+  void metric;
+  const yRev   = yesterday.netSales;
+  const dbRev  = dayBefore.netSales;
+  const l7Rev  = last7d.netSales;
+  const l7Prev = last7d.netSalesPrior7d;
 
   const groups: MetricGroup[] = [
     { label: 'Revenue', yesterday: yRev, dayBefore: dbRev, kind: 'money', platform: 'shopify' },

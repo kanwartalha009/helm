@@ -73,10 +73,10 @@ export function DashboardPage() {
   // (including "worst performing", where we want the worst *active* brands, not
   // empty ones). Ties fall back to name.
   const sortedRows: DashboardRow[] = useMemo(() => {
-    const yVal = (r: DashboardRow) =>
-      metric === 'net' ? r.yesterday.netSales : r.yesterday.revenue;
-    const wVal = (r: DashboardRow) =>
-      metric === 'net' ? r.last7d.netSales : r.last7d.revenueGross;
+    // Both toggle options surface net sales (see BrandsTableWide), so rank by it
+    // regardless of the metric — keeps the sort consistent with what's shown.
+    const yVal = (r: DashboardRow) => r.yesterday.netSales;
+    const wVal = (r: DashboardRow) => r.last7d.netSales;
     const isDead = (v: number | null) => v == null || v === 0;
     const isInactive = (r: DashboardRow) => isDead(yVal(r)) || isDead(wVal(r));
 
