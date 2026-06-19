@@ -28,8 +28,12 @@ class UserResource extends JsonResource
             'timezone'               => $this->timezone ?? 'UTC',
             'mfaEnabled'             => (bool) $this->mfa_secret,
             // Spec §08: MFA is mandatory for master_admin. AuthGate forces
-            // enrollment when this is true (post-onboarding).
-            'mfaRequired'            => $this->role === 'master_admin' && ! $this->mfa_secret,
+            // enrollment when this is true (post-onboarding). Gated by a config
+            // kill-switch (HELM_REQUIRE_ADMIN_MFA) so enforcement can be released
+            // if enrollment ever can't be completed — anti-lockout.
+            'mfaRequired'            => (bool) config('helm.require_admin_mfa', true)
+                && $this->role === 'master_admin'
+                && ! $this->mfa_secret,
             'accessibleBrandIds'     => $this->accessibleBrandIds(),
             'notificationPrefs'      => array_merge(
                 User::DEFAULT_NOTIFICATION_PREFS,

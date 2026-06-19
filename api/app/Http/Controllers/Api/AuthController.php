@@ -429,7 +429,10 @@ class AuthController extends Controller
             if (! $user || ! $user->mfa_secret) {
                 return response()->json(['message' => 'MFA is not configured for this account.'], 422);
             }
-            if (! $g2fa->verifyKey($user->mfa_secret, $code, 1)) {
+            // window=2 → accept the code for ±60s around the server clock, so a
+            // small clock drift or slow entry doesn't reject a valid code. If
+            // the server clock is grossly off (minutes), sync it via NTP.
+            if (! $g2fa->verifyKey($user->mfa_secret, $code, 2)) {
                 return response()->json(['message' => 'That code didn’t match. Try the next one your app shows.'], 422);
             }
 
@@ -465,7 +468,8 @@ class AuthController extends Controller
                 'message' => 'Your enrollment secret expired. Restart MFA setup.',
             ], 410);
         }
-        if (! $g2fa->verifyKey($pendingSecret, $code, 1)) {
+        // window=2 → ±60s tolerance around the server clock (see note above).
+        if (! $g2fa->verifyKey($pendingSecret, $code, 2)) {
             return response()->json([
                 'message' => 'That code didn’t match. Try the next one your app shows.',
             ], 422);
