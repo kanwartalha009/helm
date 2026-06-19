@@ -306,7 +306,7 @@ export function DashboardPage() {
       </div>
 
       {comparisonOn && (
-        <div className="filter-bar mb-12" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <div className="filter-bar mb-12" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <span className="text-xs muted">Compare vs last year:</span>
           {COMPARE_PERIODS.map((p) => (
             <button

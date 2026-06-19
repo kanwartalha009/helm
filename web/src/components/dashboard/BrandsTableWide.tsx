@@ -56,33 +56,57 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
     <Card style={{ overflowX: 'auto' }}>
       <table className="data-table wide-table">
         <thead>
-          {/* Top-level grouped header */}
-          <tr>
-            <th className="brand-col group-head" rowSpan={2}>
-              Brand
-            </th>
-            <th className="group-head group-start" colSpan={3}>{revenueLabel}</th>
-            {showAdRollup && <th className="group-head group-start" colSpan={3}>Blended ROAS</th>}
-            {showMeta   && <th className="group-head group-start" colSpan={3}>Meta inv.</th>}
-            {showGoogle && <th className="group-head group-start" colSpan={3}>Google inv.</th>}
-            {showTikTok && <th className="group-head group-start" colSpan={3}>TikTok inv.</th>}
-            {showTotalSpend && <th className="group-head group-start" colSpan={3}>Total inv.</th>}
-            <th className="group-head group-start" colSpan={3}>{revenueLabel} 7d</th>
-            {comparePeriods.map((p) => (
-              <th key={p} className="group-head group-start" colSpan={3}>
-                {revenueLabel} vs last year · {PERIOD_LABEL[p] ?? p}
-              </th>
-            ))}
-          </tr>
-          {/* Sub-header — Y / Y-1 / Δ for each group; This yr / Last yr / Δ for comparisons */}
-          <tr>
-            {Array.from({ length: groupCount }).map((_, i) => (
-              <SubHeaders key={i} groupStart />
-            ))}
-            {comparePeriods.map((p) => (
-              <ComparisonSubHeaders key={p} />
-            ))}
-          </tr>
+          {comparePeriods.length === 0 ? (
+            <>
+              {/* Default: 2-row grouped header */}
+              <tr>
+                <th className="brand-col group-head" rowSpan={2}>Brand</th>
+                <th className="group-head group-start" colSpan={3}>{revenueLabel}</th>
+                {showAdRollup && <th className="group-head group-start" colSpan={3}>Blended ROAS</th>}
+                {showMeta   && <th className="group-head group-start" colSpan={3}>Meta inv.</th>}
+                {showGoogle && <th className="group-head group-start" colSpan={3}>Google inv.</th>}
+                {showTikTok && <th className="group-head group-start" colSpan={3}>TikTok inv.</th>}
+                {showTotalSpend && <th className="group-head group-start" colSpan={3}>Total inv.</th>}
+                <th className="group-head group-start" colSpan={3}>{revenueLabel} 7d</th>
+              </tr>
+              <tr>
+                {Array.from({ length: groupCount }).map((_, i) => (
+                  <SubHeaders key={i} groupStart />
+                ))}
+              </tr>
+            </>
+          ) : (
+            <>
+              {/* Comparison on: 3-row header. The YoY block sits right after Brand
+                  under one parent heading; the normal groups span down beside it. */}
+              <tr>
+                <th className="brand-col group-head" rowSpan={3}>Brand</th>
+                <th className="group-head group-start" colSpan={comparePeriods.length * 3}>
+                  {revenueLabel} · vs last year
+                </th>
+                <th className="group-head group-start" rowSpan={2} colSpan={3}>{revenueLabel}</th>
+                {showAdRollup && <th className="group-head group-start" rowSpan={2} colSpan={3}>Blended ROAS</th>}
+                {showMeta   && <th className="group-head group-start" rowSpan={2} colSpan={3}>Meta inv.</th>}
+                {showGoogle && <th className="group-head group-start" rowSpan={2} colSpan={3}>Google inv.</th>}
+                {showTikTok && <th className="group-head group-start" rowSpan={2} colSpan={3}>TikTok inv.</th>}
+                {showTotalSpend && <th className="group-head group-start" rowSpan={2} colSpan={3}>Total inv.</th>}
+                <th className="group-head group-start" rowSpan={2} colSpan={3}>{revenueLabel} 7d</th>
+              </tr>
+              <tr>
+                {comparePeriods.map((p) => (
+                  <th key={p} className="group-head group-start" colSpan={3}>{PERIOD_LABEL[p] ?? p}</th>
+                ))}
+              </tr>
+              <tr>
+                {comparePeriods.map((p) => (
+                  <ComparisonSubHeaders key={p} />
+                ))}
+                {Array.from({ length: groupCount }).map((_, i) => (
+                  <SubHeaders key={i} groupStart />
+                ))}
+              </tr>
+            </>
+          )}
         </thead>
         <tbody>
           {rows.map((row) => (
@@ -233,6 +257,9 @@ function Row({
         </Link>
       </td>
 
+      {comparePeriods.map((p) => (
+        <ComparisonCells key={p} row={row} period={p} currency={currency} />
+      ))}
       {groups.map((g, i) => (
         <MetricCells
           key={g.label}
@@ -242,9 +269,6 @@ function Row({
           connected={connected}
           health={health}
         />
-      ))}
-      {comparePeriods.map((p) => (
-        <ComparisonCells key={p} row={row} period={p} currency={currency} />
       ))}
     </tr>
   );
