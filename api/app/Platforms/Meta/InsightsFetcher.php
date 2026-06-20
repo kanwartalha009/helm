@@ -106,6 +106,11 @@ final class InsightsFetcher
                 'time_range'                      => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
                 'time_increment'                  => 1,
                 'use_account_attribution_setting' => 'false',
+                // Meta defaults to 25 rows/page; a multi-month daily pull then
+                // leans on cursor pagination for every ~3 weeks. Ask for the
+                // whole window up front so a single dropped cursor can't leave a
+                // brand with only the first few weeks of last year.
+                'limit'                           => 500,
             ]);
 
             foreach ($rows as $row) {

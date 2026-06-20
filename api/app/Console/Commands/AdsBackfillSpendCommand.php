@@ -83,18 +83,46 @@ class AdsBackfillSpendCommand extends Command
                 // the relation so they don't lazy-load it per call.
                 $conn->setRelation('brand', $brand);
 
-                try {
-                    /** @var array<string, MetricSnapshot> $snapshots */
-                    $snapshots = $platform === 'meta'
-                        ? $meta->fetchRange($conn, $from, $until)
-                        : $google->fetchRange($conn, $from, $until);
-                } catch (Throwable $e) {
-                    $this->error("· {$brand->name} [{$platform}]: {$e->getMessage()}");
-                    continue;
+                // Pull in MONTHLY windows and merge by day. A single multi-year
+                // daily request to Meta's insights endpoint comes back short for
+                // high-volume accounts (partial pages / silent data caps) — which
+                // is how a brand that has advertised for years still shows last
+                // year as "new". Each small window returns complete; we stitch
+                // them together. Google is chunked the same way for parity.
+                /** @var array<string, MetricSnapshot> $snapshots */
+                $snapshots = [];
+                $failed    = false;
+                $cursor    = $from;
+                while ($cursor->lessThanOrEqualTo($until)) {
+                    $chunkEnd = $cursor->addMonth()->subDay();
+                    if ($chunkEnd->greaterThan($until)) {
+                        $chunkEnd = $until;
+                    }
+
+                    try {
+                        $chunk = $platform === 'meta'
+                            ? $meta->fetchRange($conn, $cursor, $chunkEnd)
+                            : $google->fetchRange($conn, $cursor, $chunkEnd);
+                    } catch (Throwable $e) {
+                        $this->error("· {$brand->name} [{$platform}] {$cursor->toDateString()}..{$chunkEnd->toDateString()}: {$e->getMessage()}");
+                        $failed = true;
+                        break;
+                    }
+
+                    foreach ($chunk as $day => $snap) {
+                        $snapshots[$day] = $snap;
+                    }
+                    $cursor = $chunkEnd->addDay();
+                }
+                if ($failed) {
+                    continue; // a window errored — fix the cause, then re-run (idempotent)
                 }
 
                 if ($snapshots === []) {
-                    $this->line("· {$brand->name} [{$platform}]: no spend rows for {$since}..{$until->toDateString()}.");
+                    // 0 rows = the account has no spend on record in this window
+                    // (e.g. a fresh ad account created at onboarding, so last
+                    // year's spend lives in the brand's old, unconnected account).
+                    $this->warn("· {$brand->name} [{$platform}]: 0 day-rows — account has no spend on record for {$since}..{$until->toDateString()}.");
                     continue;
                 }
 
@@ -123,8 +151,15 @@ class AdsBackfillSpendCommand extends Command
                     );
                 }
 
+                // Report the ACTUAL covered span, not the requested one — a
+                // brand whose row only spans recent weeks (e.g. 2026-05-06.. )
+                // never had last-year data, which is exactly the gap that shows
+                // as an inflated YoY ROAS. Lets you tell real coverage from a
+                // partial pull at a glance.
+                $dates = array_keys($snapshots);
+                $span  = sprintf('%s..%s', min($dates), max($dates));
                 $totalDays += count($rows);
-                $this->info("· {$brand->name} [{$platform}]: " . count($rows) . " day-rows backfilled ({$since}..{$until->toDateString()}).");
+                $this->info("· {$brand->name} [{$platform}]: " . count($rows) . " day-rows · covered {$span} (requested {$since}..{$until->toDateString()}).");
 
                 usleep(200_000); // 0.2s breather between platform pulls
             }
