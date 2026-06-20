@@ -235,6 +235,7 @@ class BrandController extends Controller
                 'label'       => $label,
                 'revenue'     => 0.0,
                 'netSales'    => 0.0,
+                'totalSales'  => 0.0,
                 'orders'      => 0,
                 'refunds'     => 0.0,
                 'days'        => 0,
@@ -259,12 +260,14 @@ class BrandController extends Controller
 
             $d = $r->date->toDateString();
             $rev = (float) ($r->revenue ?? 0);   // Total revenue (gross, before returns) — the toggle option
-            $net = (float) ($r->net_sales ?? 0); // Net sales — default dashboard metric
+            $net = (float) ($r->net_sales ?? 0);   // Net sales (hidden in UI, still aggregated)
+            $tot = (float) ($r->total_sales ?? 0); // Total revenue = Shopify Total sales — the live metric
             $ord = (int)   ($r->orders ?? 0);
             $ref = (float) ($r->refunds_amount ?? 0);
 
             $allTile['revenue'] += $rev;
             $allTile['netSales']   += $net;
+            $allTile['totalSales'] += $tot;
             $allTile['orders']     += $ord;
             $allTile['refunds']    += $ref;
             $allTile['days']       += 1;
@@ -275,6 +278,7 @@ class BrandController extends Controller
             if ($d === $todayKey) {
                 $todayTile['revenue'] = $rev;
                 $todayTile['netSales']   = $net;
+                $todayTile['totalSales'] = $tot;
                 $todayTile['orders']     = $ord;
                 $todayTile['refunds']    = $ref;
                 $todayTile['days']       = 1;
@@ -283,6 +287,7 @@ class BrandController extends Controller
             if ($d === $yesterdayKey) {
                 $yesterdayTile['revenue'] = $rev;
                 $yesterdayTile['netSales']   = $net;
+                $yesterdayTile['totalSales'] = $tot;
                 $yesterdayTile['orders']     = $ord;
                 $yesterdayTile['refunds']    = $ref;
                 $yesterdayTile['isComplete'] = (bool) $r->is_complete;
@@ -290,6 +295,7 @@ class BrandController extends Controller
             if ($d >= $l7StartKey && $d <= $todayKey) {
                 $last7Tile['revenue'] += $rev;
                 $last7Tile['netSales']   += $net;
+                $last7Tile['totalSales'] += $tot;
                 $last7Tile['orders']     += $ord;
                 $last7Tile['refunds']    += $ref;
                 $last7Tile['days']       += 1;
@@ -300,6 +306,7 @@ class BrandController extends Controller
             if ($d >= $l30StartKey && $d <= $todayKey) {
                 $last30Tile['revenue'] += $rev;
                 $last30Tile['netSales']   += $net;
+                $last30Tile['totalSales'] += $tot;
                 $last30Tile['orders']     += $ord;
                 $last30Tile['refunds']    += $ref;
                 $last30Tile['days']       += 1;

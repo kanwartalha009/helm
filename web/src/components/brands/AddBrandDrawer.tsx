@@ -464,7 +464,7 @@ function Step2Connect({
         <>
           <Banner variant="info" className="mb-16">
             Paste the <span className="mono">shpat_…</span> token shown by the store admin's{' '}
-            <strong>Settings → Apps and sales channels → Develop apps</strong> page. Helm
+            <strong>Settings → Apps and sales channels → Develop apps</strong> page. Roasdriven
             validates against Shopify before saving.
           </Banner>
           <details className="mb-16" style={{ cursor: 'pointer' }}>
@@ -472,7 +472,7 @@ function Step2Connect({
             <ol className="text-sm muted mt-12" style={{ paddingLeft: 18, lineHeight: 1.7 }}>
               <li>Store admin: <span className="mono">Settings → Apps and sales channels → Develop apps</span>.</li>
               <li>Click <strong>"Allow custom app development"</strong> if prompted.</li>
-              <li>Click <strong>"Create an app"</strong>, name it <span className="mono">Helm Analytics</span>.</li>
+              <li>Click <strong>"Create an app"</strong>, name it <span className="mono">Roasdriven Analytics</span>.</li>
               <li>
                 <strong>Configuration → Admin API integration → Configure</strong>. Tick:{' '}
                 <span className="mono">read_orders</span>, <span className="mono">read_products</span>,{' '}
@@ -557,7 +557,7 @@ function Step3Done({ brand }: { brand: Brand }) {
   return (
     <>
       <Banner variant="info">
-        <strong>{brand.name}</strong> is connected. Open it to trigger the first sync — Helm will
+        <strong>{brand.name}</strong> is connected. Open it to trigger the first sync — Roasdriven will
         pull every historical order Shopify hands back. Daily syncs then run automatically at 13:00 UTC.
       </Banner>
 

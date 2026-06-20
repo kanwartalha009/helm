@@ -75,6 +75,60 @@ final class InsightsFetcher
     }
 
     /**
+     * Daily account-level insights for a DATE RANGE — one paged call per account
+     * (time_increment=1 → one row per day), blended per day across the brand's
+     * accounts. Powers the historical spend backfill (`ads:backfill-spend`) that
+     * the year-over-year spend/ROAS comparison needs. Same field set + 7d_click
+     * window as fetch(); Meta omits days with no delivery, so the result only
+     * contains days that actually had activity.
+     *
+     * @return array<string, MetricSnapshot> keyed by Y-m-d, ascending
+     */
+    public function fetchRange(PlatformConnection $conn, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $accountIds = $this->accountIdsFor($conn);
+        if ($accountIds === []) {
+            return [];
+        }
+
+        $tz           = $conn->brand?->timezone ?: 'UTC';
+        $today        = CarbonImmutable::now($tz)->startOfDay();
+        $baseCurrency = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+        $brandId      = (int) $conn->brand_id;
+
+        // Y-m-d => array<MetricSnapshot> (one per account) for that day.
+        $perDay = [];
+        foreach ($accountIds as $accountId) {
+            $rows = $this->client->paged(self::normalizeAccountId($accountId) . '/insights', [
+                'level'                           => 'account',
+                'fields'                          => 'spend,impressions,clicks,actions,action_values,account_currency',
+                'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
+                'time_range'                      => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
+                'time_increment'                  => 1,
+                'use_account_attribution_setting' => 'false',
+            ]);
+
+            foreach ($rows as $row) {
+                $day = (string) ($row['date_start'] ?? '');
+                if ($day === '') {
+                    continue;
+                }
+                $date            = CarbonImmutable::parse($day, $tz)->startOfDay();
+                $perDay[$day][]  = self::mapInsightRow($row, $brandId, $date, $baseCurrency, $date->lessThan($today));
+            }
+        }
+
+        $out = [];
+        foreach ($perDay as $day => $snaps) {
+            $date      = CarbonImmutable::parse($day, $tz)->startOfDay();
+            $out[$day] = $this->blend($snaps, $brandId, $date, $baseCurrency, $date->lessThan($today), $accountIds);
+        }
+        ksort($out);
+
+        return $out;
+    }
+
+    /**
      * The ad accounts to pull for this brand: the selected list when present,
      * otherwise the single external_id (legacy / one-account connection).
      *

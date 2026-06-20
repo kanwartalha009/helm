@@ -66,7 +66,7 @@ export function PlatformKeysSection() {
     <div style={{ maxWidth: 760 }}>
       <h3 className="section-title">Platform keys</h3>
       <p className="text-sm muted mb-16">
-        Credentials Helm uses to talk to Shopify, Meta, Google, and TikTok on the agency&rsquo;s behalf. Stored encrypted in the database (AES-256 via APP_KEY). Per-store Shopify access tokens live on each brand&rsquo;s connection card, not here.
+        Credentials Roasdriven uses to talk to Shopify, Meta, Google, and TikTok on the agency&rsquo;s behalf. Stored encrypted in the database (AES-256 via APP_KEY). Per-store Shopify access tokens live on each brand&rsquo;s connection card, not here.
       </p>
 
       <Banner

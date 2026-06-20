@@ -5,7 +5,7 @@ export function Wordmark({ to = '/', style }: { to?: string; style?: CSSProperti
   return (
     <Link to={to} className="wordmark" style={style}>
       <span className="wordmark-dot" />
-      Helm
+      Roasdriven
     </Link>
   );
 }

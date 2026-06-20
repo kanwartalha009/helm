@@ -76,7 +76,7 @@ function FullScreenLoader() {
         <circle cx="12" cy="12" r="10" opacity="0.25" />
         <path d="M22 12a10 10 0 0 1-10 10" />
       </svg>
-      Loading Helm…
+      Loading Roasdriven…
       <style>{`@keyframes helm-spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );

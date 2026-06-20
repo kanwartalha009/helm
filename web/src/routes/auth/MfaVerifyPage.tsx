@@ -66,7 +66,7 @@ export function MfaVerifyPage() {
           <h2>Enter your 6-digit code</h2>
           <p className="mt-8 text-sm">
             Open your authenticator app (Google Authenticator, Authy, 1Password) and enter the
-            current code for Helm.
+            current code for Roasdriven.
           </p>
         </div>
 

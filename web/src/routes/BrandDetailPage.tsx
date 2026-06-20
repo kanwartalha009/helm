@@ -379,7 +379,7 @@ function OverviewTab({
         title="Connect Shopify to start syncing"
         description={
           <>
-            <strong>{brand.name}</strong> is created, but Helm needs a Shopify connection to pull orders, refunds, and revenue. Install the Helm Shopify app on this brand’s store and the dashboard will populate the moment the first sync finishes.
+            <strong>{brand.name}</strong> is created, but Roasdriven needs a Shopify connection to pull orders, refunds, and revenue. Install the Roasdriven Shopify app on this brand’s store and the dashboard will populate the moment the first sync finishes.
           </>
         }
         action={
@@ -435,7 +435,7 @@ function OverviewTab({
         </h3>
         <span className="text-xs muted">
           {tiles!.allTime.days} day{tiles!.allTime.days === 1 ? '' : 's'} on file ·
-          all-time net sales {formatMoney(tiles!.allTime.netSales, currency)}
+          all-time total revenue {formatMoney(tiles!.allTime.totalSales, currency)}
         </span>
       </div>
 
@@ -444,7 +444,8 @@ function OverviewTab({
           <thead>
             <tr>
               <th style={{ width: 130 }}>Date</th>
-              <th className="num">Net sales</th>
+              {/* Net sales hidden per client (Bosco, 2026-06-19) — uncomment to restore:
+              <th className="num">Net sales</th> */}
               <th className="num">Total revenue</th>
               {hasSpend && <th className="num">Spend</th>}
               {hasSpend && <th className="num">Blended ROAS</th>}
@@ -458,7 +459,8 @@ function OverviewTab({
             {daily.map((row) => (
               <tr key={row.date}>
                 <td className="mono">{row.date}</td>
-                <td className="num">{row.netSales !== null ? formatMoney(row.netSales, currency) : '—'}</td>
+                {/* Net sales hidden per client (Bosco, 2026-06-19) — uncomment to restore:
+                <td className="num">{row.netSales !== null ? formatMoney(row.netSales, currency) : '—'}</td> */}
                 <td className="num">{row.totalSales !== null ? formatMoney(row.totalSales, currency) : '—'}</td>
                 {hasSpend && (
                   <td className="num muted">{row.spend !== null ? formatMoney(row.spend, currency) : '—'}</td>
@@ -516,7 +518,7 @@ function StatTile({ tile, currency }: { tile: BrandMetricTile; currency: string 
   return (
     <div className="stat">
       <div className="stat-label">{tile.label}</div>
-      <div className="stat-value num">{formatMoney(tile.netSales, currency)}</div>
+      <div className="stat-value num">{formatMoney(tile.totalSales, currency)}</div>
       <div className="stat-sub muted">{sub}{!tile.isComplete ? ' · partial' : ''}</div>
     </div>
   );
@@ -574,7 +576,7 @@ function ShopifyCard({
 
   const onDisconnect = () => {
     if (!conn) return;
-    const msg = `Disconnect Shopify from ${brand.name}? Helm will stop syncing this store. You can re-install at any time.`;
+    const msg = `Disconnect Shopify from ${brand.name}? Roasdriven will stop syncing this store. You can re-install at any time.`;
     if (!window.confirm(msg)) return;
     disconnect.mutate({ connectionId: conn.id, brandSlug: brand.slug });
   };
@@ -615,7 +617,7 @@ function ShopifyCard({
         {authErrored ? (
           <>Last error: <span className="mono">{conn?.lastError ?? 'unknown'}</span>. Disconnect and re-add with a fresh token.</>
         ) : syncWarning ? (
-          <>Last sync attempt failed: <span className="mono">{conn?.lastError ?? 'unknown'}</span>. The connection is healthy — Helm will retry automatically on the next sync.</>
+          <>Last sync attempt failed: <span className="mono">{conn?.lastError ?? 'unknown'}</span>. The connection is healthy — Roasdriven will retry automatically on the next sync.</>
         ) : connected
           ? `Last sync ${conn?.lastSyncAt ? new Date(conn.lastSyncAt).toLocaleString() : '—'}.`
           : `Create an admin custom app in the store, copy its Admin API access token, and paste it here. Takes 3 minutes per store.`}
@@ -1263,7 +1265,7 @@ function ShopifyOAuthButton({
                 won't need them again.
               </>
             ) : (
-              <>This brand's Partner app credentials are stored. Helm opens Shopify in a new tab; you approve and Shopify redirects back with the access token.</>
+              <>This brand's Partner app credentials are stored. Roasdriven opens Shopify in a new tab; you approve and Shopify redirects back with the access token.</>
             )}
           </Banner>
 
@@ -1407,7 +1409,7 @@ function ShopifyInstallDrawer({
         <ol className="text-sm muted mt-12" style={{ paddingLeft: 18, lineHeight: 1.7 }}>
           <li>In the store admin: <span className="mono">Settings → Apps and sales channels → Develop apps</span>.</li>
           <li>Click <strong>"Allow custom app development"</strong> if prompted (one-time).</li>
-          <li>Click <strong>"Create an app"</strong>, name it <span className="mono">Helm Analytics</span>.</li>
+          <li>Click <strong>"Create an app"</strong>, name it <span className="mono">Roasdriven Analytics</span>.</li>
           <li>
             Open <strong>Configuration → Admin API integration → Configure</strong>. Tick exactly:{' '}
             <span className="mono">read_orders</span>, <span className="mono">read_products</span>,{' '}

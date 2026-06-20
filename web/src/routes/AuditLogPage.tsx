@@ -88,7 +88,7 @@ export function AuditLogPage() {
             </svg>
           }
           title="No activity yet"
-          body="As you and your team work in Helm, every sensitive action — sign-ins, invitations, credential rotations, brand access changes — lands here. Append-only, never deleted."
+          body="As you and your team work in Roasdriven, every sensitive action — sign-ins, invitations, credential rotations, brand access changes — lands here. Append-only, never deleted."
           footnote={
             <Link to="/sitemap" style={{ color: 'inherit' }}>
               Audit log explained →

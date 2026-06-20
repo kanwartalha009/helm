@@ -55,7 +55,7 @@ export function LoginPage() {
     <AuthLayout>
       <div className="auth-card">
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <h2>Sign in to Helm</h2>
+          <h2>Sign in to Roasdriven</h2>
           <p className="mt-8 text-sm">Use the email tied to your invitation.</p>
         </div>
 

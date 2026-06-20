@@ -32,8 +32,11 @@ export function DashboardPage() {
   // | 'all' | a user id. Admin/manager only; limited roles are hard-scoped
   // server-side via the Brand global access scope.
   const [manager, setManager] = useState<string>('me');
-  // Revenue metric: Total revenue (default — Shopify "Total sales") or Net sales.
-  const [metric, setMetric] = useState<'net' | 'total'>('total');
+  // Revenue metric. Net sales is hidden per the client (Bosco, 2026-06-19): only
+  // Total revenue is shown, so the metric toggle below is commented out and the
+  // metric is pinned to 'total'. Re-enable: restore `setMetric` here and
+  // uncomment the <Segmented> in the filter bar.
+  const [metric] = useState<'net' | 'total'>('total');
   // Year-over-year comparison: a toggle + multi-select periods. The comparison
   // columns follow the metric toggle above; periods are only sent to the API
   // (and computed) while the toggle is on.
@@ -245,6 +248,9 @@ export function DashboardPage() {
 
         <span style={{ flex: 1 }} />
 
+        {/* Net sales hidden per client (Bosco, 2026-06-19) — only Total revenue
+            is shown. To re-enable, restore `setMetric` (state above) and
+            uncomment this toggle:
         <Segmented
           options={[
             { value: 'net', label: 'Net sales' },
@@ -253,6 +259,7 @@ export function DashboardPage() {
           value={metric}
           onChange={setMetric}
         />
+        */}
         <button
           className="filter-btn"
           style={
@@ -345,7 +352,7 @@ export function DashboardPage() {
           </svg>
         }
       >
-        Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Default is <strong>total revenue</strong> (Shopify’s Total sales — net sales plus shipping, tax, and duties); switch to <strong>net sales</strong> with the toggle. Blended ROAS uses whichever metric is selected. Online Store channel only.
+        Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Figures are <strong>total revenue</strong> (Shopify’s Total sales). Blended ROAS is revenue ÷ ad spend. Online Store channel only.
       </Banner>
 
       <div style={{ marginTop: 16 }}>
@@ -407,7 +414,7 @@ function DashboardEmptyState() {
           maxWidth: 480,
         }}
       >
-        Helm shows blended revenue and ROAS across every store you manage. Connect a brand&rsquo;s
+        Roasdriven shows blended revenue and ROAS across every store you manage. Connect a brand&rsquo;s
         Shopify and ad accounts to see real numbers here.
       </p>
 
@@ -445,7 +452,7 @@ function DashboardEmptyState() {
         <StepCard
           n={2}
           title="Create a brand"
-          body="Name, timezone, base currency. Helm uses the brand timezone for every metric date."
+          body="Name, timezone, base currency. Roasdriven uses the brand timezone for every metric date."
           onClick={() => openAddBrand(true)}
           cta="Add brand"
         />

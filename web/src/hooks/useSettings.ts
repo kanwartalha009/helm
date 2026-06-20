@@ -157,7 +157,7 @@ export function useCompleteOnboarding() {
     onSuccess: (user) => {
       qc.setQueryData(['auth', 'me'], user);
       qc.invalidateQueries({ queryKey: ['workspace-settings'] });
-      toast.success('Setup complete', 'Welcome to Helm.');
+      toast.success('Setup complete', 'Welcome to Roasdriven.');
     },
     onError: (err: any) => {
       toast.error('Couldn\'t save', firstApiError(err));

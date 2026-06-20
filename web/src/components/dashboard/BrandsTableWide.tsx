@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar, Card, Tag, Dot } from '@/components/ui';
 import { cn } from '@/lib/cn';
@@ -22,14 +23,15 @@ interface Props {
   rows: DashboardRow[];
   /** When set (e.g. 'USD'), format every row in this currency; otherwise each brand renders in its own native currency. */
   currency?: string;
-  /** Revenue metric: 'net' = Net sales (default), 'total' = Total revenue (before returns, incl. shipping/tax). */
+  /** Revenue metric. 'total' = Total revenue (Shopify "Total sales") — the only metric shown
+   *  since net sales was hidden (Bosco, 2026-06-20); 'net' is retained for easy re-enable. */
   metric?: 'net' | 'total';
   visibleAdPlatforms?: Set<Platform>;
   /** Year-over-year comparison periods to append (yesterday|last7|last30|mtd). */
   comparePeriods?: string[];
 }
 
-export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = 'net', comparePeriods = [] }: Props) {
+export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = 'total', comparePeriods = [] }: Props) {
   const showMeta   = visibleAdPlatforms?.has('meta')   ?? false;
   const showGoogle = visibleAdPlatforms?.has('google') ?? false;
   const showTikTok = visibleAdPlatforms?.has('tiktok') ?? false;
@@ -77,13 +79,16 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
             </>
           ) : (
             <>
-              {/* Comparison on: 3-row header. The YoY block sits right after Brand
-                  under one parent heading; the normal groups span down beside it. */}
+              {/* Comparison on: 3-row header. Each enabled period is one block
+                  (Revenue / Spend / ROAS × This yr·Last yr·Δ = 9 cols) right
+                  after Brand; the normal groups span down beside it. */}
               <tr>
                 <th className="brand-col group-head" rowSpan={3}>Brand</th>
-                <th className="group-head group-start" colSpan={comparePeriods.length * 3}>
-                  {revenueLabel} · vs last year
-                </th>
+                {comparePeriods.map((p) => (
+                  <th key={p} className="group-head group-start" colSpan={9}>
+                    {PERIOD_LABEL[p] ?? p} · vs last year
+                  </th>
+                ))}
                 <th className="group-head group-start" rowSpan={2} colSpan={3}>{revenueLabel}</th>
                 {showAdRollup && <th className="group-head group-start" rowSpan={2} colSpan={3}>Blended ROAS</th>}
                 {showMeta   && <th className="group-head group-start" rowSpan={2} colSpan={3}>Meta inv.</th>}
@@ -94,12 +99,20 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
               </tr>
               <tr>
                 {comparePeriods.map((p) => (
-                  <th key={p} className="group-head group-start" colSpan={3}>{PERIOD_LABEL[p] ?? p}</th>
+                  <Fragment key={p}>
+                    <th className="group-head group-start" colSpan={3}>{revenueLabel}</th>
+                    <th className="group-head group-start" colSpan={3}>Spend</th>
+                    <th className="group-head group-start" colSpan={3}>ROAS</th>
+                  </Fragment>
                 ))}
               </tr>
               <tr>
                 {comparePeriods.map((p) => (
-                  <ComparisonSubHeaders key={p} />
+                  <Fragment key={p}>
+                    <ComparisonSubHeaders />
+                    <ComparisonSubHeaders />
+                    <ComparisonSubHeaders />
+                  </Fragment>
                 ))}
                 {Array.from({ length: groupCount }).map((_, i) => (
                   <SubHeaders key={i} groupStart />
@@ -156,33 +169,48 @@ function ComparisonSubHeaders() {
   );
 }
 
-function ComparisonCells({
-  row,
-  period,
+// One This yr / Last yr / Δ triplet for a single comparison metric (revenue,
+// spend, or ROAS). Money metrics show a % delta; ROAS shows an absolute
+// multiplier delta (matching the live ROAS column). A null side renders "—",
+// and a missing last-year baseline shows "new" rather than a fake −100%.
+function ComparisonTriplet({
+  data,
+  kind,
   currency,
 }: {
-  row: DashboardRow;
-  period: string;
+  data?: { thisYear: number | null; lastYear: number | null };
+  kind: 'money' | 'roas';
   currency: string;
 }) {
-  const c = row.comparison?.[period];
-  const thisYear = c?.thisYear ?? null;
-  const lastYear = c?.lastYear ?? null;
-  // % change vs last year; null when there's no last-year baseline (new brand)
-  // or last year was exactly zero (can't divide).
-  const pct =
-    thisYear !== null && lastYear !== null && lastYear !== 0
-      ? ((thisYear - lastYear) / lastYear) * 100
-      : null;
-  const direction: 'up' | 'down' | 'flat' | 'na' =
-    pct === null ? 'na' : pct > 0.05 ? 'up' : pct < -0.05 ? 'down' : 'flat';
-  const deltaLabel = pct === null ? '—' : `${pct > 0 ? '+' : ''}${pct.toFixed(0)}%`;
+  const thisYear = data?.thisYear ?? null;
+  const lastYear = data?.lastYear ?? null;
+
+  const fmt = (v: number | null) =>
+    v === null ? '—' : kind === 'roas' ? formatRoas(v) : formatMoney(v, currency);
+
+  let deltaLabel: string;
+  let direction: 'up' | 'down' | 'flat' | 'na';
+  if (thisYear === null || lastYear === null) {
+    deltaLabel = '—';
+    direction = 'na';
+  } else if (kind === 'roas') {
+    const diff = thisYear - lastYear;
+    direction = diff > 0.005 ? 'up' : diff < -0.005 ? 'down' : 'flat';
+    deltaLabel = `${diff > 0 ? '+' : ''}${diff.toFixed(2)}`;
+  } else if (lastYear === 0) {
+    deltaLabel = '—';
+    direction = 'na';
+  } else {
+    const pct = ((thisYear - lastYear) / lastYear) * 100;
+    direction = pct > 0.05 ? 'up' : pct < -0.05 ? 'down' : 'flat';
+    deltaLabel = `${pct > 0 ? '+' : ''}${pct.toFixed(0)}%`;
+  }
 
   return (
     <>
-      <td className="num group-start">{thisYear !== null ? formatMoney(thisYear, currency) : '—'}</td>
+      <td className="num group-start">{fmt(thisYear)}</td>
       <td className="num prior">
-        {lastYear !== null ? formatMoney(lastYear, currency) : <span className="muted">new</span>}
+        {lastYear !== null ? fmt(lastYear) : <span className="muted">new</span>}
       </td>
       <td className={cn('delta', direction)}>{deltaLabel}</td>
     </>
@@ -218,8 +246,9 @@ function Row({
   // brand renders in its own native currency.
   const currency = displayCurrency || brand.baseCurrency || 'USD';
 
-  // Net sales or Total revenue (Shopify "Total sales", Online Store) per the
-  // toggle — both Shopify's own ShopifyQL figures.
+  // Total revenue (Shopify "Total sales", Online Store). Net sales is hidden
+  // (Bosco, 2026-06-20) so `metric` is pinned to 'total'; the 'net' branch is
+  // retained for easy re-enable. Both are Shopify's own ShopifyQL figures.
   const yRev   = metric === 'net' ? yesterday.netSales : yesterday.totalSales;
   const dbRev  = metric === 'net' ? dayBefore.netSales : dayBefore.totalSales;
   const l7Rev  = metric === 'net' ? last7d.netSales : last7d.totalSales;
@@ -257,9 +286,16 @@ function Row({
         </Link>
       </td>
 
-      {comparePeriods.map((p) => (
-        <ComparisonCells key={p} row={row} period={p} currency={currency} />
-      ))}
+      {comparePeriods.map((p) => {
+        const c = row.comparison?.[p];
+        return (
+          <Fragment key={p}>
+            <ComparisonTriplet data={c?.revenue} kind="money" currency={currency} />
+            <ComparisonTriplet data={c?.spend} kind="money" currency={currency} />
+            <ComparisonTriplet data={c?.roas} kind="roas" currency={currency} />
+          </Fragment>
+        );
+      })}
       {groups.map((g, i) => (
         <MetricCells
           key={g.label}

@@ -131,7 +131,7 @@ export function MfaSetupPage() {
             {secret}
           </div>
           <p className="text-xs muted mt-8">
-            Account name: <span className="mono">Helm</span> · Type: <span className="mono">Time-based (TOTP)</span> · Digits: <span className="mono">6</span>
+            Account name: <span className="mono">Roasdriven</span> · Type: <span className="mono">Time-based (TOTP)</span> · Digits: <span className="mono">6</span>
           </p>
         </details>
 

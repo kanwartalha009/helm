@@ -74,7 +74,7 @@ export function AcceptInvitePage() {
         password,
         password_confirmation: confirm,
       });
-      toast.success('Welcome to Helm', `Signed in as ${previewState.preview.email}.`);
+      toast.success('Welcome to Roasdriven', `Signed in as ${previewState.preview.email}.`);
       navigate('/onboarding', { replace: true });
     } catch (err: any) {
       const errors = err?.response?.data?.errors;

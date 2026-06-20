@@ -161,10 +161,18 @@ export interface DashboardRow {
     isComplete: boolean;
   };
   // Year-over-year comparison — present only when the Comparison filter is on.
-  // Keyed by period: yesterday | last7 | last30 | mtd. thisYear/lastYear are the
-  // selected metric (net or total) summed over the period vs the same dates a
-  // year earlier; lastYear is null for a brand with no history that far back.
-  comparison?: Record<string, { thisYear: number | null; lastYear: number | null }>;
+  // Keyed by period: yesterday | last7 | last30 | mtd. Each period carries
+  // revenue (the selected metric), blended ad spend, and ROAS — this year vs the
+  // same dates a year earlier. A side is null when no data landed in that window
+  // (e.g. last year before ad spend was backfilled), rendered as "—".
+  comparison?: Record<
+    string,
+    {
+      revenue: { thisYear: number | null; lastYear: number | null };
+      spend: { thisYear: number | null; lastYear: number | null };
+      roas: { thisYear: number | null; lastYear: number | null };
+    }
+  >;
 }
 
 export interface SyncLog {

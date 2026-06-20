@@ -49,7 +49,7 @@ export function TeamPage() {
   if (isLoading) {
     return (
       <AppLayout title="Team">
-        <PageHeader title="Team" subtitle="Internal users and brand-side users with access to Helm." />
+        <PageHeader title="Team" subtitle="Internal users and brand-side users with access to Roasdriven." />
         <div className="muted" style={{ padding: 24 }}>
           Loading team…
         </div>
@@ -60,7 +60,7 @@ export function TeamPage() {
   if (isError) {
     return (
       <AppLayout title="Team">
-        <PageHeader title="Team" subtitle="Internal users and brand-side users with access to Helm." />
+        <PageHeader title="Team" subtitle="Internal users and brand-side users with access to Roasdriven." />
         <Banner
           variant="warning"
           icon={
@@ -154,7 +154,7 @@ export function TeamPage() {
     <AppLayout title="Team" tag={`${active.length} active`}>
       <PageHeader
         title="Team"
-        subtitle="Internal users and brand-side users with access to Helm."
+        subtitle="Internal users and brand-side users with access to Roasdriven."
         actions={
           <button onClick={() => openInvite(true)} className="btn btn-primary btn-sm">
             <svg

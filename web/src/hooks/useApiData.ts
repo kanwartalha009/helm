@@ -50,6 +50,7 @@ export interface BrandMetricTile {
   label: string;
   revenue: number;
   netSales: number;
+  totalSales: number;
   orders: number;
   refunds: number;
   days: number;

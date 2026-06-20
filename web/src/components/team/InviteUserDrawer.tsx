@@ -172,7 +172,7 @@ export function InviteUserDrawer({ open, onClose }: InviteUserDrawerProps) {
             <textarea
               className="input"
               rows={3}
-              placeholder="Welcome to Helm…"
+              placeholder="Welcome to Roasdriven…"
               style={{ resize: 'vertical', fontFamily: 'inherit' }}
               value={note}
               onChange={(e) => setNote(e.target.value)}

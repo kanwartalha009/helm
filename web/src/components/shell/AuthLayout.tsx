@@ -16,7 +16,7 @@ export function AuthLayout({ children, homeTo = '/' }: AuthLayoutProps) {
       <footer className="auth-footer">
         <div className="flex items-center justify-between">
           <span>© 2026 Nova Solution</span>
-          <span>Helm v1.0</span>
+          <span>Roasdriven v1.0</span>
         </div>
       </footer>
     </div>

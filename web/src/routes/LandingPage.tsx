@@ -29,13 +29,13 @@ export function LandingPage() {
           </span>
           <h1>One dashboard for every brand you run.</h1>
           <p className="lede">
-            Helm pulls revenue from Shopify, spend from Meta, Google, and TikTok, and shows you
+            Roasdriven pulls revenue from Shopify, spend from Meta, Google, and TikTok, and shows you
             blended ROAS across every store you manage — in the currency you choose, on the day you
             choose.
           </p>
           <div className="hero-cta">
             <Link to="/login" className="btn btn-primary btn-lg">
-              Sign in to Helm
+              Sign in to Roasdriven
             </Link>
             <a href="#features" className="btn btn-ghost btn-lg">
               See what it does →
@@ -76,7 +76,7 @@ export function LandingPage() {
           <div style={{ maxWidth: 580 }}>
             <h2>Built like a control tower, not a slideshow.</h2>
             <p className="lede mt-16">
-              Helm is an internal tool for one agency. No SaaS marketing, no upsell. It loads in
+              Roasdriven is an internal tool for one agency. No SaaS marketing, no upsell. It loads in
               under a second across a hundred stores, and every number has a date, a timezone, and
               an FX rate behind it.
             </p>
@@ -88,7 +88,7 @@ export function LandingPage() {
         <div className="container footer-inner">
           <div>© 2026 Nova Solution</div>
           <div className="flex gap-12">
-            <span>Helm v1.0</span>
+            <span>Roasdriven v1.0</span>
             <span>·</span>
             <Link to="/sitemap" className="muted">
               Site map

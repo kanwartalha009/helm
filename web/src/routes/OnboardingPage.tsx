@@ -30,7 +30,7 @@ const TIMEZONES = [
 
 /**
  * 3-step first-run wizard. Triggered for any authenticated user whose
- * `onboardingCompletedAt` is null. Captures the basics so no Helm screen
+ * `onboardingCompletedAt` is null. Captures the basics so no Roasdriven screen
  * ever renders with an empty workspace name or a half-empty profile.
  */
 export function OnboardingPage() {

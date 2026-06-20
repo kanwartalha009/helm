@@ -90,9 +90,8 @@ final class DashboardQuery
             ['yesterday', 'last7', 'last30', 'mtd'],
         ));
         $compareCol  = (($params['metric'] ?? 'total') === 'net') ? 'net_sales' : 'total_sales';
-        $compareExpr = $usd ? "{$compareCol} * COALESCE(fx_rate_to_usd, 1)" : $compareCol;
 
-        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr, $totalExpr, $comparePeriods, $compareExpr): array {
+        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr, $totalExpr, $comparePeriods, $compareCol): array {
             $tz             = $b->timezone ?: 'UTC';
             $yesterdayDate  = CarbonImmutable::now($tz)->subDay()->startOfDay()->toDateString();
             $dayBeforeDate  = CarbonImmutable::now($tz)->subDays(2)->startOfDay()->toDateString();
@@ -204,7 +203,10 @@ final class DashboardQuery
                 ->whereBetween('date', [$prior7dStart, $prior7dEnd])
                 ->count();
 
-            // Per selected period: this year vs the same calendar dates last year.
+            // Per selected period: revenue, ad spend and ROAS this year vs the
+            // SAME calendar dates last year. Spend/ROAS need historical ad data
+            // (`php artisan ads:backfill-spend`); a window with no ad rows yet
+            // renders "—" rather than a fake 0 / −100%.
             $comparison = [];
             foreach ($comparePeriods as $period) {
                 [$start, $end] = $this->comparisonWindow($period, $tz);
@@ -213,9 +215,19 @@ final class DashboardQuery
                 }
                 $lastStart = CarbonImmutable::parse($start)->subYear()->toDateString();
                 $lastEnd   = CarbonImmutable::parse($end)->subYear()->toDateString();
+
+                $revThis   = $this->comparisonRevenue($b->id, $compareCol, $usd, $start, $end);
+                $revLast   = $this->comparisonRevenue($b->id, $compareCol, $usd, $lastStart, $lastEnd);
+                $spendThis = $this->comparisonSpend($b->id, $usd, $start, $end);
+                $spendLast = $this->comparisonSpend($b->id, $usd, $lastStart, $lastEnd);
+
                 $comparison[$period] = [
-                    'thisYear' => $this->comparisonSum($b->id, $compareExpr, $start, $end),
-                    'lastYear' => $this->comparisonSum($b->id, $compareExpr, $lastStart, $lastEnd),
+                    'revenue' => ['thisYear' => $revThis['display'],   'lastYear' => $revLast['display']],
+                    'spend'   => ['thisYear' => $spendThis['display'], 'lastYear' => $spendLast['display']],
+                    'roas'    => [
+                        'thisYear' => $this->comparisonRoas($revThis['usd'], $spendThis['usd']),
+                        'lastYear' => $this->comparisonRoas($revLast['usd'], $spendLast['usd']),
+                    ],
                 ];
             }
 
@@ -407,20 +419,74 @@ final class DashboardQuery
     }
 
     /**
-     * Sum the metric expression over [start, end] for a brand's Shopify rows.
-     * Returns null (not 0) when no rows landed in the window, so the UI can show
-     * "—" for a brand that didn't exist last year instead of a fake −100%.
+     * Shopify revenue over [start, end] for the selected metric column, returning
+     * BOTH the display-currency sum (for the column) and the USD-normalized sum
+     * (for ROAS). Each is null — not 0 — when no rows landed, so the UI shows "—"
+     * for a brand with no history that far back instead of a fake −100%.
+     *
+     * @return array{display: ?float, usd: ?float}
      */
-    private function comparisonSum(int $brandId, string $expr, string $start, string $end): ?float
+    private function comparisonRevenue(int $brandId, string $col, bool $usd, string $start, string $end): array
     {
+        $displayExpr = $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+        $usdExpr     = "{$col} * COALESCE(fx_rate_to_usd, 1)";
+
         $row = DailyMetric::query()
             ->where('brand_id', $brandId)
             ->where('platform', 'shopify')
             ->whereBetween('date', [$start, $end])
-            ->selectRaw("COALESCE(SUM({$expr}), 0) AS s, COUNT(*) AS c")
+            ->selectRaw("COALESCE(SUM({$displayExpr}), 0) AS disp, COALESCE(SUM({$usdExpr}), 0) AS usd, COUNT(*) AS c")
             ->first();
 
-        return ((int) ($row->c ?? 0)) > 0 ? round((float) ($row->s ?? 0), 2) : null;
+        $count = (int) ($row->c ?? 0);
+
+        return [
+            'display' => $count > 0 ? round((float) ($row->disp ?? 0), 2) : null,
+            'usd'     => $count > 0 ? (float) ($row->usd ?? 0) : null,
+        ];
+    }
+
+    /**
+     * Blended ad spend (Meta + Google + TikTok) over [start, end]: display-currency
+     * sum (for the column) + USD-normalized sum (for ROAS). Null — not 0 — when no
+     * ad rows landed in the window, so a period with no spend history (e.g. last
+     * year before the platforms were connected, pre-`ads:backfill-spend`) renders
+     * "—" rather than a misleading 0.
+     *
+     * @return array{display: ?float, usd: ?float}
+     */
+    private function comparisonSpend(int $brandId, bool $usd, string $start, string $end): array
+    {
+        $displayExpr = $usd ? 'spend * COALESCE(fx_rate_to_usd, 1)' : 'spend';
+        $usdExpr     = 'spend * COALESCE(fx_rate_to_usd, 1)';
+
+        $row = DailyMetric::query()
+            ->where('brand_id', $brandId)
+            ->whereIn('platform', ['meta', 'google', 'tiktok'])
+            ->whereBetween('date', [$start, $end])
+            ->selectRaw("COALESCE(SUM({$displayExpr}), 0) AS disp, COALESCE(SUM({$usdExpr}), 0) AS usd, COUNT(*) AS c")
+            ->first();
+
+        $count = (int) ($row->c ?? 0);
+
+        return [
+            'display' => $count > 0 ? round((float) ($row->disp ?? 0), 2) : null,
+            'usd'     => $count > 0 ? (float) ($row->usd ?? 0) : null,
+        ];
+    }
+
+    /**
+     * Blended ROAS over a comparison window = revenue(USD) ÷ spend(USD), matching
+     * the dashboard's live ratio(). Null when either side is missing or spend is
+     * zero — a brand with revenue but no ad spend that period reads "—", not 0×.
+     */
+    private function comparisonRoas(?float $revUsd, ?float $spendUsd): ?float
+    {
+        if ($revUsd === null || $spendUsd === null || $spendUsd <= 0.0) {
+            return null;
+        }
+
+        return round($revUsd / $spendUsd, 2);
     }
 
     private function shopifyRow(int $brandId, string $date): ?DailyMetric

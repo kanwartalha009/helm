@@ -91,6 +91,76 @@ final class ReportsFetcher
     }
 
     /**
+     * Daily account-level metrics for a DATE RANGE — one GAQL call per customer
+     * (segments.date BETWEEN → one row per (customer, day)), blended per day.
+     * Powers the historical spend backfill (`ads:backfill-spend`) the YoY
+     * spend/ROAS comparison needs. Same fields as fetch() plus segments.date.
+     *
+     * @return array<string, MetricSnapshot> keyed by Y-m-d, ascending
+     */
+    public function fetchRange(PlatformConnection $conn, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $customerIds = $this->customerIdsFor($conn);
+        if ($customerIds === []) {
+            return [];
+        }
+
+        $tz           = $conn->brand?->timezone ?: 'UTC';
+        $today        = CarbonImmutable::now($tz)->startOfDay();
+        $baseCurrency = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+        $brandId      = (int) $conn->brand_id;
+
+        $gaql = "SELECT customer.id, customer.currency_code, segments.date, metrics.cost_micros, "
+            . "metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value "
+            . "FROM customer WHERE segments.date BETWEEN '{$from->toDateString()}' AND '{$to->toDateString()}'";
+
+        // Y-m-d => running per-currency totals for that day across customers.
+        $perDay = [];
+        foreach ($customerIds as $customerId) {
+            foreach ($this->client->search($customerId, $gaql) as $row) {
+                $metrics  = $row->getMetrics();
+                $segments = $row->getSegments();
+                if ($metrics === null || $segments === null) {
+                    continue;
+                }
+                $day = (string) $segments->getDate();
+                if ($day === '') {
+                    continue;
+                }
+                $currency = strtoupper((string) ($row->getCustomer()?->getCurrencyCode() ?: $baseCurrency));
+
+                $perDay[$day] ??= ['spendByCcy' => [], 'valueByCcy' => [], 'impressions' => 0, 'clicks' => 0, 'conversions' => 0.0];
+                $perDay[$day]['impressions'] += (int) $metrics->getImpressions();
+                $perDay[$day]['clicks']      += (int) $metrics->getClicks();
+                $perDay[$day]['conversions'] += (float) $metrics->getConversions();
+                $perDay[$day]['spendByCcy'][$currency] = ($perDay[$day]['spendByCcy'][$currency] ?? 0.0) + ((int) $metrics->getCostMicros()) / 1_000_000;
+                $perDay[$day]['valueByCcy'][$currency] = ($perDay[$day]['valueByCcy'][$currency] ?? 0.0) + (float) $metrics->getConversionsValue();
+            }
+        }
+
+        $out = [];
+        foreach ($perDay as $day => $agg) {
+            $date = CarbonImmutable::parse($day, $tz)->startOfDay();
+            [$currency, $spend, $value] = $this->resolveMoney($agg['spendByCcy'], $agg['valueByCcy'], $baseCurrency, $date);
+            $out[$day] = $this->snapshot(
+                $brandId,
+                $date,
+                $currency,
+                $spend,
+                $agg['impressions'],
+                $agg['clicks'],
+                (int) round($agg['conversions']),
+                $value,
+                array_values($customerIds),
+                $date->lessThan($today),
+            );
+        }
+        ksort($out);
+
+        return $out;
+    }
+
+    /**
      * The customer IDs to pull for this brand: the selected list when present,
      * otherwise the single external_id.
      *
