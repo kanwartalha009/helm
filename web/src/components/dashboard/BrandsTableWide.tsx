@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Avatar, Card, Tag, Dot } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { formatMoney, formatRoas, pctDelta } from '@/lib/formatters';
+import { useTriggerSync } from '@/hooks/useBrands';
 import type { DashboardRow, Platform } from '@/types/domain';
 
 interface MetricGroup {
@@ -79,17 +80,18 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
             </>
           ) : (
             <>
-              {/* Comparison on: 3-row header. Each enabled period is one block
-                  (Revenue / Spend / ROAS × This yr·Last yr·Δ = 9 cols) right
-                  after Brand; the normal groups span down beside it. */}
+              {/* Comparison on: 3-row header. The YoY block sits right AFTER the
+                  Total revenue group (Bosco, 2026-06-21); the other groups span
+                  down beside it. Each enabled period = Revenue / Spend / ROAS ×
+                  This yr·Last yr·Δ = 9 cols. */}
               <tr>
                 <th className="brand-col group-head" rowSpan={3}>Brand</th>
+                <th className="group-head group-start" rowSpan={2} colSpan={3}>{revenueLabel}</th>
                 {comparePeriods.map((p) => (
                   <th key={p} className="group-head group-start" colSpan={9}>
                     {PERIOD_LABEL[p] ?? p} · vs last year
                   </th>
                 ))}
-                <th className="group-head group-start" rowSpan={2} colSpan={3}>{revenueLabel}</th>
                 {showAdRollup && <th className="group-head group-start" rowSpan={2} colSpan={3}>Blended ROAS</th>}
                 {showMeta   && <th className="group-head group-start" rowSpan={2} colSpan={3}>Meta inv.</th>}
                 {showGoogle && <th className="group-head group-start" rowSpan={2} colSpan={3}>Google inv.</th>}
@@ -107,6 +109,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
                 ))}
               </tr>
               <tr>
+                <SubHeaders groupStart />
                 {comparePeriods.map((p) => (
                   <Fragment key={p}>
                     <ComparisonSubHeaders />
@@ -114,7 +117,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
                     <ComparisonSubHeaders />
                   </Fragment>
                 ))}
-                {Array.from({ length: groupCount }).map((_, i) => (
+                {Array.from({ length: groupCount - 1 }).map((_, i) => (
                   <SubHeaders key={i} groupStart />
                 ))}
               </tr>
@@ -246,6 +249,14 @@ function Row({
   // brand renders in its own native currency.
   const currency = displayCurrency || brand.baseCurrency || 'USD';
 
+  // Per-brand sync trigger for the "Sync now" affordance shown when yesterday
+  // isn't a finalized day. Each row owns its mutation so pending state is
+  // per-brand. revNeedsSync = connected to Shopify but yesterday not complete
+  // (missing, or a partial mid-day sync) — don't pass that partial off as the
+  // yesterday number (Bosco, 2026-06-21).
+  const triggerSync = useTriggerSync();
+  const revNeedsSync = connected.has('shopify') && !yesterday.isComplete;
+
   // Total revenue (Shopify "Total sales", Online Store). Net sales is hidden
   // (Bosco, 2026-06-20) so `metric` is pinned to 'total'; the 'net' branch is
   // retained for easy re-enable. Both are Shopify's own ShopifyQL figures.
@@ -286,6 +297,18 @@ function Row({
         </Link>
       </td>
 
+      {/* Total revenue first, then the YoY comparison block (right after Total
+          revenue per Bosco, 2026-06-21), then the remaining groups. */}
+      <MetricCells
+        group={groups[0]}
+        currency={currency}
+        index={0}
+        connected={connected}
+        health={health}
+        needsSync={revNeedsSync}
+        onSync={() => triggerSync.mutate(brand.slug)}
+        syncing={triggerSync.isPending}
+      />
       {comparePeriods.map((p) => {
         const c = row.comparison?.[p];
         return (
@@ -296,12 +319,12 @@ function Row({
           </Fragment>
         );
       })}
-      {groups.map((g, i) => (
+      {groups.slice(1).map((g, i) => (
         <MetricCells
           key={g.label}
           group={g}
           currency={currency}
-          index={i}
+          index={i + 1}
           connected={connected}
           health={health}
         />
@@ -316,12 +339,18 @@ function MetricCells({
   index,
   connected,
   health,
+  needsSync,
+  onSync,
+  syncing,
 }: {
   group: MetricGroup;
   currency: string;
   index: number;
   connected: Set<string>;
   health: Record<string, { status: string; lastSyncAt: string | null; hasError: boolean } | undefined>;
+  needsSync?: boolean;
+  onSync?: () => void;
+  syncing?: boolean;
 }) {
   const fmt = (v: number | null) =>
     v === null || v === undefined
@@ -333,6 +362,29 @@ function MetricCells({
   const groupStart = 'group-start';
   const cellClass = cn('num');
   const isFirstColInGroup = true;
+
+  // Yesterday isn't finalized for this Shopify-connected brand (missing, or a
+  // partial mid-day sync). Don't render a misleading partial as the yesterday
+  // figure — offer a per-brand Sync now (Bosco, 2026-06-21).
+  if (group.platform === 'shopify' && index === 0 && needsSync) {
+    const errored = health.shopify?.hasError;
+    return (
+      <td className={cn(cellClass, groupStart)} colSpan={3} style={{ textAlign: 'center' }}>
+        <button
+          type="button"
+          onClick={onSync}
+          disabled={syncing}
+          title="Yesterday isn’t fully synced — sync this brand for correct numbers."
+          style={{ background: 'none', border: 0, padding: 0, cursor: syncing ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+        >
+          <Tag variant="warning">
+            <Dot variant="warning" />
+            {syncing ? 'Syncing…' : errored ? 'Retry sync' : 'Sync now'}
+          </Tag>
+        </button>
+      </td>
+    );
+  }
 
   if (group.yesterday === null) {
     if (group.platform && !connected.has(group.platform)) {

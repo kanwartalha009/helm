@@ -23,6 +23,14 @@ class WorkspaceSetting extends Model
         'workspace_name'     => 'Nova Solution',
         'primary_currency'   => 'USD',
         'daily_sync_time'    => '13:00',   // UTC, hardcoded per spec but kept here for visibility
+        // White-label report theme (per-agency). The SPA reads this into CSS
+        // variables so every generated report carries the agency's branding.
+        // Client-facing name is "Roasdriven"; the internal product stays "Helm".
+        'report_branding'    => [
+            'agency_name' => 'Roasdriven',
+            'accent'      => '#1f6f5c',
+            'footer_text' => 'Powered by novasolution.ae',
+        ],
     ];
 
     public static function getValue(string $key, mixed $fallback = null): mixed

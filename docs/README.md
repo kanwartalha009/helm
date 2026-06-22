@@ -45,6 +45,7 @@ These are decisions the spec has already made. Treat them as fixed and don't re-
 
 ## Status
 
-- Spec version: 1.0 (May 2026)
-- Build: not yet started
-- Total scope: 22 working weeks across 5 phases
+- Spec version: 1.0 (May 2026) — the contracted vision. Sections 00–13 stay intact and are what we build toward.
+- Build: **live in production since 2026-06-01** (~80 brands). Phase 1 + 1.5 shipped; now releasing features incrementally, client-validated (decision D-013).
+- **Current reality:** [AS-BUILT.md](./AS-BUILT.md). **Ratified deviations:** [decisions/](./decisions/README.md). Where reality and a spec section disagree, the decisions log is the tiebreaker for "what is true today"; the spec is never silently overwritten.
+- Total scope: 22 working weeks across 5 phases (original plan; delivery is now incremental — see D-013).

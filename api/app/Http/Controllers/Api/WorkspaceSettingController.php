@@ -37,6 +37,11 @@ class WorkspaceSettingController extends Controller
         $data = $request->validate([
             'workspace_name'   => ['sometimes', 'string', 'max:120'],
             'primary_currency' => ['sometimes', Rule::in(['USD', 'EUR', 'GBP'])],
+            // White-label report theme — the SPA sends the full object on save.
+            'report_branding'             => ['sometimes', 'array'],
+            'report_branding.agency_name' => ['sometimes', 'string', 'max:120'],
+            'report_branding.accent'      => ['sometimes', 'string', 'max:32'],
+            'report_branding.footer_text' => ['sometimes', 'string', 'max:200'],
         ]);
 
         // Filter out empty/null so we never overwrite real values with blanks

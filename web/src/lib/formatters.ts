@@ -10,7 +10,10 @@ export function formatMoney(
   const formatter = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency,
-    maximumFractionDigits: 0,
+    // Show cents in standard notation (Bosco, 2026-06-21). Compact ($1.2K)
+    // keeps its own light precision.
+    minimumFractionDigits: opts.compact ? 0 : 2,
+    maximumFractionDigits: 2,
     notation: opts.compact ? 'compact' : 'standard',
   });
   return formatter.format(value);

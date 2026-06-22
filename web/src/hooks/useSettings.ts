@@ -6,6 +6,7 @@ import type {
   PlatformCredentialSchema,
   User,
 } from '@/types/domain';
+import type { ReportBranding } from '@/types/reports';
 
 // These hooks hit the REAL Laravel API at /api/* — no mocks.
 // They're the production data path for the Settings page.
@@ -18,6 +19,8 @@ export interface WorkspaceSettings {
   // renders in its own native currency. The backend column is kept for
   // backwards-compat but unused.
   daily_sync_time: string;
+  // White-label theme for client reports (read into CSS vars by ReportDocument).
+  report_branding: ReportBranding;
 }
 
 export function useWorkspaceSettings() {

@@ -21,6 +21,9 @@ import { BrandDetailPage } from '@/routes/BrandDetailPage';
 import { BrandAdsPage } from '@/routes/BrandAdsPage';
 import { BrandProductsPage } from '@/routes/BrandProductsPage';
 import { BrandAuditPage } from '@/routes/BrandAuditPage';
+import { ReportsPage } from '@/routes/ReportsPage';
+import { ReportViewPage } from '@/routes/ReportViewPage';
+import { PublicReportPage } from '@/routes/PublicReportPage';
 
 // /add-brand routes removed — brand creation is now an in-place drawer
 // triggered from the topbar / empty states / search palette.
@@ -67,6 +70,9 @@ export function App() {
           <Route path="/mfa/setup" element={<MfaSetupPage />} />
           <Route path="/mfa/verify" element={<MfaVerifyPage />} />
 
+          {/* Public shared report — token-gated, no auth (a client opens the link Bosco sent) */}
+          <Route path="/r/:token" element={<PublicReportPage />} />
+
           {/* Onboarding — gated separately because the gate redirects to/from it */}
           <Route
             path="/onboarding"
@@ -87,6 +93,10 @@ export function App() {
           <Route path="/brands/:slug/ads" element={<AuthGate><BrandAdsPage /></AuthGate>} />
           <Route path="/brands/:slug/products" element={<AuthGate><BrandProductsPage /></AuthGate>} />
           <Route path="/brands/:slug/audit" element={<AuthGate><BrandAuditPage /></AuthGate>} />
+
+          {/* Reporting & Creative Intelligence (Phase 2, slice 2.0) */}
+          <Route path="/reports" element={<AuthGate><ReportsPage /></AuthGate>} />
+          <Route path="/brands/:slug/reports/:type" element={<AuthGate><ReportViewPage /></AuthGate>} />
 
           {/* /add-brand legacy URLs redirect to dashboard — the drawer is the
               only entry point now. */}

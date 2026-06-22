@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\BrandController;
 use App\Http\Controllers\Api\ConnectionController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\PlatformCredentialController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SyncStatusController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\WorkspaceSettingController;
@@ -33,6 +34,10 @@ Route::prefix('auth')->group(function (): void {
     Route::post('invitations/accept',  [AuthController::class, 'acceptInvitation'])
         ->name('auth.invitations.accept');
 });
+
+// Public, read-only shared report — gated by an unguessable token, not auth.
+// This is how a client opens a report link Bosco sent them.
+Route::get('r/{token}', [ReportController::class, 'publicShow'])->middleware('throttle:60,1');
 
 Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
 
@@ -63,6 +68,10 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
     Route::get('dashboard',         [DashboardController::class, 'index']);
     Route::get('dashboard/summary', [DashboardController::class, 'summary']);
 
+    // Reports — list available types. The brand-scoped build + share routes
+    // live under the access.brand group below.
+    Route::get('reports', [ReportController::class, 'index']);
+
     // Brands
     Route::get('brands',             [BrandController::class, 'index']);
     Route::post('brands',            [BrandController::class, 'store']);
@@ -73,6 +82,11 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
 
         Route::get('brands/{brand}/trend',   [DashboardController::class, 'trend']);
         Route::get('brands/{brand}/metrics', [BrandController::class, 'metrics']);
+
+        // Reports — build a report for this brand, and snapshot it to a public
+        // share token. Report type is validated against the registry.
+        Route::get('brands/{brand}/reports/{type}',         [ReportController::class, 'show']);
+        Route::post('brands/{brand}/reports/{type}/shares', [ReportController::class, 'createShare']);
 
         // Brand-level team assignment (brand_user_access). Admin/manager only —
         // gated by BrandPolicy::update inside the controller.

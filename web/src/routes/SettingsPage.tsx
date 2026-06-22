@@ -13,6 +13,8 @@ import {
 } from '@/hooks/useSettings';
 import { logout } from '@/lib/auth';
 import { toast } from '@/stores/toastStore';
+import { DEFAULT_BRANDING } from '@/types/reports';
+import type { ReportBranding } from '@/types/reports';
 
 export function SettingsPage() {
   return (
@@ -22,6 +24,7 @@ export function SettingsPage() {
       <Tabs
         tabs={[
           { id: 'general',        label: 'General',        content: <ErrorBoundary><GeneralTab /></ErrorBoundary> },
+          { id: 'reports',        label: 'Reports',        content: <ErrorBoundary><ReportBrandingTab /></ErrorBoundary> },
           { id: 'account',        label: 'Account',        content: <ErrorBoundary><AccountTab /></ErrorBoundary> },
           { id: 'mfa',            label: 'Two-factor',     content: <ErrorBoundary><MfaTab /></ErrorBoundary> },
           { id: 'platform-keys',  label: 'Platform keys',  content: <ErrorBoundary><PlatformKeysSection /></ErrorBoundary> },
@@ -133,6 +136,102 @@ function timeSince(date: Date): string {
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m ago`;
   return date.toLocaleTimeString();
+}
+
+/* ---- Reports (white-label theme) ------------------------------------- */
+
+function ReportBrandingTab() {
+  const { data: settings, isLoading, isError, error } = useWorkspaceSettings();
+  const updateMutation = useUpdateWorkspaceSettings();
+  const [form, setForm] = useState<ReportBranding>(DEFAULT_BRANDING);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+
+  useEffect(() => {
+    if (settings?.report_branding) setForm({ ...DEFAULT_BRANDING, ...settings.report_branding });
+  }, [settings]);
+
+  if (isLoading) return <div style={{ maxWidth: 640 }} className="muted">Loading…</div>;
+  if (isError) return <ErrorBanner error={error} />;
+
+  const saved = settings?.report_branding ?? DEFAULT_BRANDING;
+  const dirty =
+    form.agency_name !== saved.agency_name ||
+    form.accent !== saved.accent ||
+    form.footer_text !== saved.footer_text;
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateMutation.mutate({ report_branding: form }, { onSuccess: () => setSavedAt(new Date()) });
+  };
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <h3 className="section-title">Report branding</h3>
+      <p className="text-sm muted" style={{ marginBottom: 16 }}>
+        Applied to every white-label client report. The brand name sits on top; your agency name and accent run throughout; the footer carries your attribution.
+      </p>
+      <form className="card" style={{ padding: 24 }} onSubmit={handleSave}>
+        <div className="form-grid">
+          <div className="field">
+            <label className="field-label">Agency name</label>
+            <input
+              className="input"
+              type="text"
+              value={form.agency_name}
+              onChange={(e) => setForm((f) => ({ ...f, agency_name: e.target.value }))}
+            />
+            <span className="field-hint">Shown in the report footer.</span>
+          </div>
+          <div className="field">
+            <label className="field-label">Accent colour</label>
+            <div className="flex items-center gap-8">
+              <input
+                type="color"
+                value={form.accent}
+                onChange={(e) => setForm((f) => ({ ...f, accent: e.target.value }))}
+                style={{ width: 44, height: 36, border: '1px solid var(--border)', borderRadius: 8, padding: 2, background: 'none', cursor: 'pointer' }}
+              />
+              <input
+                className="input"
+                type="text"
+                value={form.accent}
+                onChange={(e) => setForm((f) => ({ ...f, accent: e.target.value }))}
+                style={{ maxWidth: 140 }}
+              />
+            </div>
+          </div>
+          <div className="field">
+            <label className="field-label">Footer text</label>
+            <input
+              className="input"
+              type="text"
+              value={form.footer_text}
+              onChange={(e) => setForm((f) => ({ ...f, footer_text: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div style={{ marginTop: 20, border: '1px solid var(--border)', borderRadius: 10, padding: 16, background: 'var(--surface, #fff)' }}>
+          <div style={{ fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', color: form.accent, fontWeight: 600 }}>
+            Overall performance report
+          </div>
+          <div style={{ fontFamily: 'Georgia, serif', fontSize: 28, fontWeight: 600, marginTop: 4 }}>Brand name</div>
+          <div style={{ borderTop: '1px solid var(--border)', marginTop: 14, paddingTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+            <strong style={{ fontFamily: 'Georgia, serif', color: 'var(--text)' }}>{form.agency_name}</strong> · {form.footer_text}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-8 mt-24">
+          <Button type="submit" size="sm" variant="primary" disabled={!dirty || updateMutation.isPending}>
+            {updateMutation.isPending ? 'Saving…' : 'Save changes'}
+          </Button>
+          {savedAt && !dirty && (
+            <span className="text-xs" style={{ color: 'var(--success)' }}>Saved {timeSince(savedAt)}</span>
+          )}
+        </div>
+      </form>
+    </div>
+  );
 }
 
 /* ---- Account ---------------------------------------------------------- */
