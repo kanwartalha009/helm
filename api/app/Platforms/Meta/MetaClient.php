@@ -6,6 +6,7 @@ namespace App\Platforms\Meta;
 
 use App\Services\PlatformCredentialService;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Support\Facades\Log;
 use Psr\Http\Message\ResponseInterface;
@@ -107,8 +108,18 @@ final class MetaClient
                     'query'       => $query + ['access_token' => $token],
                     'http_errors' => false,
                 ]);
+            } catch (ConnectException $e) {
+                // Transient connection failure (DNS thread-spawn under load,
+                // connect timeout). Retry with backoff like a rate-limit, then
+                // surface it.
+                if ($attempt <= self::MAX_RETRIES) {
+                    Log::warning('meta.client.connect_retry', ['attempt' => $attempt, 'message' => $e->getMessage()]);
+                    sleep((int) min(self::MAX_SLEEP_SECS, 2 ** $attempt));
+                    continue;
+                }
+                throw new RuntimeException('Meta request failed: ' . str_replace($token, '[redacted]', $e->getMessage()), 0, $e);
             } catch (GuzzleException $e) {
-                throw new RuntimeException('Meta request failed: ' . $e->getMessage(), 0, $e);
+                throw new RuntimeException('Meta request failed: ' . str_replace($token, '[redacted]', $e->getMessage()), 0, $e);
             }
 
             $status = $response->getStatusCode();

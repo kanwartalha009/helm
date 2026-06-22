@@ -6,6 +6,7 @@ namespace App\Platforms\Shopify;
 
 use Closure;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -29,6 +30,9 @@ final class ShopifyClient
 
     /** Hard cap on a single throttle-sleep so we never block a worker forever. */
     private const MAX_SLEEP_SECS = 30;
+
+    /** Retries for transient connection failures (DNS thread-spawn under load, connect timeout). */
+    private const TRANSIENT_RETRIES = 3;
 
     private readonly Client $http;
     private string $accessToken;
@@ -92,21 +96,36 @@ final class ShopifyClient
     {
         $url = sprintf('https://%s/admin/api/%s/graphql.json', $this->shopDomain, $apiVersion ?? self::API_VERSION);
 
-        try {
-            $response = $this->http->post($url, [
-                'headers' => [
-                    'X-Shopify-Access-Token' => $this->accessToken,
-                    'Content-Type'           => 'application/json',
-                    'Accept'                 => 'application/json',
-                ],
-                'json' => [
-                    'query'     => $query,
-                    'variables' => (object) $variables,
-                ],
-                'http_errors' => false,
-            ]);
-        } catch (GuzzleException $e) {
-            throw new RuntimeException('Shopify request failed: ' . $e->getMessage(), 0, $e);
+        $response = null;
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                $response = $this->http->post($url, [
+                    'headers' => [
+                        'X-Shopify-Access-Token' => $this->accessToken,
+                        'Content-Type'           => 'application/json',
+                        'Accept'                 => 'application/json',
+                    ],
+                    'json' => [
+                        'query'     => $query,
+                        'variables' => (object) $variables,
+                    ],
+                    'http_errors' => false,
+                ]);
+                break;
+            } catch (ConnectException $e) {
+                // Transient connection failure — a DNS getaddrinfo thread-spawn
+                // failure under load, or a connect timeout. Back off and retry
+                // before surfacing, so a momentary resource spike during a big
+                // fan-out doesn't fail the whole sync.
+                if ($attempt <= self::TRANSIENT_RETRIES) {
+                    Log::warning('shopify.client.connect_retry', ['shop' => $this->shopDomain, 'attempt' => $attempt, 'message' => $e->getMessage()]);
+                    sleep((int) min(8, 2 ** ($attempt - 1)));
+                    continue;
+                }
+                throw new RuntimeException('Shopify request failed: ' . $e->getMessage(), 0, $e);
+            } catch (GuzzleException $e) {
+                throw new RuntimeException('Shopify request failed: ' . $e->getMessage(), 0, $e);
+            }
         }
 
         $status = $response->getStatusCode();

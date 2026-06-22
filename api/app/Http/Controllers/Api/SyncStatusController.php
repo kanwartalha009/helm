@@ -177,16 +177,15 @@ class SyncStatusController extends Controller
         $brandsSkipped        = 0; // active brands with no connections
         $brandsAlreadyRunning = 0; // active brands with an in-flight sync
 
-        // Stagger dispatch by N seconds per brand so a fan-out across 17+
-        // stores doesn't all hit Shopify within the same minute. The queue
-        // worker still processes serially, but adding a delay means a
-        // failure on brand #4 doesn't push brand #5 onto a retry minute
-        // when Shopify is throttling. 30s feels right at ~100 brands:
-        // 100 × 30s = 50 min spread, well inside the 12h sync window.
-        $staggerSeconds  = 0;
-        $perBrandStagger = 30;
+        // Prioritise the brands that need it most: sync the stalest (or
+        // never-synced) Shopify connections first, so if anything interrupts
+        // the run, the brands with the most-missing data are already done.
+        $sortedBrands = $brands->sortBy(function (Brand $brand) use ($connectionsByBrand): int {
+            $shopify = ($connectionsByBrand->get($brand->id) ?? collect())->firstWhere('platform', 'shopify');
+            return $shopify?->last_sync_at?->getTimestamp() ?? 0; // never-synced sorts first
+        })->values();
 
-        foreach ($brands as $brand) {
+        foreach ($sortedBrands as $brand) {
             if ($pendingByBrand->has($brand->id)) {
                 $brandsAlreadyRunning++;
                 continue;
@@ -200,13 +199,19 @@ class SyncStatusController extends Controller
 
             $brandsSynced++;
             $today = CarbonImmutable::now($brand->timezone)->startOfDay();
-            $from  = $today->subDays(6);
 
-            $delayAt = now()->addSeconds($staggerSeconds);
+            // The master sync is a dashboard REFRESH, not a first-import. Bound
+            // Shopify to a recent window (35 days — covers yesterday, day-before,
+            // L7d, L30, MTD) instead of the all-time scan, and ads to 3 days.
+            // That's the difference between ~5s and ~78s on a large store like
+            // Meller, and it stops the fan-out from exhausting the box's threads
+            // (the getaddrinfo failures). No dispatch stagger — Horizon worker
+            // concurrency already caps how many run at once; the old 30s/brand
+            // stagger just made the last brand wait ~40 minutes.
+            $shopifySince = $today->subDays(34);
+            $adsFrom      = $today->subDays(2);
 
-            $dispatched += $this->dispatchForBrand($brand, $connections, $today, $from, $delayAt);
-
-            $staggerSeconds += $perBrandStagger;
+            $dispatched += $this->dispatchForBrand($brand, $connections, $today, $adsFrom, null, $shopifySince);
         }
 
         return response()->json([
@@ -344,6 +349,7 @@ class SyncStatusController extends Controller
         CarbonImmutable $today,
         CarbonImmutable $from,
         ?\Illuminate\Support\Carbon $delayAt = null,
+        ?CarbonImmutable $shopifySince = null,
     ): int {
         $dispatched = 0;
 
@@ -356,7 +362,7 @@ class SyncStatusController extends Controller
                     'status'      => 'queued',
                     'started_at'  => null,
                 ]);
-                $pending = SyncBrandHistoryJob::dispatch($brand, $conn, null, $log->id);
+                $pending = SyncBrandHistoryJob::dispatch($brand, $conn, $shopifySince, $log->id);
                 if ($delayAt !== null) {
                     $pending->delay($delayAt);
                 }
