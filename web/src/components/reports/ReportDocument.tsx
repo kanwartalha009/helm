@@ -1,5 +1,7 @@
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import type {
+  AdAuditSection as AdAuditSectionData,
+  AdVerdict,
   CommerceRow,
   CommerceSection,
   CommerceTrend,
@@ -76,11 +78,35 @@ export function ReportDocument({
   const footerText = data.branding?.footer_text || 'Powered by novasolution.ae';
   const initialCommentary = content?.commentary ?? DEFAULT_COMMENTARY;
 
-  // Commerce sections present this period, numbered contiguously from 03.
-  const commerce: Array<{ id: 'region' | 'product' | 'collection'; section: CommerceSection }> = [];
-  if (data.byRegion) commerce.push({ id: 'region', section: data.byRegion });
-  if (data.byProduct) commerce.push({ id: 'product', section: data.byProduct });
-  if (data.byCategory) commerce.push({ id: 'collection', section: data.byCategory });
+  // Dynamic sections after the fixed 00/01/02, numbered contiguously from 03 so
+  // a gap never appears when one is absent (no backfill yet, no comparison, …).
+  const adsAudit = data.adsAudit ?? [];
+  const auditActions = adsAudit.flatMap((a) => a.actions);
+  const showStrategy = auditActions.length > 0 || !!content?.strategyRead;
+
+  let secN = 3;
+  const nextNum = () => String(secN++).padStart(2, '0');
+  const sections: React.ReactNode[] = [];
+  if (data.byRegion)
+    sections.push(<RegionSection key="region" num={nextNum()} section={data.byRegion} currency={currency} hasComparison={hasComparison} read={content?.regionRead} />);
+  if (data.byProduct)
+    sections.push(<ProductSection key="product" num={nextNum()} section={data.byProduct} currency={currency} hasComparison={hasComparison} read={content?.productRead} />);
+  if (data.byCategory)
+    sections.push(<CollectionSection key="collection" num={nextNum()} section={data.byCategory} currency={currency} read={content?.collectionRead} />);
+  adsAudit.forEach((a) =>
+    sections.push(
+      <AdsAuditSection
+        key={`audit-${a.platform}`}
+        num={nextNum()}
+        audit={a}
+        currency={currency}
+        hasComparison={hasComparison}
+        read={a.platform === 'google' ? content?.googleAuditRead : content?.metaAuditRead}
+      />,
+    ),
+  );
+  if (showStrategy)
+    sections.push(<StrategySection key="strategy" num={nextNum()} actions={auditActions} read={content?.strategyRead} />);
 
   const fmt = (v: number | null, kind: 'money' | 'ratio' | 'int' = 'money'): string =>
     v === null ? '—' : kind === 'ratio' ? formatRoas(v) : kind === 'int' ? v.toLocaleString() : formatMoney(v, currency);
@@ -194,16 +220,7 @@ export function ReportDocument({
         </div>
       </section>
 
-      {commerce.map((c, i) => {
-        const num = String(3 + i).padStart(2, '0');
-        if (c.id === 'region') {
-          return <RegionSection key={c.id} num={num} section={c.section} currency={currency} hasComparison={hasComparison} read={content?.regionRead} />;
-        }
-        if (c.id === 'product') {
-          return <ProductSection key={c.id} num={num} section={c.section} currency={currency} hasComparison={hasComparison} read={content?.productRead} />;
-        }
-        return <CollectionSection key={c.id} num={num} section={c.section} currency={currency} read={content?.collectionRead} />;
-      })}
+      {sections}
 
       <footer className="rpt-foot">
         <div>
@@ -476,6 +493,128 @@ function rowTint(trend: CommerceTrend): string {
   return '';
 }
 
+const VERDICT: Record<string, { label: string; tone: Tone }> = {
+  dead: { label: 'Dead', tone: 'dead' },
+  scaling_loss: { label: 'Scaling loss', tone: 'wound' },
+  weak: { label: 'Weak', tone: 'wound' },
+  winner: { label: 'Winner', tone: 'win' },
+  steady: { label: 'Steady', tone: 'hold' },
+  minor: { label: 'Minor', tone: 'hold' },
+};
+
+function verdictTint(v: AdVerdict): string {
+  if (v === 'dead') return 'row-dead';
+  if (v === 'scaling_loss' || v === 'weak') return 'row-wound';
+  if (v === 'winner') return 'row-win';
+  return '';
+}
+
+function DeltaRatio({ value, prev }: { value: number | null; prev: number | null }) {
+  if (value === null || prev === null) return <span className="flat">—</span>;
+  const abs = value - prev;
+  const dir = abs > 0.005 ? 'up' : abs < -0.005 ? 'down' : 'flat';
+  return <span className={dir}>{abs > 0 ? '+' : ''}{abs.toFixed(2)}×</span>;
+}
+
+function AdsAuditSection({
+  num,
+  audit,
+  currency,
+  hasComparison,
+  read,
+}: {
+  num: string;
+  audit: AdAuditSectionData;
+  currency: string;
+  hasComparison: boolean;
+  read?: string;
+}) {
+  const money = (v: number | null) => (v === null ? '—' : formatMoney(v, currency));
+  const roas = (v: number | null) => (v === null ? '—' : `${v.toFixed(2)}×`);
+  const pct1 = (v: number | null) => (v === null ? '—' : `${v.toFixed(2)}%`);
+  const platLabel = PLATFORM_LABEL[audit.platform] ?? audit.platform;
+  const k = audit.kpis;
+
+  return (
+    <section className="rpt-sec">
+      <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>{platLabel} audit — honest read</h2></div>
+      <div className="rpt-sec-sub">Where the budget went, what's working, and what to stop. Verdicts are rules-based on 7-day-click ROAS.</div>
+      <div className="rpt-kpis rpt-kpis-6">
+        <Kpi label="Spend" value={money(k.spend.value)} delta={<Delta pct={k.spend.deltaPct} abs={null} kind="money" />} />
+        <Kpi label="Purchases" value={k.purchases.value === null ? '—' : k.purchases.value.toLocaleString()} delta={<Delta pct={k.purchases.deltaPct} abs={null} kind="int" />} />
+        <Kpi label="ROAS" value={roas(k.roas.value)} delta={<DeltaRatio value={k.roas.value} prev={k.roas.previous} />} />
+        <Kpi label="CTR" value={pct1(k.ctr.value)} delta={<Delta pct={k.ctr.deltaPct} abs={null} kind="int" />} />
+        <Kpi label="CPM" value={money(k.cpm.value)} delta={<Delta pct={k.cpm.deltaPct} abs={null} kind="int" />} />
+        <div className="rpt-kpi rpt-kpi-warn">
+          <div className="rpt-kpi-l">Wasted spend</div>
+          <div className="rpt-kpi-v">{money(audit.waste.amount)}</div>
+          <div className="rpt-kpi-d">{audit.waste.count} campaign{audit.waste.count === 1 ? '' : 's'}{audit.waste.sharePct === null ? '' : ` · ${audit.waste.sharePct.toFixed(0)}% of spend`}</div>
+        </div>
+      </div>
+      {audit.campaigns.length > 0 && (
+        <div className="rpt-tbl-wrap">
+          <table className="rpt-tbl rpt-tbl-dim">
+            <thead>
+              <tr>
+                <th>Campaign</th>
+                <th>Verdict</th>
+                <th className="r">Spend</th>
+                <th className="r">ROAS</th>
+                {hasComparison && <th className="r">Δ spend</th>}
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {audit.campaigns.map((c) => (
+                <tr key={c.id} className={verdictTint(c.verdict)}>
+                  <td className="name"><div className="rpt-dim-label">{c.name}</div></td>
+                  <td>{VERDICT[c.verdict] ? <Badge tone={VERDICT[c.verdict].tone}>{VERDICT[c.verdict].label}</Badge> : '—'}</td>
+                  <td className="r">{money(c.spend)}</td>
+                  <td className="r">{roas(c.roas)}</td>
+                  {hasComparison && <td className="r"><Delta pct={c.spendDelta} abs={null} kind="int" /></td>}
+                  <td><span className="rpt-act-pill">{c.action}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {audit.totalCampaigns > audit.campaigns.length && (
+        <div className="rpt-cap">Showing the top {audit.campaigns.length} of {audit.totalCampaigns} campaigns by spend.</div>
+      )}
+      <SectionRead tag={`${platLabel} read`} text={read} />
+    </section>
+  );
+}
+
+function StrategySection({
+  num,
+  actions,
+  read,
+}: {
+  num: string;
+  actions: { kind: 'stop' | 'fix' | 'scale'; title: string; body: string }[];
+  read?: string;
+}) {
+  return (
+    <section className="rpt-sec">
+      <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>Strategy &amp; action plan</h2></div>
+      <div className="rpt-sec-sub">The prioritised next-30-days plan from the audit — stop the waste, cap the scalers, fund the winners.</div>
+      {actions.length > 0 && (
+        <div className="rpt-actions rpt-actions-stack">
+          {actions.map((a, i) => (
+            <div className={`rpt-act ${ACTION_META[a.kind]?.tone ?? 'hold'}`} key={i}>
+              <div className="rpt-act-k">{ACTION_META[a.kind]?.label ?? a.kind}</div>
+              <div className="rpt-act-t"><b>{a.title}</b> — {a.body}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <SectionRead tag="Strategy read" text={read} />
+    </section>
+  );
+}
+
 const REPORT_CSS = `
 .rpt{--ink:#161514;--ink-2:#45433f;--ink-3:#7a766f;--ink-4:#a8a39a;--line:#e7e4dd;--line-2:#d6d2c8;
   --paper:#fff;--bg:#f7f6f3;--red:#bb2d2d;--red-bg:#fbf1f0;--red-line:#eecac6;--green:#1f7a48;--green-bg:#eef8f1;--green-line:#bfe0c8;
@@ -550,6 +689,13 @@ const REPORT_CSS = `
 .rpt-tbl-dim tfoot td{padding:12px 18px;border-top:1.5px solid var(--accent);font-weight:700;background:var(--accent-soft)}
 .rpt-tbl-dim tfoot td.r{text-align:right;font-family:var(--mono);font-size:11.5px}
 .rpt-cap{font-size:10.5px;color:var(--ink-4);margin-top:10px;line-height:1.5;font-style:italic}
+.rpt-kpis-6{grid-template-columns:repeat(6,1fr)}
+.rpt-kpis-6 .rpt-kpi-v{font-size:26px}
+.rpt-kpi-warn{background:var(--red-bg);border-color:var(--red-line)}
+.rpt-kpi-warn .rpt-kpi-l,.rpt-kpi-warn .rpt-kpi-v{color:var(--red)}
+.rpt-kpi-warn .rpt-kpi-d{color:var(--ink-3)}
+.rpt-act-pill{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:20px;background:rgba(0,0,0,.05);color:var(--ink-2);white-space:nowrap}
+.rpt-actions-stack{grid-template-columns:1fr;gap:10px}
 .rpt-bars{background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:20px 24px}
 .rpt-bar-row{display:grid;grid-template-columns:160px 1fr 100px 64px;gap:12px;align-items:center;padding:8px 0;font-size:12px}
 .rpt-bar-row+.rpt-bar-row{border-top:1px solid var(--line)}

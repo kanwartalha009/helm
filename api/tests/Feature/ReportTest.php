@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Models\AdCampaignDailyMetric;
 use App\Models\Brand;
 use App\Models\CommerceDailyMetric;
 use App\Models\DailyMetric;
 use App\Models\User;
+use App\Reports\Support\AdAudit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -179,6 +181,57 @@ class ReportTest extends TestCase
         $matrix = collect($res->json('byRegion.matrix'))->keyBy('bucket');
         $this->assertSame(1, $matrix['dead']['count']);
         $this->assertSame(1, $matrix['growing']['count']);
+    }
+
+    public function test_ad_audit_classifies_campaigns_and_sums_waste(): void
+    {
+        $brand = Brand::factory()->create(['base_currency' => 'EUR', 'timezone' => 'Europe/Madrid']);
+
+        $seed = function (string $cid, string $name, float $spend, float $value) use ($brand): void {
+            (new AdCampaignDailyMetric())->forceFill([
+                'brand_id'         => $brand->id,
+                'platform'         => 'meta',
+                'date'             => now()->subDays(3)->toDateString(),
+                'campaign_id'      => $cid,
+                'campaign_name'    => $name,
+                'spend'            => $spend,
+                'impressions'      => 10000,
+                'clicks'           => 200,
+                'conversions'      => 20,
+                'conversion_value' => $value,
+                'currency'         => 'EUR',
+                'fx_rate_to_usd'   => 1.0,
+                'is_complete'      => true,
+                'pulled_at'        => now(),
+            ])->save();
+        };
+
+        $seed('c_dead', 'Losing campaign', 1000, 500);   // 0.5× ROAS → dead → waste
+        $seed('c_win', 'Winning campaign', 1000, 4000);  // 4.0× ROAS → winner
+
+        $audit = app(AdAudit::class)->forPlatform(
+            $brand->id,
+            'meta',
+            now()->subDays(30)->toDateString(),
+            now()->toDateString(),
+            null,
+            null,
+            usd: false,
+        );
+
+        $this->assertNotNull($audit);
+        $byId = collect($audit['campaigns'])->keyBy('id');
+        $this->assertSame('dead', $byId['c_dead']['verdict']);
+        $this->assertSame('winner', $byId['c_win']['verdict']);
+
+        // Waste = spend on the sub-1× campaign only.
+        $this->assertEqualsWithDelta(1000.0, $audit['waste']['amount'], 0.01);
+        $this->assertSame(1, $audit['waste']['count']);
+
+        // The action plan surfaces both a stop and a scale item.
+        $kinds = collect($audit['actions'])->pluck('kind')->all();
+        $this->assertContains('stop', $kinds);
+        $this->assertContains('scale', $kinds);
     }
 
     public function test_unknown_report_type_is_404(): void

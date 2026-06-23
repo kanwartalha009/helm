@@ -75,20 +75,24 @@ class ShopifyBackfillSalesCommand extends Command
                     'date'        => $day,
                     'net_sales'   => $figures['net'] ?? null,
                     'total_sales' => $figures['total'] ?? null,
+                    'orders'      => $figures['orders'] ?? null,
                     'currency'    => $brand->base_currency,
                     'is_complete' => true,
                     'pulled_at'   => now(),
                 ];
             }
 
-            // Insert missing historical days; update net/total on existing rows.
-            // The update list excludes order-based columns, so a backfill can
-            // never zero out revenue / refunds / orders / spend already synced.
+            // Insert missing historical days; refresh net/total/orders on existing
+            // rows. Orders comes from the ShopifyQL aggregate (same source as
+            // revenue) rather than order-by-order pagination, which is unreliable
+            // on high-volume brands — so a backfill makes orders CONSISTENT with
+            // revenue rather than leaving the report's order count at zero. The
+            // update list still excludes refunds / spend, so those are untouched.
             foreach (array_chunk($rows, 500) as $chunk) {
                 DailyMetric::upsert(
                     $chunk,
                     ['brand_id', 'platform', 'date'],
-                    ['net_sales', 'total_sales', 'pulled_at'],
+                    ['net_sales', 'total_sales', 'orders', 'pulled_at'],
                 );
             }
 

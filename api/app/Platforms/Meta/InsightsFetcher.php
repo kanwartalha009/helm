@@ -134,6 +134,59 @@ final class InsightsFetcher
     }
 
     /**
+     * Daily CAMPAIGN-level insights for a date range — one paged call per
+     * account with level=campaign, time_increment=1. Powers the ads audit
+     * (slice 2.2): spend / purchases / ROAS per campaign per day, same 7d_click
+     * window as the account-level fetch. Returns flat native-currency rows; the
+     * backfill command stamps the fx rate and upserts.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchCampaignRange(PlatformConnection $conn, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $accountIds = $this->accountIdsFor($conn);
+        if ($accountIds === []) {
+            return [];
+        }
+
+        $fallbackCcy = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+
+        $out = [];
+        foreach ($accountIds as $accountId) {
+            $rows = $this->client->paged(self::normalizeAccountId($accountId) . '/insights', [
+                'level'                           => 'campaign',
+                'fields'                          => 'campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,account_currency',
+                'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
+                'time_range'                       => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
+                'time_increment'                  => 1,
+                'use_account_attribution_setting' => 'false',
+                'limit'                           => 500,
+            ]);
+
+            foreach ($rows as $row) {
+                $day = (string) ($row['date_start'] ?? '');
+                $cid = (string) ($row['campaign_id'] ?? '');
+                if ($day === '' || $cid === '') {
+                    continue;
+                }
+                $out[] = [
+                    'date'             => $day,
+                    'campaign_id'      => $cid,
+                    'campaign_name'    => (string) ($row['campaign_name'] ?? ''),
+                    'spend'            => isset($row['spend']) ? round((float) $row['spend'], 2) : 0.0,
+                    'impressions'      => (int) ($row['impressions'] ?? 0),
+                    'clicks'           => (int) ($row['clicks'] ?? 0),
+                    'conversions'      => (int) round(self::attributedTotal($row['actions'] ?? [], self::PURCHASE_ACTION_TYPES)),
+                    'conversion_value' => round(self::attributedTotal($row['action_values'] ?? [], self::PURCHASE_ACTION_TYPES), 2),
+                    'currency'         => strtoupper((string) ($row['account_currency'] ?? $fallbackCcy)),
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * The ad accounts to pull for this brand: the selected list when present,
      * otherwise the single external_id (legacy / one-account connection).
      *

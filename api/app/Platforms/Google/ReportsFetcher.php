@@ -161,6 +161,59 @@ final class ReportsFetcher
     }
 
     /**
+     * Daily CAMPAIGN-level metrics for a date range — GAQL `FROM campaign` with
+     * segments.date yields one row per (campaign, day). Powers the ads audit
+     * (slice 2.4): spend / conversions / ROAS per campaign. Returns flat
+     * native-currency rows; the backfill stamps fx and upserts.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchCampaignRange(PlatformConnection $conn, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $customerIds = $this->customerIdsFor($conn);
+        if ($customerIds === []) {
+            return [];
+        }
+
+        $baseCurrency = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+
+        $gaql = "SELECT campaign.id, campaign.name, customer.currency_code, segments.date, "
+            . "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value "
+            . "FROM campaign WHERE segments.date BETWEEN '{$from->toDateString()}' AND '{$to->toDateString()}'";
+
+        $out = [];
+        foreach ($customerIds as $customerId) {
+            foreach ($this->client->search($customerId, $gaql) as $row) {
+                $metrics  = $row->getMetrics();
+                $segments = $row->getSegments();
+                $campaign = $row->getCampaign();
+                if ($metrics === null || $segments === null || $campaign === null) {
+                    continue;
+                }
+                $day = (string) $segments->getDate();
+                $cid = (string) $campaign->getId();
+                if ($day === '' || $cid === '') {
+                    continue;
+                }
+
+                $out[] = [
+                    'date'             => $day,
+                    'campaign_id'      => $cid,
+                    'campaign_name'    => (string) $campaign->getName(),
+                    'spend'            => round(((int) $metrics->getCostMicros()) / 1_000_000, 2),
+                    'impressions'      => (int) $metrics->getImpressions(),
+                    'clicks'           => (int) $metrics->getClicks(),
+                    'conversions'      => (int) round((float) $metrics->getConversions()),
+                    'conversion_value' => round((float) $metrics->getConversionsValue(), 2),
+                    'currency'         => strtoupper((string) ($row->getCustomer()?->getCurrencyCode() ?: $baseCurrency)),
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * The customer IDs to pull for this brand: the selected list when present,
      * otherwise the single external_id.
      *

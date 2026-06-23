@@ -9,6 +9,7 @@ use App\Models\DailyMetric;
 use App\Models\PlatformConnection;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Contracts\ReportType;
+use App\Reports\Support\AdAudit;
 use App\Reports\Support\CommerceBreakdown;
 
 /**
@@ -31,7 +32,10 @@ final class OverallPerformanceReport implements ReportType
 {
     private const AD_PLATFORMS = ['meta', 'google', 'tiktok'];
 
-    public function __construct(private readonly CommerceBreakdown $commerce) {}
+    public function __construct(
+        private readonly CommerceBreakdown $commerce,
+        private readonly AdAudit $ads,
+    ) {}
 
     public function key(): string
     {
@@ -87,7 +91,35 @@ final class OverallPerformanceReport implements ReportType
             'byRegion'   => $this->commerce->forDimension($brand->id, 'country',  $start, $end, $cStart, $cEnd, $filters->usd),
             'byProduct'  => $this->commerce->forDimension($brand->id, 'product',  $start, $end, $cStart, $cEnd, $filters->usd),
             'byCategory' => $this->commerce->forDimension($brand->id, 'category', $start, $end, $cStart, $cEnd, $filters->usd),
+            // Campaign-level Meta + Google audit (slice 2.2 / 2.4). One entry per
+            // connected ad platform that has campaign rows; null/absent until
+            // ads:backfill-campaigns has run — the SPA omits the section.
+            'adsAudit'   => $this->adsAudit($brand->id, $connected, $start, $end, $cStart, $cEnd, $filters->usd),
         ];
+    }
+
+    /**
+     * Campaign-level audit per connected ad platform — Meta first, then Google.
+     * Each platform with campaign rows in the window returns an audit block;
+     * platforms without data are simply absent (missing ≠ zero).
+     *
+     * @param array<int, string> $connected
+     * @return array<int, array<string, mixed>>
+     */
+    private function adsAudit(int $brandId, array $connected, string $start, string $end, ?string $cStart, ?string $cEnd, bool $usd): array
+    {
+        $out = [];
+        foreach (['meta', 'google'] as $platform) {
+            if (! in_array($platform, $connected, true)) {
+                continue;
+            }
+            $audit = $this->ads->forPlatform($brandId, $platform, $start, $end, $cStart, $cEnd, $usd);
+            if ($audit !== null) {
+                $out[] = $audit;
+            }
+        }
+
+        return $out;
     }
 
     /** @return array<string, mixed> */

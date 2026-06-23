@@ -63,6 +63,36 @@ export interface CommerceSection {
   matrix: CommerceMatrixBucket[] | null;
 }
 
+// Campaign-level ads audit (slice 2.2 / 2.4) — Meta + Google.
+export type AdVerdict = 'dead' | 'scaling_loss' | 'weak' | 'winner' | 'steady' | 'minor';
+
+export interface AdAuditKpi {
+  value: number | null;
+  previous: number | null;
+  deltaPct: number | null;
+}
+
+export interface AdCampaignRow {
+  id: string;
+  name: string;
+  spend: number;
+  roas: number | null;
+  conversions: number;
+  prevRoas: number | null;
+  spendDelta: number | null;
+  verdict: AdVerdict;
+  action: string;
+}
+
+export interface AdAuditSection {
+  platform: string;
+  kpis: { spend: AdAuditKpi; purchases: AdAuditKpi; roas: AdAuditKpi; ctr: AdAuditKpi; cpm: AdAuditKpi };
+  waste: { amount: number; sharePct: number | null; count: number };
+  campaigns: AdCampaignRow[];
+  totalCampaigns: number;
+  actions: { kind: 'stop' | 'fix' | 'scale'; title: string; body: string }[];
+}
+
 // Analyst narrative + action plan — written by the LLM layer (slice 2.3) and
 // editable before send. Every field optional: the report renders cleanly with
 // none of it (data-only), and richer as each slot is filled.
@@ -72,6 +102,9 @@ export interface ReportContent {
   regionRead?: string;
   productRead?: string;
   collectionRead?: string;
+  metaAuditRead?: string;
+  googleAuditRead?: string;
+  strategyRead?: string;
 }
 
 export interface OverallPerformanceReportData {
@@ -94,6 +127,7 @@ export interface OverallPerformanceReportData {
   byRegion?: CommerceSection | null;
   byProduct?: CommerceSection | null;
   byCategory?: CommerceSection | null;
+  adsAudit?: AdAuditSection[];
   branding: ReportBranding;
   content?: ReportContent | null;
   shared?: boolean;

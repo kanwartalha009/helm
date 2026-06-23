@@ -520,13 +520,18 @@ GQL;
      * Returns an empty map (so callers store net_sales = null, NOT zero) if
      * ShopifyQL errors, rather than failing the whole sync.
      *
-     * @return array<string, array{net: float, total: ?float}>  [Y-m-d => figures]
+     * Orders comes from the same ShopifyQL aggregate as revenue (not the
+     * order-by-order pagination), so high-volume brands like Meller — where
+     * paging thousands of orders/day is fragile — still get a reliable, fast
+     * count that's always consistent with the revenue on the same row.
+     *
+     * @return array<string, array{net: float, total: ?float, orders: ?int}>  [Y-m-d => figures]
      */
     private function netSalesByDay(ShopifyClient $client, string $sinceStr, string $untilStr): array
     {
         // Strip quotes so the channel value can't break out of the WHERE literal.
         $channel = str_replace("'", '', $this->shopifyqlChannel());
-        $ql = "FROM sales SHOW net_sales, total_sales GROUP BY day "
+        $ql = "FROM sales SHOW net_sales, total_sales, orders GROUP BY day "
             . "SINCE {$sinceStr} UNTIL {$untilStr} "
             . "WHERE sales_channel = '{$channel}' ORDER BY day";
 
@@ -566,7 +571,7 @@ GQL;
         }
 
         // The grouping (day) column is the only non-metric column.
-        $metricCols = ['net_sales', 'total_sales'];
+        $metricCols = ['net_sales', 'total_sales', 'orders'];
         $dayCol = null;
         foreach ($columns as $c) {
             $name = (string) ($c['name'] ?? '');
@@ -589,9 +594,11 @@ GQL;
             // Normalise "2026-06-05T00:00:00" / "2026-06-05" → "2026-06-05".
             $day = substr((string) $rawDay, 0, 10);
             $ts  = $row['total_sales'] ?? null;
+            $od  = $row['orders'] ?? null;
             $out[$day] = [
-                'net'   => round((float) $ns, 2),
-                'total' => $ts !== null ? round((float) $ts, 2) : null,
+                'net'    => round((float) $ns, 2),
+                'total'  => $ts !== null ? round((float) $ts, 2) : null,
+                'orders' => $od !== null ? (int) $od : null,
             ];
         }
 
