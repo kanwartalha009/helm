@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\Brand;
+use App\Models\CommerceDailyMetric;
 use App\Models\DailyMetric;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -75,6 +76,58 @@ class ReportTest extends TestCase
         $meta = collect($res->json('byPlatform'))->firstWhere('platform', 'meta');
         $this->assertFalse($meta['connected']);
         $this->assertNull($meta['spend']);
+
+        // No commerce_daily_metrics yet → the 2.1 sections are absent (null),
+        // never rendered as empty/zero. They appear only once the backfill runs.
+        $this->assertNull($res->json('byRegion'));
+        $this->assertNull($res->json('byProduct'));
+        $this->assertNull($res->json('byCategory'));
+    }
+
+    public function test_commerce_breakdown_sections_appear_once_backfilled(): void
+    {
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = Brand::factory()->create([
+            'base_currency' => 'EUR',
+            'timezone'      => 'Europe/Madrid',
+            'status'        => 'active',
+        ]);
+
+        // Two country rows inside the last-30-day window (slice 2.1 grain).
+        foreach ([['United States', 700.0, 7], ['Germany', 300.0, 3]] as [$country, $rev, $orders]) {
+            (new CommerceDailyMetric())->forceFill([
+                'brand_id'        => $brand->id,
+                'date'            => now()->subDays(3)->toDateString(),
+                'dimension_type'  => 'country',
+                'dimension_key'   => $country,
+                'dimension_label' => $country,
+                'orders'          => $orders,
+                'net_sales'       => $rev * 0.9,
+                'total_sales'     => $rev,
+                'currency'        => 'EUR',
+                'fx_rate_to_usd'  => 1.1,
+                'is_complete'     => true,
+                'pulled_at'       => now(),
+            ])->save();
+        }
+
+        Sanctum::actingAs($user);
+
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/overall-performance?period=last30&compare=none")
+            ->assertOk()
+            ->assertJsonStructure([
+                'byRegion' => ['rows' => [['key', 'label', 'revenue', 'orders', 'aov', 'share', 'previous', 'deltaPct']], 'total' => ['revenue', 'orders']],
+            ]);
+
+        // Ranked by revenue: US first at 70% share of the section total (1000).
+        $this->assertEquals('United States', $res->json('byRegion.rows.0.key'));
+        $this->assertEquals(700, $res->json('byRegion.rows.0.revenue'));
+        $this->assertEquals(0.7, $res->json('byRegion.rows.0.share'));
+        $this->assertEquals(1000, $res->json('byRegion.total.revenue'));
+
+        // Only the country dimension was seeded — product/category stay absent.
+        $this->assertNull($res->json('byProduct'));
+        $this->assertNull($res->json('byCategory'));
     }
 
     public function test_unknown_report_type_is_404(): void

@@ -9,23 +9,29 @@ use App\Models\DailyMetric;
 use App\Models\PlatformConnection;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Contracts\ReportType;
+use App\Reports\Support\CommerceBreakdown;
 
 /**
- * Slice 2.0 — runs entirely on data Helm already syncs: brand-total revenue
- * (Shopify total_sales), ad spend per platform, orders. Revenue vs ad spend vs
- * blended ROAS for the period and the comparison window. No new data.
+ * The brand's sendable monthly report. Headline runs on data Helm already syncs:
+ * brand-total revenue (Shopify total_sales), ad spend per platform, orders —
+ * revenue vs ad spend vs blended ROAS for the period and the comparison window.
+ *
+ * Slice 2.1 adds the by-region / by-product / by-category sections from
+ * commerce_daily_metrics. They're folded in here (not separate report types)
+ * because Bosco sends ONE report per brand; each section is present only when
+ * the commerce backfill has landed rows for that brand and window, so the report
+ * degrades cleanly before 2.1 data exists and lights up after.
  *
  * Currency + FX follow the dashboard: native by default, or USD (× the stored
  * fx_rate snapshot) when requested. ROAS is computed in USD so the ratio is
  * correct in either mode. Missing ≠ zero — an unconnected ad platform reports
  * `connected: false`, never spend 0 (spec rule 9).
- *
- * NOTE: the by-country "top markets" section is intentionally absent — that data
- * lands in slice 2.1. Do not stub it here.
  */
 final class OverallPerformanceReport implements ReportType
 {
     private const AD_PLATFORMS = ['meta', 'google', 'tiktok'];
+
+    public function __construct(private readonly CommerceBreakdown $commerce) {}
 
     public function key(): string
     {
@@ -76,6 +82,11 @@ final class OverallPerformanceReport implements ReportType
             // True only when every ad platform is connected; the SPA uses this to
             // caption blended ROAS honestly ("Meta only" etc.).
             'spendComplete'  => count(array_intersect(self::AD_PLATFORMS, $connected)) === count(self::AD_PLATFORMS),
+            // Granular commerce (slice 2.1). null until shopify:backfill-commerce
+            // has landed rows for this brand/window — the SPA omits the section.
+            'byRegion'   => $this->commerce->forDimension($brand->id, 'country',  $start, $end, $cStart, $cEnd, $filters->usd),
+            'byProduct'  => $this->commerce->forDimension($brand->id, 'product',  $start, $end, $cStart, $cEnd, $filters->usd),
+            'byCategory' => $this->commerce->forDimension($brand->id, 'category', $start, $end, $cStart, $cEnd, $filters->usd),
         ];
     }
 

@@ -397,6 +397,112 @@ GQL;
     }
 
     /**
+     * Range pull of Shopify sales grouped by day AND a dimension (country,
+     * product, or product category) for the reporting engine's Country and
+     * Product reports (feature spec slice 2.1). One ShopifyQL call per dimension.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function salesByDimensionRange(PlatformConnection $conn, string $dimension, string $sinceStr, string $untilStr): array
+    {
+        return $this->groupedSalesByDay($this->makeClient($conn), $dimension, $sinceStr, $untilStr);
+    }
+
+    /**
+     * ShopifyQL `FROM sales ... GROUP BY day, {dimension}`. Measures are kept to
+     * the proven total_sales / net_sales / orders so the only variable is the
+     * dimension name — a wrong dimension surfaces as a logged parseError and an
+     * empty result (never a fake zero), so the backfill degrades cleanly and the
+     * dimension is a one-line fix in the command's allow-list.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function groupedSalesByDay(ShopifyClient $client, string $dimension, string $sinceStr, string $untilStr): array
+    {
+        // Only [a-z_] — the dimension is a fixed allow-list from the command,
+        // never user input, but sanitise anyway so it can't break the QL.
+        $dim     = preg_replace('/[^a-z_]/', '', strtolower($dimension)) ?? '';
+        $channel = str_replace("'", '', $this->shopifyqlChannel());
+        if ($dim === '') {
+            return [];
+        }
+
+        $ql = "FROM sales SHOW total_sales, net_sales, orders "
+            . "GROUP BY day, {$dim} "
+            . "SINCE {$sinceStr} UNTIL {$untilStr} "
+            . "WHERE sales_channel = '{$channel}' ORDER BY day";
+
+        $gql = <<<'GQL'
+query ($q: String!) {
+  shopifyqlQuery(query: $q) {
+    tableData { columns { name } rows }
+    parseErrors
+  }
+}
+GQL;
+
+        try {
+            $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
+        } catch (Throwable $e) {
+            Log::warning('shopify.shopifyql.request_failed', ['error' => $e->getMessage(), 'ql' => $ql]);
+            return [];
+        }
+
+        $resp = $data['shopifyqlQuery'] ?? null;
+        if (! is_array($resp)) {
+            return [];
+        }
+        if (! empty($resp['parseErrors'])) {
+            $pe = $resp['parseErrors'];
+            Log::warning('shopify.shopifyql.parse_error', [
+                'parseErrors' => is_array($pe) ? json_encode($pe) : (string) $pe,
+                'ql'          => $ql,
+            ]);
+            return [];
+        }
+
+        $columns = $resp['tableData']['columns'] ?? [];
+        $rows    = $resp['tableData']['rows'] ?? [];
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        // Two grouping columns (day + the dimension); the rest are measures.
+        $metricCols = ['total_sales', 'net_sales', 'orders'];
+        $dayCol = null;
+        foreach ($columns as $c) {
+            $name = (string) ($c['name'] ?? '');
+            if ($name !== '' && $name !== $dim && ! in_array($name, $metricCols, true)) {
+                $dayCol = $name;
+                break;
+            }
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $rawDay = $dayCol !== null ? ($row[$dayCol] ?? null) : null;
+            $key    = $row[$dim] ?? null;
+            if ($rawDay === null || $key === null || (string) $key === '') {
+                continue;
+            }
+            $out[] = [
+                'date'   => substr((string) $rawDay, 0, 10),
+                'key'    => (string) $key,
+                'label'  => (string) $key,
+                'total'  => isset($row['total_sales']) ? round((float) $row['total_sales'], 2) : null,
+                'net'    => isset($row['net_sales'])   ? round((float) $row['net_sales'], 2)   : null,
+                'orders' => isset($row['orders'])      ? (int) $row['orders']                  : null,
+                'units'  => null,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * Net sales per day from Shopify's analytics engine (ShopifyQL) — the exact
      * "Net sales" figure behind Analytics > Reports, scoped to the Online Store
      * channel. Dates are grouped in the STORE timezone (ShopifyQL's native

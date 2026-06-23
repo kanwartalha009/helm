@@ -35,6 +35,24 @@ export interface ReportPlatformSpend {
   spend: number | null;
 }
 
+// Granular commerce breakdown (slice 2.1) — by region / product / category.
+export interface CommerceRow {
+  key: string;
+  label: string;
+  revenue: number;
+  orders: number;
+  aov: number | null;
+  share: number | null; // 0–1, within the section
+  previous: number | null;
+  deltaPct: number | null;
+}
+
+export interface CommerceSection {
+  rows: CommerceRow[];
+  other: { revenue: number; orders: number; share: number | null; count: number } | null;
+  total: { revenue: number; orders: number };
+}
+
 export interface OverallPerformanceReportData {
   reportType: string;
   brand: { name: string; slug: string; baseCurrency: string; timezone: string };
@@ -51,6 +69,10 @@ export interface OverallPerformanceReportData {
   revenueVsSpend: ReportRow[];
   byPlatform: ReportPlatformSpend[];
   spendComplete: boolean;
+  // Slice 2.1 — null until shopify:backfill-commerce has landed rows.
+  byRegion?: CommerceSection | null;
+  byProduct?: CommerceSection | null;
+  byCategory?: CommerceSection | null;
   branding: ReportBranding;
   content?: { commentary?: string } | null;
   shared?: boolean;
