@@ -11,6 +11,7 @@ use App\Models\SyncLog;
 use App\Platforms\PlatformRegistry;
 use App\Platforms\Support\SyncFailureClassifier;
 use App\Services\Currency\FxService;
+use App\Services\Sync\CampaignSync;
 use Carbon\CarbonImmutable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -62,7 +63,7 @@ class SyncBrandDayJob implements ShouldQueue
         $this->onQueue($platformConnection->platform === 'shopify' ? 'shopify-sync' : 'ads-sync');
     }
 
-    public function handle(PlatformRegistry $registry, FxService $fx): void
+    public function handle(PlatformRegistry $registry, FxService $fx, CampaignSync $campaignSync): void
     {
         // Two paths in:
         //   - $logId set      → controller/command already wrote a `queued`
@@ -137,6 +138,12 @@ class SyncBrandDayJob implements ShouldQueue
                 'last_sync_at' => now(),
                 'last_error'   => null,
             ]);
+
+            // Keep the ads audit current: pull this day's campaign-level rows for
+            // Meta/Google right after the account-level metric lands. Best-effort
+            // — syncDay guards the platform and swallows its own errors, so it can
+            // never fail the day sync that has already succeeded above.
+            $campaignSync->syncDay($this->platformConnection, $this->date);
         } catch (Throwable $e) {
             $log->update([
                 'status'        => 'failed',
