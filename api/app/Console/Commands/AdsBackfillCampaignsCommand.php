@@ -19,21 +19,23 @@ use Throwable;
  * purchases, conversion value and ROAS per campaign per day — the grain the
  * audit needs to rank winners, flag waste and build the kill-list + strategy.
  *
- * Monthly windows (Meta's insights endpoint returns short for high-volume
- * accounts on long ranges; Google is chunked for parity). Additive upsert on
- * (brand, platform, date, campaign) that NEVER touches daily_metrics.
+ * Small day-windows (campaign-level daily insights trip Meta's "reduce the
+ * amount of data" cap on busy accounts over long ranges; --chunk-days tunes it,
+ * Google is chunked the same way). Additive upsert on (brand, platform, date,
+ * campaign) that NEVER touches daily_metrics.
  *
  *   php artisan ads:backfill-campaigns                          # all active brands, both platforms, since 2025-01-01
  *   php artisan ads:backfill-campaigns meller                   # one brand
  *   php artisan ads:backfill-campaigns meller --platform=meta   # one brand, Meta only
- *   php artisan ads:backfill-campaigns --since=2026-01-01
+ *   php artisan ads:backfill-campaigns meller --since=2026-04-01 --chunk-days=3   # busy account → smaller windows
  */
 class AdsBackfillCampaignsCommand extends Command
 {
     protected $signature = 'ads:backfill-campaigns '
         . '{brand? : slug or id; omit for all active brands} '
         . '{--since=2025-01-01 : first day to pull (Y-m-d)} '
-        . '{--platform= : meta|google; omit for both}';
+        . '{--platform= : meta|google; omit for both} '
+        . '{--chunk-days=7 : days per API request; lower it (e.g. 3 or 1) if Meta returns "reduce the amount of data"}';
 
     protected $description = 'Backfill campaign-level Meta + Google performance into ad_campaign_daily_metrics for the ads audit.';
 
@@ -53,6 +55,11 @@ class AdsBackfillCampaignsCommand extends Command
 
             return self::FAILURE;
         }
+
+        // Campaign-level daily insights are far heavier than account-level, so a
+        // month-long window trips Meta's "reduce the amount of data" cap on busy
+        // accounts. Pull in small day-windows instead — tunable per run.
+        $chunkDays = max(1, (int) $this->option('chunk-days'));
 
         $brands = $this->resolveBrands();
         if ($brands->isEmpty()) {
@@ -86,7 +93,7 @@ class AdsBackfillCampaignsCommand extends Command
                 $failed = false;
                 $cursor = $from;
                 while ($cursor->lessThanOrEqualTo($until)) {
-                    $chunkEnd = $cursor->addMonth()->subDay();
+                    $chunkEnd = $cursor->addDays($chunkDays - 1);
                     if ($chunkEnd->greaterThan($until)) {
                         $chunkEnd = $until;
                     }
