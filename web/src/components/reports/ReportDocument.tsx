@@ -35,6 +35,8 @@ export function ReportDocument({
 
   const fmt = (v: number | null, kind: 'money' | 'ratio' | 'int' = 'money'): string =>
     v === null ? '—' : kind === 'ratio' ? formatRoas(v) : kind === 'int' ? v.toLocaleString() : formatMoney(v, currency);
+  // Hero KPI numbers read cleaner as whole units; the tables below carry the cents.
+  const kpiMoney = (v: number | null): string => (v === null ? '—' : formatMoney(v, currency, { whole: true }));
 
   return (
     <div className="rpt" style={{ ['--rpt-accent' as never]: accent }}>
@@ -55,8 +57,8 @@ export function ReportDocument({
       </header>
 
       <div className="rpt-kpis">
-        <Kpi label="Total revenue" value={fmt(kpis.revenue.value)} delta={<Delta pct={kpis.revenue.deltaPct} abs={null} kind="money" />} />
-        <Kpi label="Ad spend" value={fmt(kpis.adSpend.value)} delta={<Delta pct={kpis.adSpend.deltaPct} abs={null} kind="money" />} />
+        <Kpi label="Total revenue" value={kpiMoney(kpis.revenue.value)} delta={<Delta pct={kpis.revenue.deltaPct} abs={null} kind="money" />} />
+        <Kpi label="Ad spend" value={kpiMoney(kpis.adSpend.value)} delta={<Delta pct={kpis.adSpend.deltaPct} abs={null} kind="money" />} />
         <Kpi
           label="Blended ROAS"
           value={fmt(kpis.blendedRoas.value, 'ratio')}
@@ -64,7 +66,7 @@ export function ReportDocument({
           note={spendComplete ? undefined : 'On connected platforms only'}
         />
         <Kpi label="Orders" value={fmt(kpis.orders.value, 'int')} delta={<Delta pct={kpis.orders.deltaPct} abs={null} kind="int" />} />
-        <Kpi label="Avg order value" value={fmt(kpis.aov.value)} delta={<Delta pct={kpis.aov.deltaPct} abs={null} kind="money" />} />
+        <Kpi label="Avg order value" value={kpiMoney(kpis.aov.value)} delta={<Delta pct={kpis.aov.deltaPct} abs={null} kind="money" />} />
       </div>
 
       <section className="rpt-section">

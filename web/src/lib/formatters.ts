@@ -4,16 +4,16 @@
 export function formatMoney(
   value: number | null | undefined,
   currency: string = 'USD',
-  opts: { compact?: boolean } = {}
+  opts: { compact?: boolean; whole?: boolean } = {}
 ): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
   const formatter = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency,
-    // Show cents in standard notation (Bosco, 2026-06-21). Compact ($1.2K)
-    // keeps its own light precision.
-    minimumFractionDigits: opts.compact ? 0 : 2,
-    maximumFractionDigits: 2,
+    // Show cents in standard notation (Bosco, 2026-06-21). Compact ($1.2K) and
+    // `whole` (clean report hero numbers) drop the cents.
+    minimumFractionDigits: opts.compact || opts.whole ? 0 : 2,
+    maximumFractionDigits: opts.whole ? 0 : 2,
     notation: opts.compact ? 'compact' : 'standard',
   });
   return formatter.format(value);
