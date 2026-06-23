@@ -36,6 +36,8 @@ export interface ReportPlatformSpend {
 }
 
 // Granular commerce breakdown (slice 2.1) — by region / product / category.
+export type CommerceTrend = 'dead' | 'wounded' | 'stable' | 'growing' | 'new' | null;
+
 export interface CommerceRow {
   key: string;
   label: string;
@@ -45,12 +47,31 @@ export interface CommerceRow {
   share: number | null; // 0–1, within the section
   previous: number | null;
   deltaPct: number | null;
+  trend: CommerceTrend;
+}
+
+export interface CommerceMatrixBucket {
+  bucket: 'dead' | 'wounded' | 'new' | 'growing';
+  count: number;
+  samples: { label: string; deltaPct: number | null; revenue: number }[];
 }
 
 export interface CommerceSection {
   rows: CommerceRow[];
   other: { revenue: number; orders: number; share: number | null; count: number } | null;
   total: { revenue: number; orders: number };
+  matrix: CommerceMatrixBucket[] | null;
+}
+
+// Analyst narrative + action plan — written by the LLM layer (slice 2.3) and
+// editable before send. Every field optional: the report renders cleanly with
+// none of it (data-only), and richer as each slot is filled.
+export interface ReportContent {
+  commentary?: string;
+  actions?: { kind: 'stop' | 'fix' | 'scale'; title: string; body: string }[];
+  regionRead?: string;
+  productRead?: string;
+  collectionRead?: string;
 }
 
 export interface OverallPerformanceReportData {
@@ -74,7 +95,7 @@ export interface OverallPerformanceReportData {
   byProduct?: CommerceSection | null;
   byCategory?: CommerceSection | null;
   branding: ReportBranding;
-  content?: { commentary?: string } | null;
+  content?: ReportContent | null;
   shared?: boolean;
 }
 

@@ -63,6 +63,13 @@ final class RevenueFetcher
      */
     private const SHOPIFYQL_API_VERSION = '2026-04';
 
+    // ShopifyQL caps results at 1000 rows when no LIMIT is given (its documented
+    // default), silently dropping the tail. The commerce backfill groups by
+    // day × dimension, so it overrides that with an explicit ceiling and the
+    // command chunks by month to stay well under it. 10k < the 25k Admin API
+    // pagination ceiling.
+    private const SHOPIFYQL_ROW_LIMIT = 10000;
+
     public function __construct(private readonly OAuthService $oauth) {}
 
     /**
@@ -430,7 +437,8 @@ GQL;
         $ql = "FROM sales SHOW total_sales, net_sales, orders "
             . "GROUP BY day, {$dim} "
             . "SINCE {$sinceStr} UNTIL {$untilStr} "
-            . "WHERE sales_channel = '{$channel}' ORDER BY day";
+            . "WHERE sales_channel = '{$channel}' ORDER BY day "
+            . "LIMIT " . self::SHOPIFYQL_ROW_LIMIT;
 
         $gql = <<<'GQL'
 query ($q: String!) {

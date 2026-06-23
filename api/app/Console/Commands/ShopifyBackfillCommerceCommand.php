@@ -94,69 +94,125 @@ class ShopifyBackfillCommerceCommand extends Command
             $until    = CarbonImmutable::now($brand->timezone ?: 'UTC')->toDateString();
             $currency = $brand->base_currency;
             $fxCache  = [];   // date string => ?float, dedupes FX lookups within the brand
+            $months   = $this->monthWindows($since, $until);
 
             foreach ($dimensions as $type => $dim) {
-                try {
-                    $sales = $fetcher->salesByDimensionRange($conn, $dim, $since, $until);
-                } catch (Throwable $e) {
-                    $this->error("· {$brand->name} [{$type}]: {$e->getMessage()}");
-                    continue;
-                }
+                $dimRows = 0;
+                $failed  = 0;
 
-                if ($sales === []) {
-                    $this->line("· {$brand->name} [{$type}]: no rows for {$since}..{$until} (empty or dimension '{$dim}' not recognised — check logs).");
-                    continue;
-                }
-
-                $records = [];
-                foreach ($sales as $r) {
-                    $date = (string) $r['date'];
-                    $key  = trim((string) $r['key']);
-                    if ($key === '') {
+                // Month-by-month: a single full-range call groups by day ×
+                // dimension and would blow past ShopifyQL's 1000-row default,
+                // silently dropping the most recent days (ORDER BY day keeps the
+                // head). Monthly windows stay far under the cap and keep each
+                // query's complexity low for the rate limiter.
+                foreach ($months as [$chunkStart, $chunkEnd]) {
+                    try {
+                        $sales = $fetcher->salesByDimensionRange($conn, $dim, $chunkStart, $chunkEnd);
+                    } catch (Throwable $e) {
+                        $this->error("· {$brand->name} [{$type}] {$chunkStart}: {$e->getMessage()}");
+                        $failed++;
                         continue;
                     }
 
-                    $fxRate = $fxCache[$date]
-                        ??= $fx->cachedToUsd($currency, CarbonImmutable::parse($date));
+                    if ($sales === []) {
+                        continue;
+                    }
 
-                    $records[] = [
-                        'brand_id'        => $brand->id,
-                        'date'            => $date,
-                        'dimension_type'  => $type,
-                        'dimension_key'   => mb_substr($key, 0, 191),
-                        'dimension_label' => mb_substr((string) $r['label'], 0, 191),
-                        'orders'          => $r['orders'] ?? null,
-                        'units'           => $r['units'] ?? null,
-                        'net_sales'       => $r['net'] ?? null,
-                        'total_sales'     => $r['total'] ?? null,
-                        'currency'        => $currency,
-                        'fx_rate_to_usd'  => $fxRate,
-                        'is_complete'     => true,
-                        'pulled_at'       => now(),
-                    ];
+                    $records = $this->records($brand, $type, $sales, $currency, $fxCache, $fx);
+
+                    // Insert new (brand, date, dimension) rows; refresh metrics on
+                    // existing ones. The update list is metrics-only, so a re-run
+                    // never invents zeros or clobbers another dimension's rows.
+                    foreach (array_chunk($records, 500) as $chunk) {
+                        CommerceDailyMetric::upsert(
+                            $chunk,
+                            ['brand_id', 'date', 'dimension_type', 'dimension_key'],
+                            ['dimension_label', 'orders', 'units', 'net_sales', 'total_sales', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+                        );
+                    }
+
+                    $dimRows += count($records);
+                    usleep(150_000); // breather between ShopifyQL calls
                 }
 
-                // Insert new (brand, date, dimension) rows; refresh metrics on
-                // existing ones. The update list is metrics-only, so a re-run
-                // never invents zeros or clobbers another dimension's rows.
-                foreach (array_chunk($records, 500) as $chunk) {
-                    CommerceDailyMetric::upsert(
-                        $chunk,
-                        ['brand_id', 'date', 'dimension_type', 'dimension_key'],
-                        ['dimension_label', 'orders', 'units', 'net_sales', 'total_sales', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
-                    );
+                if ($dimRows === 0 && $failed === 0) {
+                    $this->line("· {$brand->name} [{$type}]: no rows for {$since}..{$until} (empty or dimension '{$dim}' not recognised — check logs).");
+                } else {
+                    $note = $failed > 0 ? " — {$failed} month(s) errored, re-run to fill (upsert is idempotent)" : '';
+                    $this->info("· {$brand->name} [{$type}]: {$dimRows} rows backfilled ({$since}..{$until}){$note}.");
                 }
 
-                $totalRows += count($records);
-                $this->info("· {$brand->name} [{$type}]: " . count($records) . " rows backfilled ({$since}..{$until}).");
-
-                usleep(200_000); // 0.2s breather between ShopifyQL calls
+                $totalRows += $dimRows;
             }
         }
 
         $this->info("Done. {$totalRows} commerce rows upserted across {$brands->count()} brand(s).");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Map fetched ShopifyQL rows to commerce_daily_metrics records, resolving
+     * each day's USD rate once (cached per brand). Revenue stays native; the
+     * stored fx snapshot lets reports show USD without converting at read time.
+     *
+     * @param array<int, array<string, mixed>> $sales
+     * @param array<string, ?float>            $fxCache  by-date cache, mutated
+     * @return array<int, array<string, mixed>>
+     */
+    private function records(Brand $brand, string $type, array $sales, string $currency, array &$fxCache, FxService $fx): array
+    {
+        $records = [];
+        foreach ($sales as $r) {
+            $date = (string) $r['date'];
+            $key  = trim((string) $r['key']);
+            if ($key === '') {
+                continue;
+            }
+
+            $fxRate = $fxCache[$date]
+                ??= $fx->cachedToUsd($currency, CarbonImmutable::parse($date));
+
+            $records[] = [
+                'brand_id'        => $brand->id,
+                'date'            => $date,
+                'dimension_type'  => $type,
+                'dimension_key'   => mb_substr($key, 0, 191),
+                'dimension_label' => mb_substr((string) $r['label'], 0, 191),
+                'orders'          => $r['orders'] ?? null,
+                'units'           => $r['units'] ?? null,
+                'net_sales'       => $r['net'] ?? null,
+                'total_sales'     => $r['total'] ?? null,
+                'currency'        => $currency,
+                'fx_rate_to_usd'  => $fxRate,
+                'is_complete'     => true,
+                'pulled_at'       => now(),
+            ];
+        }
+
+        return $records;
+    }
+
+    /**
+     * Month-aligned [start, end] windows spanning [since, until], so each
+     * ShopifyQL call covers at most one calendar month.
+     *
+     * @return array<int, array{0: string, 1: string}>
+     */
+    private function monthWindows(string $since, string $until): array
+    {
+        $cursor = CarbonImmutable::parse($since)->startOfDay();
+        $end    = CarbonImmutable::parse($until)->startOfDay();
+
+        $out = [];
+        while ($cursor <= $end) {
+            $monthEnd = $cursor->endOfMonth()->startOfDay();
+            $chunkEnd = $monthEnd > $end ? $end : $monthEnd;
+            $out[]    = [$cursor->toDateString(), $chunkEnd->toDateString()];
+            $cursor   = $chunkEnd->addDay();
+        }
+
+        return $out;
     }
 
     /** @return \Illuminate\Support\Collection<int, Brand> */

@@ -19,6 +19,14 @@ use App\Models\CommerceDailyMetric;
  */
 final class CommerceBreakdown
 {
+    // Trajectory thresholds (Δ% vs the comparison window). These classify every
+    // market/product into the agency report's status badges + region matrix.
+    // Defaults — tune once Bosco confirms his banding (open item #16).
+    private const DEAD    = -30.0;  // Δ% ≤ this → dead zone
+    private const WOUNDED = -10.0;  // DEAD < Δ% ≤ this → wounded
+    private const GROWING = 10.0;   // Δ% ≥ this → recovered / growing
+    // between WOUNDED and GROWING → holding/stable.
+
     /**
      * @return array<string, mixed>|null
      */
@@ -37,19 +45,23 @@ final class CommerceBreakdown
             return null;
         }
 
-        $prev = ($cStart !== null && $cEnd !== null)
-            ? $this->aggregate($brandId, $dimensionType, $cStart, $cEnd, $usd)
-            : [];
+        $hasCompare = $cStart !== null && $cEnd !== null;
+        $prev = $hasCompare ? $this->aggregate($brandId, $dimensionType, $cStart, $cEnd, $usd) : [];
 
-        // Section totals — shares are within the section, so they sum to 100%
-        // and never depend on the brand-level KPI revenue (which is computed
-        // from a different grain).
+        // Enrich EVERY row with its comparison + trajectory first, so the matrix
+        // counts span the full market set (not just the visible top N). Section
+        // totals here — shares are within the section, summing to 100%.
         $totalRev = 0.0;
         $totalOrders = 0;
-        foreach ($cur as $row) {
-            $totalRev += $row['revenue'];
+        foreach ($cur as $key => &$row) {
+            $totalRev    += $row['revenue'];
             $totalOrders += $row['orders'];
+            $prevRev      = $prev[$key]['revenue'] ?? null;
+            $row['previous'] = $prevRev !== null ? round((float) $prevRev, 2) : null;
+            $row['deltaPct'] = $this->pct($row['revenue'], $prevRev);
+            $row['trend']    = $hasCompare ? $this->trend($row['deltaPct'], $prevRev) : null;
         }
+        unset($row);
 
         // Rank by revenue, split into the top N + an "other" rollup of the tail.
         usort($cur, static fn (array $a, array $b): int => $b['revenue'] <=> $a['revenue']);
@@ -58,7 +70,6 @@ final class CommerceBreakdown
 
         $rows = [];
         foreach ($top as $row) {
-            $prevRev = $prev[$row['key']]['revenue'] ?? null;
             $rows[] = [
                 'key'      => $row['key'],
                 'label'    => $row['label'],
@@ -66,8 +77,9 @@ final class CommerceBreakdown
                 'orders'   => $row['orders'],
                 'aov'      => $row['orders'] > 0 ? round($row['revenue'] / $row['orders'], 2) : null,
                 'share'    => $totalRev > 0 ? round($row['revenue'] / $totalRev, 4) : null,
-                'previous' => $prevRev !== null ? round((float) $prevRev, 2) : null,
-                'deltaPct' => $this->pct($row['revenue'], $prevRev),
+                'previous' => $row['previous'],
+                'deltaPct' => $row['deltaPct'],
+                'trend'    => $row['trend'],
             ];
         }
 
@@ -88,10 +100,66 @@ final class CommerceBreakdown
         }
 
         return [
-            'rows'  => $rows,
-            'other' => $other,
-            'total' => ['revenue' => round($totalRev, 2), 'orders' => $totalOrders],
+            'rows'   => $rows,
+            'other'  => $other,
+            'total'  => ['revenue' => round($totalRev, 2), 'orders' => $totalOrders],
+            // Counts + sample movers per trajectory bucket across ALL rows —
+            // drives the region status matrix. Null when there's no comparison
+            // (every row would be "new", which says nothing).
+            'matrix' => $hasCompare ? $this->matrix($cur) : null,
         ];
+    }
+
+    /** Classify a row's trajectory from its Δ% and prior revenue. */
+    private function trend(?float $deltaPct, float|int|null $previous): string
+    {
+        if ($previous === null) {
+            return 'new';            // no prior revenue → first-time
+        }
+        if ($deltaPct === null) {
+            return 'growing';        // grew from zero
+        }
+        if ($deltaPct <= self::DEAD) {
+            return 'dead';
+        }
+        if ($deltaPct <= self::WOUNDED) {
+            return 'wounded';
+        }
+        if ($deltaPct >= self::GROWING) {
+            return 'growing';
+        }
+
+        return 'stable';
+    }
+
+    /**
+     * Bucket counts + top-3 sample movers (by revenue) for the four matrix
+     * cells. "stable" is intentionally excluded — the matrix highlights change.
+     *
+     * @param array<int, array<string, mixed>> $rows  full set, already enriched
+     * @return array<int, array<string, mixed>>
+     */
+    private function matrix(array $rows): array
+    {
+        $buckets = ['dead' => [], 'wounded' => [], 'new' => [], 'growing' => []];
+        foreach ($rows as $r) {
+            $t = $r['trend'] ?? null;
+            if ($t !== null && isset($buckets[$t])) {
+                $buckets[$t][] = [
+                    'label'    => $r['label'],
+                    'deltaPct' => $r['deltaPct'],
+                    'revenue'  => round((float) $r['revenue'], 2),
+                ];
+            }
+        }
+
+        $out = [];
+        foreach ($buckets as $bucket => $items) {
+            usort($items, static fn (array $a, array $b): int => $b['revenue'] <=> $a['revenue']);
+            $out[] = ['bucket' => $bucket, 'count' => count($items), 'samples' => array_slice($items, 0, 3)];
+        }
+
+        return $out;
     }
 
     /**

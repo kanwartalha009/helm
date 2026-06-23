@@ -130,6 +130,57 @@ class ReportTest extends TestCase
         $this->assertNull($res->json('byCategory'));
     }
 
+    public function test_region_trend_classification_and_matrix(): void
+    {
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = Brand::factory()->create([
+            'base_currency' => 'EUR',
+            'timezone'      => 'Europe/Madrid',
+            'status'        => 'active',
+        ]);
+
+        $seed = function (string $country, float $rev, string $date) use ($brand): void {
+            (new CommerceDailyMetric())->forceFill([
+                'brand_id'        => $brand->id,
+                'date'            => $date,
+                'dimension_type'  => 'country',
+                'dimension_key'   => $country,
+                'dimension_label' => $country,
+                'orders'          => 5,
+                'total_sales'     => $rev,
+                'net_sales'       => $rev,
+                'currency'        => 'EUR',
+                'fx_rate_to_usd'  => 1.0,
+                'is_complete'     => true,
+                'pulled_at'       => now(),
+            ])->save();
+        };
+
+        // last7 window = [now-7 .. now-1]; previous = [now-14 .. now-8].
+        $cur  = now()->subDays(2)->toDateString();
+        $prior = now()->subDays(10)->toDateString();
+
+        // US collapsed (-70% → dead); Germany surged (+400% → growing).
+        $seed('United States', 300, $cur);
+        $seed('United States', 1000, $prior);
+        $seed('Germany', 500, $cur);
+        $seed('Germany', 100, $prior);
+
+        Sanctum::actingAs($user);
+
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/overall-performance?period=last7&compare=previous")
+            ->assertOk();
+
+        $rows = collect($res->json('byRegion.rows'))->keyBy('key');
+        $this->assertSame('dead', $rows['United States']['trend']);
+        $this->assertSame('growing', $rows['Germany']['trend']);
+
+        // Matrix buckets carry the counts that drive the status cards.
+        $matrix = collect($res->json('byRegion.matrix'))->keyBy('bucket');
+        $this->assertSame(1, $matrix['dead']['count']);
+        $this->assertSame(1, $matrix['growing']['count']);
+    }
+
     public function test_unknown_report_type_is_404(): void
     {
         $user  = User::factory()->create(['role' => 'master_admin']);
