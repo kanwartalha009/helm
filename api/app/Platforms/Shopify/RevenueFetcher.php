@@ -219,6 +219,16 @@ GQL;
         $netSales   = $dayFigures['net'] ?? null;
         $totalSales = $dayFigures['total'] ?? null;
 
+        // Confirmed-zero day: the order scan above succeeded and returned no
+        // orders, and ShopifyQL has no sales row for the day — so it's a real €0
+        // day, not missing data. Store 0 (not null) so it renders as €0 complete
+        // instead of a perpetual "—"/Partial. (If the scan had failed it would
+        // have thrown above; we only reach here on a clean read.)
+        if ($dayFigures === null && $orders === 0) {
+            $netSales   = 0.0;
+            $totalSales = 0.0;
+        }
+
         $todayLocal = CarbonImmutable::now($tz)->startOfDay();
         $isComplete = $date->setTimezone($tz)->startOfDay()->lessThan($todayLocal);
 

@@ -100,6 +100,9 @@ final class OverallPerformanceReport implements ReportType
             // Dead / overstocked stock from the latest inventory snapshot
             // (slice 2.1). Null until shopify:sync-inventory has run.
             'deadInventory' => $this->deadInventory($brand->id),
+            // Is the data current for this window? The SPA prompts a fresh sync
+            // before trusting the numbers when this says we're behind.
+            'freshness'  => $this->freshness($brand->id, $end),
         ];
     }
 
@@ -125,6 +128,33 @@ final class OverallPerformanceReport implements ReportType
         }
 
         return $out;
+    }
+
+    /**
+     * Is the report's data current? Compares the latest COMPLETE Shopify day on
+     * file against the window end (yesterday). When behind, the SPA blocks the
+     * report behind a "sync fresh data first" gate so a client never receives
+     * stale numbers.
+     *
+     * @return array<string, mixed>
+     */
+    private function freshness(int $brandId, string $windowEnd): array
+    {
+        $lastComplete = DailyMetric::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'shopify')
+            ->where('is_complete', true)
+            ->max('date');
+
+        $end  = CarbonImmutable::parse($windowEnd)->startOfDay();
+        $last = $lastComplete !== null ? CarbonImmutable::parse((string) $lastComplete)->startOfDay() : null;
+
+        return [
+            'upToDate'   => $last !== null && $last->greaterThanOrEqualTo($end),
+            'lastSynced' => $last?->toDateString(),
+            'staleDays'  => ($last !== null && $last->lessThan($end)) ? (int) $last->diffInDays($end) : 0,
+            'windowEnd'  => $end->toDateString(),
+        ];
     }
 
     /**

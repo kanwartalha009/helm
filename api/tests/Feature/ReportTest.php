@@ -270,6 +270,43 @@ class ReportTest extends TestCase
         $this->assertSame(50, $out['deadUnits']);
     }
 
+    public function test_report_freshness_flags_stale_then_clears_after_sync(): void
+    {
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = Brand::factory()->create([
+            'base_currency' => 'EUR',
+            'timezone'      => 'Europe/Madrid',
+            'status'        => 'active',
+        ]);
+
+        $completeDay = function (string $date) use ($brand): void {
+            (new DailyMetric())->forceFill([
+                'brand_id'    => $brand->id,
+                'platform'    => 'shopify',
+                'date'        => $date,
+                'total_sales' => 100,
+                'orders'      => 2,
+                'currency'    => 'EUR',
+                'is_complete' => true,
+                'pulled_at'   => now(),
+            ])->save();
+        };
+
+        // Latest complete day is 4 days back → behind the window end (yesterday).
+        $completeDay(now('Europe/Madrid')->subDays(4)->toDateString());
+
+        Sanctum::actingAs($user);
+        $stale = $this->getJson("/api/brands/{$brand->slug}/reports/overall-performance?period=last30&compare=none")->assertOk();
+        $this->assertFalse($stale->json('freshness.upToDate'));
+        $this->assertGreaterThan(0, $stale->json('freshness.staleDays'));
+
+        // A fresh sync lands yesterday → up to date.
+        $completeDay(now('Europe/Madrid')->subDay()->toDateString());
+        $fresh = $this->getJson("/api/brands/{$brand->slug}/reports/overall-performance?period=last30&compare=none")->assertOk();
+        $this->assertTrue($fresh->json('freshness.upToDate'));
+        $this->assertSame(0, $fresh->json('freshness.staleDays'));
+    }
+
     public function test_unknown_report_type_is_404(): void
     {
         $user  = User::factory()->create(['role' => 'master_admin']);

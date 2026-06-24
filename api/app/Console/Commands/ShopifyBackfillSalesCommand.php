@@ -67,32 +67,48 @@ class ShopifyBackfillSalesCommand extends Command
                 continue;
             }
 
-            $rows = [];
-            foreach ($map as $day => $figures) {
+            // Fill EVERY day from the brand's first sales day in this window
+            // through today — not just the days ShopifyQL returned. ShopifyQL
+            // omits zero-sales days, which then sit "Partial" forever (an ad-spend
+            // row exists for the day but no Shopify row). Because $map is non-empty
+            // here the query DID cover the range, so an omitted day is a CONFIRMED
+            // zero and lands as €0 complete. Filling starts at the first day with
+            // data so we never invent zeros for dates before the store existed.
+            $tzToday   = CarbonImmutable::now($brand->timezone ?: 'UTC')->toDateString();
+            $firstData = min(array_keys($map));
+            $fillStart = $firstData > $since ? $firstData : $since;
+
+            $rows   = [];
+            $cursor = CarbonImmutable::parse($fillStart);
+            $end    = CarbonImmutable::parse($until);
+            while ($cursor->lessThanOrEqualTo($end)) {
+                $day = $cursor->toDateString();
+                $fig = $map[$day] ?? null;
                 $rows[] = [
                     'brand_id'    => $brand->id,
                     'platform'    => 'shopify',
                     'date'        => $day,
-                    'net_sales'   => $figures['net'] ?? null,
-                    'total_sales' => $figures['total'] ?? null,
-                    'orders'      => $figures['orders'] ?? null,
+                    'net_sales'   => $fig['net']    ?? 0,
+                    'total_sales' => $fig['total']  ?? 0,
+                    'orders'      => $fig['orders'] ?? 0,
                     'currency'    => $brand->base_currency,
-                    'is_complete' => true,
+                    'is_complete' => $day !== $tzToday,   // today is still partial
                     'pulled_at'   => now(),
                 ];
+                $cursor = $cursor->addDay();
             }
 
-            // Insert missing historical days; refresh net/total/orders on existing
-            // rows. Orders comes from the ShopifyQL aggregate (same source as
-            // revenue) rather than order-by-order pagination, which is unreliable
-            // on high-volume brands — so a backfill makes orders CONSISTENT with
-            // revenue rather than leaving the report's order count at zero. The
-            // update list still excludes refunds / spend, so those are untouched.
+            // Insert missing days (including confirmed-zero days) and refresh
+            // net/total/orders + completeness on existing rows, so a previously
+            // "Partial" zero-sales day flips to €0 Complete. Orders comes from the
+            // ShopifyQL aggregate (same source as revenue), not order-by-order
+            // pagination, which is unreliable on high-volume brands. Refunds /
+            // spend are a different platform concern and stay untouched.
             foreach (array_chunk($rows, 500) as $chunk) {
                 DailyMetric::upsert(
                     $chunk,
                     ['brand_id', 'platform', 'date'],
-                    ['net_sales', 'total_sales', 'orders', 'pulled_at'],
+                    ['net_sales', 'total_sales', 'orders', 'is_complete', 'pulled_at'],
                 );
             }
 

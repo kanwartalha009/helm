@@ -154,6 +154,7 @@ export interface OverallPerformanceReportData {
   byCategory?: CommerceSection | null;
   deadInventory?: DeadInventoryData | null;
   adsAudit?: AdAuditSection[];
+  freshness?: { upToDate: boolean; lastSynced: string | null; staleDays: number; windowEnd: string };
   branding: ReportBranding;
   content?: ReportContent | null;
   shared?: boolean;

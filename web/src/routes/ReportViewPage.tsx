@@ -1,27 +1,38 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/shell/AppLayout';
-import { Button, Segmented } from '@/components/ui';
+import { Button, Card, Segmented } from '@/components/ui';
 import { ReportDocument } from '@/components/reports/ReportDocument';
 import { useCreateShare, useReport } from '@/hooks/useReports';
+import { useTriggerSync } from '@/hooks/useBrands';
 import { toast } from '@/stores/toastStore';
 import type { ReportFiltersInput } from '@/types/reports';
 
 /**
  * In-app report view: filters, the editable white-label document, and the two
- * delivery actions. Export PDF uses the browser print path (print CSS lives in
- * ReportDocument); Create share link snapshots the filters + edited commentary
- * to a public token and copies the URL.
+ * delivery actions. Before the report renders, a freshness gate checks the data
+ * is current for the selected window — a client should never receive stale
+ * numbers, so when the latest synced day is behind we block on a fresh sync
+ * (with a "show anyway" escape).
  */
 export function ReportViewPage() {
   const { slug, type } = useParams();
+  const qc = useQueryClient();
   const [period, setPeriod] = useState<ReportFiltersInput['period']>('last30');
   const [compare, setCompare] = useState<ReportFiltersInput['compare']>('previous');
   const [commentary, setCommentary] = useState('');
+  const [showAnyway, setShowAnyway] = useState(false);
 
   const filters: ReportFiltersInput = { period, compare };
   const { data, isLoading, isError, error } = useReport(slug, type, filters);
   const createShare = useCreateShare(slug, type);
+  const triggerSync = useTriggerSync();
+
+  // A new window must re-check freshness, so the gate can't be bypassed for it.
+  useEffect(() => setShowAnyway(false), [period, compare, slug, type]);
+
+  const stale = !!data?.freshness && !data.freshness.upToDate;
 
   const onShare = () => {
     createShare.mutate(
@@ -34,6 +45,20 @@ export function ReportViewPage() {
         },
       },
     );
+  };
+
+  const onSyncAndRefresh = () => {
+    if (!slug) return;
+    triggerSync.mutate(slug, {
+      onSuccess: () => {
+        toast.success('Sync started', 'Pulling fresh data — the report refreshes here in a moment.');
+        // The sync runs on the queue; give it a head start, then refetch so the
+        // gate clears itself once the latest day lands.
+        setTimeout(() => qc.invalidateQueries({ queryKey: ['report', slug] }), 15000);
+      },
+      onError: (e: unknown) =>
+        toast.error('Couldn’t start sync', (e as { message?: string })?.message ?? 'Unknown error'),
+    });
   };
 
   return (
@@ -57,10 +82,10 @@ export function ReportViewPage() {
           onChange={(v) => setCompare(v as ReportFiltersInput['compare'])}
         />
         <span style={{ flex: 1 }} />
-        <Button variant="secondary" onClick={() => window.print()} disabled={!data}>
+        <Button variant="secondary" onClick={() => window.print()} disabled={!data || (stale && !showAnyway)}>
           Export PDF
         </Button>
-        <Button variant="primary" onClick={onShare} disabled={!data || createShare.isPending}>
+        <Button variant="primary" onClick={onShare} disabled={!data || (stale && !showAnyway) || createShare.isPending}>
           {createShare.isPending ? 'Creating…' : 'Create share link'}
         </Button>
       </div>
@@ -71,7 +96,62 @@ export function ReportViewPage() {
           Couldn’t load the report: {(error as any)?.response?.data?.message ?? (error as Error)?.message}
         </div>
       )}
-      {data && <ReportDocument data={data} editable onCommentaryChange={setCommentary} />}
+      {data &&
+        (stale && !showAnyway ? (
+          <FreshnessGate
+            staleDays={data.freshness!.staleDays}
+            lastSynced={data.freshness!.lastSynced}
+            windowEnd={data.freshness!.windowEnd}
+            syncing={triggerSync.isPending}
+            onSync={onSyncAndRefresh}
+            onShowAnyway={() => setShowAnyway(true)}
+          />
+        ) : (
+          <ReportDocument data={data} editable onCommentaryChange={setCommentary} />
+        ))}
     </AppLayout>
+  );
+}
+
+function FreshnessGate({
+  staleDays,
+  lastSynced,
+  windowEnd,
+  syncing,
+  onSync,
+  onShowAnyway,
+}: {
+  staleDays: number;
+  lastSynced: string | null;
+  windowEnd: string;
+  syncing: boolean;
+  onSync: () => void;
+  onShowAnyway: () => void;
+}) {
+  return (
+    <Card style={{ padding: 28, maxWidth: 560, margin: '24px auto', textAlign: 'center' }}>
+      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
+        Sync fresh data before generating this report
+      </div>
+      <p className="muted text-sm" style={{ marginBottom: 18, lineHeight: 1.6 }}>
+        {lastSynced ? (
+          <>
+            The latest complete day on file is <b>{lastSynced}</b>, but this report covers through{' '}
+            <b>{windowEnd}</b> — it’s <b>{staleDays} day{staleDays === 1 ? '' : 's'}</b> behind. Sync now so the
+            numbers are correct before you send it.
+          </>
+        ) : (
+          <>No synced data is on file for this brand yet. Run a sync to pull the data this report needs.</>
+        )}
+      </p>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+        <Button variant="primary" onClick={onSync} disabled={syncing}>
+          {syncing ? 'Starting sync…' : 'Sync now'}
+        </Button>
+        <Button variant="secondary" onClick={onShowAnyway}>
+          Show anyway
+        </Button>
+      </div>
+    </Card>
   );
 }
