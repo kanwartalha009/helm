@@ -11,6 +11,7 @@ use App\Reports\Contracts\ReportFilters;
 use App\Reports\Contracts\ReportType;
 use App\Reports\Support\AdAudit;
 use App\Reports\Support\CommerceBreakdown;
+use App\Reports\Support\DeadInventory;
 
 /**
  * The brand's sendable monthly report. Headline runs on data Helm already syncs:
@@ -35,6 +36,7 @@ final class OverallPerformanceReport implements ReportType
     public function __construct(
         private readonly CommerceBreakdown $commerce,
         private readonly AdAudit $ads,
+        private readonly DeadInventory $inventory,
     ) {}
 
     public function key(): string
@@ -95,6 +97,9 @@ final class OverallPerformanceReport implements ReportType
             // connected ad platform that has campaign rows; null/absent until
             // ads:backfill-campaigns has run — the SPA omits the section.
             'adsAudit'   => $this->adsAudit($brand->id, $connected, $start, $end, $cStart, $cEnd, $filters->usd),
+            // Dead / overstocked stock from the latest inventory snapshot
+            // (slice 2.1). Null until shopify:sync-inventory has run.
+            'deadInventory' => $this->deadInventory($brand->id),
         ];
     }
 
@@ -120,6 +125,23 @@ final class OverallPerformanceReport implements ReportType
         }
 
         return $out;
+    }
+
+    /**
+     * Latest dead-stock snapshot by product + collection, or null when no
+     * inventory snapshot exists yet (shopify:sync-inventory hasn't run).
+     *
+     * @return array<string, mixed>|null
+     */
+    private function deadInventory(int $brandId): ?array
+    {
+        $byProduct    = $this->inventory->forDimension($brandId, 'product');
+        $byCollection = $this->inventory->forDimension($brandId, 'collection');
+        if ($byProduct === null && $byCollection === null) {
+            return null;
+        }
+
+        return ['byProduct' => $byProduct, 'byCollection' => $byCollection];
     }
 
     /** @return array<string, mixed> */

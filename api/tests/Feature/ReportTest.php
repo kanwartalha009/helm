@@ -8,8 +8,10 @@ use App\Models\AdCampaignDailyMetric;
 use App\Models\Brand;
 use App\Models\CommerceDailyMetric;
 use App\Models\DailyMetric;
+use App\Models\InventorySnapshot;
 use App\Models\User;
 use App\Reports\Support\AdAudit;
+use App\Reports\Support\DeadInventory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -232,6 +234,40 @@ class ReportTest extends TestCase
         $kinds = collect($audit['actions'])->pluck('kind')->all();
         $this->assertContains('stop', $kinds);
         $this->assertContains('scale', $kinds);
+    }
+
+    public function test_dead_inventory_flags_stock_that_is_not_selling(): void
+    {
+        $brand = Brand::factory()->create(['timezone' => 'Europe/Madrid']);
+
+        $seed = function (string $key, int $ending, int $sold) use ($brand): void {
+            (new InventorySnapshot())->forceFill([
+                'brand_id'        => $brand->id,
+                'captured_on'     => now()->toDateString(),
+                'dimension_type'  => 'product',
+                'dimension_key'   => $key,
+                'dimension_label' => $key,
+                'ending_units'    => $ending,
+                'units_sold'      => $sold,
+                'window_days'     => 90,
+                'pulled_at'       => now(),
+            ])->save();
+        };
+
+        $seed('dead-ring', 50, 0);          // stock, zero sales → dead
+        $seed('slow-necklace', 100, 5);     // ~1800 days of cover → slow
+        $seed('healthy-bracelet', 20, 60);  // ~30 days of cover → healthy (excluded)
+
+        $out = app(DeadInventory::class)->forDimension($brand->id, 'product');
+
+        $this->assertNotNull($out);
+        $byKey = collect($out['rows'])->keyBy('key');
+        $this->assertSame('dead', $byKey['dead-ring']['status']);
+        $this->assertSame('slow', $byKey['slow-necklace']['status']);
+        $this->assertArrayNotHasKey('healthy-bracelet', $byKey->all());
+
+        $this->assertSame(1, $out['deadCount']);
+        $this->assertSame(50, $out['deadUnits']);
     }
 
     public function test_unknown_report_type_is_404(): void

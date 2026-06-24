@@ -406,6 +406,9 @@ function OverviewTab({
   const currency = metrics?.currency ?? brand.baseCurrency;
   const noData = !tiles || tiles.allTime.days === 0;
   const hasSpend = daily.some((r) => r.spend !== null);
+  // The most recent day in the brand's series is "today" — used to label an
+  // incomplete row accurately (only today is genuinely "partial").
+  const latestDate = daily.reduce((m, r) => (r.date > m ? r.date : m), daily[0]?.date ?? '');
 
   if (noData) {
     return (
@@ -474,7 +477,7 @@ function OverviewTab({
                   {row.isComplete ? (
                     <span className="status-pill success">Complete</span>
                   ) : (
-                    <span className="status-pill warning">Partial (today)</span>
+                    <span className="status-pill warning">{row.date === latestDate ? 'Partial (today)' : 'Partial'}</span>
                   )}
                 </td>
                 <td className="text-right muted text-sm">

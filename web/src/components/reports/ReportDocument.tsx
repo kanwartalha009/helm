@@ -5,6 +5,7 @@ import type {
   CommerceRow,
   CommerceSection,
   CommerceTrend,
+  DeadInventorySection as DeadInventorySectionData,
   OverallPerformanceReportData,
 } from '@/types/reports';
 
@@ -93,6 +94,10 @@ export function ReportDocument({
     sections.push(<ProductSection key="product" num={nextNum()} section={data.byProduct} currency={currency} hasComparison={hasComparison} read={content?.productRead} />);
   if (data.byCategory)
     sections.push(<CollectionSection key="collection" num={nextNum()} section={data.byCategory} currency={currency} read={content?.collectionRead} />);
+  if (data.deadInventory?.byProduct)
+    sections.push(<DeadStockSection key="dead-product" num={nextNum()} noun="product" section={data.deadInventory.byProduct} />);
+  if (data.deadInventory?.byCollection)
+    sections.push(<DeadStockSection key="dead-collection" num={nextNum()} noun="collection" section={data.deadInventory.byCollection} />);
   adsAudit.forEach((a) =>
     sections.push(
       <AdsAuditSection
@@ -491,6 +496,53 @@ function rowTint(trend: CommerceTrend): string {
   if (trend === 'wounded') return 'row-wound';
   if (trend === 'growing') return 'row-win';
   return '';
+}
+
+function DeadStockSection({
+  num,
+  noun,
+  section,
+}: {
+  num: string;
+  noun: string;
+  section: DeadInventorySectionData;
+}) {
+  const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
+  return (
+    <section className="rpt-sec">
+      <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>Dead inventory by {noun}</h2></div>
+      <div className="rpt-sec-sub">
+        {section.deadCount} {noun}{section.deadCount === 1 ? '' : 's'} with stock and no sales in the last {section.windowDays} days · {section.deadUnits.toLocaleString()} units tied up · snapshot {section.capturedOn}
+      </div>
+      <div className="rpt-tbl-wrap">
+        <table className="rpt-tbl rpt-tbl-dim">
+          <thead>
+            <tr>
+              <th>{Noun}</th>
+              <th>Status</th>
+              <th className="r">Stock units</th>
+              <th className="r">Sold ({section.windowDays}d)</th>
+              <th className="r">Cover</th>
+            </tr>
+          </thead>
+          <tbody>
+            {section.rows.map((r) => (
+              <tr key={r.key} className={r.status === 'dead' ? 'row-dead' : 'row-wound'}>
+                <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
+                <td>{r.status === 'dead' ? <Badge tone="dead">Dead</Badge> : <Badge tone="wound">Slow</Badge>}</td>
+                <td className="r">{r.endingUnits.toLocaleString()}</td>
+                <td className="r">{r.unitsSold.toLocaleString()}</td>
+                <td className="r">{r.coverDays === null ? '∞' : `${r.coverDays}d`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {section.flaggedItems > section.rows.length && (
+        <div className="rpt-cap">Showing the top {section.rows.length} of {section.flaggedItems} flagged {noun}s by units on hand.</div>
+      )}
+    </section>
+  );
 }
 
 const VERDICT: Record<string, { label: string; tone: Tone }> = {

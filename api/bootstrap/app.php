@@ -79,6 +79,16 @@ return Application::configure(basePath: dirname(__DIR__))
             ->onOneServer()
             ->appendOutputTo(storage_path('logs/schedule.log'));
 
+        // Inventory snapshot — once daily for the dead-stock report. 14:00 UTC,
+        // after the 13:00 sync so the trailing sell-through reflects the latest
+        // day. Captures stock + units sold by product and collection.
+        $schedule->command('shopify:sync-inventory')
+            ->dailyAt('14:00')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
         // sync_logs retention — keep last 90 days. Sunday 02:00 UTC.
         $schedule->call(function (): void {
             SyncLog::where('created_at', '<', now()->subDays(90))->delete();

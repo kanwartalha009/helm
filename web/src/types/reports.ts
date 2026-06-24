@@ -63,6 +63,31 @@ export interface CommerceSection {
   matrix: CommerceMatrixBucket[] | null;
 }
 
+// Dead / overstocked inventory (slice 2.1) — by product / collection.
+export interface DeadInventoryRow {
+  key: string;
+  label: string;
+  endingUnits: number;
+  unitsSold: number;
+  sellThrough: number | null;
+  coverDays: number | null;
+  status: 'dead' | 'slow';
+}
+
+export interface DeadInventorySection {
+  capturedOn: string;
+  windowDays: number;
+  rows: DeadInventoryRow[];
+  deadCount: number;
+  deadUnits: number;
+  flaggedItems: number;
+}
+
+export interface DeadInventoryData {
+  byProduct: DeadInventorySection | null;
+  byCollection: DeadInventorySection | null;
+}
+
 // Campaign-level ads audit (slice 2.2 / 2.4) — Meta + Google.
 export type AdVerdict = 'dead' | 'scaling_loss' | 'weak' | 'winner' | 'steady' | 'minor';
 
@@ -127,6 +152,7 @@ export interface OverallPerformanceReportData {
   byRegion?: CommerceSection | null;
   byProduct?: CommerceSection | null;
   byCategory?: CommerceSection | null;
+  deadInventory?: DeadInventoryData | null;
   adsAudit?: AdAuditSection[];
   branding: ReportBranding;
   content?: ReportContent | null;

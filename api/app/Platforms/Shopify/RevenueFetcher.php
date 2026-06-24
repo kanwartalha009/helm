@@ -352,15 +352,21 @@ GQL;
             : (count($byDay) > 0 ? min(array_keys($byDay)) : $todayLocal);
         $netByDay = $this->netSalesByDay($client, $sinceStr, $todayLocal);
 
-        // Days with orders, plus refund-only days ShopifyQL reports a non-zero
-        // net for (e.g. a day of pure returns → negative net sales).
-        $dates = array_keys($byDay);
-        foreach (array_keys($netByDay) as $d) {
-            if (! isset($byDay[$d]) && (($netByDay[$d]['net'] ?? 0.0) != 0.0)) {
-                $dates[] = $d;
-            }
+        // Emit a row for EVERY day in the scanned window, not just days that had
+        // orders. A low-volume brand's zero-order day is a CONFIRMED zero (the
+        // order scan and the ShopifyQL call both succeeded above), so it must
+        // land as a complete €0 / 0-order row — otherwise it shows as a
+        // perpetual "Partial" that never updates, because the next sync skips it
+        // again for having no orders. Missing ≠ zero still holds: a FAILED scan
+        // throws before this point and writes nothing, so we only ever zero-fill
+        // a window we actually read end to end.
+        $dates  = [];
+        $cursor = CarbonImmutable::parse($sinceStr, $tz)->startOfDay();
+        $endDay = CarbonImmutable::parse($todayLocal, $tz)->startOfDay();
+        while ($cursor->lessThanOrEqualTo($endDay)) {
+            $dates[] = $cursor->toDateString();
+            $cursor  = $cursor->addDay();
         }
-        $dates = array_values(array_unique($dates));
 
         $snapshots = [];
         foreach ($dates as $date) {
@@ -370,6 +376,13 @@ GQL;
             $refunds    = round($totals['refunds'], 2);
             $revenueNet = round($revenue - $refunds, 2);
 
+            // A day with no orders AND no ShopifyQL sales row is a confirmed zero
+            // (the whole window was scanned), so store 0 — not null — and it
+            // renders as €0 complete rather than an empty "—". A day that DID have
+            // orders but no ShopifyQL row keeps null (unknown total) as before.
+            $net   = $netByDay[$date]['net']   ?? (isset($byDay[$date]) ? null : 0.0);
+            $total = $netByDay[$date]['total'] ?? (isset($byDay[$date]) ? null : 0.0);
+
             $snapshots[$date] = new MetricSnapshot(
                 brandId:        $conn->brand_id,
                 platform:       'shopify',
@@ -377,8 +390,8 @@ GQL;
                 currency:       $currency,
                 revenue:        $revenue,
                 revenueNet:     $revenueNet,
-                netSales:       $netByDay[$date]['net'] ?? null,
-                totalSales:     $netByDay[$date]['total'] ?? null,
+                netSales:       $net,
+                totalSales:     $total,
                 orders:         $totals['orders'],
                 refundsAmount:  $refunds,
                 refundedOrders: $totals['refunded'],
@@ -599,6 +612,91 @@ GQL;
                 'net'    => round((float) $ns, 2),
                 'total'  => $ts !== null ? round((float) $ts, 2) : null,
                 'orders' => $od !== null ? (int) $od : null,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Inventory stock + sell-through for one dimension (product_title or
+     * product_type) over a trailing window — powers the dead-stock report. One
+     * ShopifyQL `FROM inventory` call, one row per dimension value (no day
+     * grouping). Degrades to [] + a logged parseError on failure, never a fake
+     * zero. Dimensions/fields verified against the ShopifyQL inventory schema.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function inventoryByDimension(PlatformConnection $conn, string $dimension, string $sinceStr, string $untilStr, int $limit = 200): array
+    {
+        return $this->inventoryGrouped($this->makeClient($conn), $dimension, $sinceStr, $untilStr, $limit);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function inventoryGrouped(ShopifyClient $client, string $dimension, string $sinceStr, string $untilStr, int $limit): array
+    {
+        $dim = preg_replace('/[^a-z_]/', '', strtolower($dimension)) ?? '';
+        if ($dim === '') {
+            return [];
+        }
+
+        $ql = "FROM inventory SHOW ending_inventory_units, inventory_units_sold, sell_through_rate "
+            . "GROUP BY {$dim} "
+            . "SINCE {$sinceStr} UNTIL {$untilStr} "
+            . "ORDER BY ending_inventory_units DESC "
+            . "LIMIT " . max(1, $limit);
+
+        $gql = <<<'GQL'
+query ($q: String!) {
+  shopifyqlQuery(query: $q) {
+    tableData { columns { name } rows }
+    parseErrors
+  }
+}
+GQL;
+
+        try {
+            $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
+        } catch (Throwable $e) {
+            Log::warning('shopify.shopifyql.request_failed', ['error' => $e->getMessage(), 'ql' => $ql]);
+            return [];
+        }
+
+        $resp = $data['shopifyqlQuery'] ?? null;
+        if (! is_array($resp)) {
+            return [];
+        }
+        if (! empty($resp['parseErrors'])) {
+            $pe = $resp['parseErrors'];
+            Log::warning('shopify.shopifyql.parse_error', [
+                'parseErrors' => is_array($pe) ? json_encode($pe) : (string) $pe,
+                'ql'          => $ql,
+            ]);
+            return [];
+        }
+
+        $rows = $resp['tableData']['rows'] ?? [];
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $key = $row[$dim] ?? null;
+            if ($key === null || (string) $key === '') {
+                continue;
+            }
+            $out[] = [
+                'key'               => (string) $key,
+                'label'             => (string) $key,
+                'ending_units'      => isset($row['ending_inventory_units']) ? (int) $row['ending_inventory_units'] : null,
+                'units_sold'        => isset($row['inventory_units_sold']) ? (int) $row['inventory_units_sold'] : null,
+                'sell_through_rate' => isset($row['sell_through_rate']) && is_numeric($row['sell_through_rate']) ? (float) $row['sell_through_rate'] : null,
             ];
         }
 
