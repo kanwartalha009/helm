@@ -12,6 +12,8 @@ use App\Reports\Contracts\ReportType;
 use App\Reports\Support\AdAudit;
 use App\Reports\Support\CommerceBreakdown;
 use App\Reports\Support\DeadInventory;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * The brand's sendable monthly report. Headline runs on data Helm already syncs:
@@ -90,20 +92,47 @@ final class OverallPerformanceReport implements ReportType
             'spendComplete'  => count(array_intersect(self::AD_PLATFORMS, $connected)) === count(self::AD_PLATFORMS),
             // Granular commerce (slice 2.1). null until shopify:backfill-commerce
             // has landed rows for this brand/window — the SPA omits the section.
-            'byRegion'   => $this->commerce->forDimension($brand->id, 'country',  $start, $end, $cStart, $cEnd, $filters->usd),
-            'byProduct'  => $this->commerce->forDimension($brand->id, 'product',  $start, $end, $cStart, $cEnd, $filters->usd),
-            'byCategory' => $this->commerce->forDimension($brand->id, 'category', $start, $end, $cStart, $cEnd, $filters->usd),
+            // Each enrichment is fault-isolated: a failure in one new section logs
+            // and drops to a safe default rather than 500-ing the whole report.
+            'byRegion'   => $this->safely('byRegion', fn () => $this->commerce->forDimension($brand->id, 'country',  $start, $end, $cStart, $cEnd, $filters->usd), null),
+            'byProduct'  => $this->safely('byProduct', fn () => $this->commerce->forDimension($brand->id, 'product',  $start, $end, $cStart, $cEnd, $filters->usd), null),
+            'byCategory' => $this->safely('byCategory', fn () => $this->commerce->forDimension($brand->id, 'category', $start, $end, $cStart, $cEnd, $filters->usd), null),
             // Campaign-level Meta + Google audit (slice 2.2 / 2.4). One entry per
             // connected ad platform that has campaign rows; null/absent until
             // ads:backfill-campaigns has run — the SPA omits the section.
-            'adsAudit'   => $this->adsAudit($brand->id, $connected, $start, $end, $cStart, $cEnd, $filters->usd),
+            'adsAudit'   => $this->safely('adsAudit', fn () => $this->adsAudit($brand->id, $connected, $start, $end, $cStart, $cEnd, $filters->usd), []),
             // Dead / overstocked stock from the latest inventory snapshot
             // (slice 2.1). Null until shopify:sync-inventory has run.
-            'deadInventory' => $this->deadInventory($brand->id),
+            'deadInventory' => $this->safely('deadInventory', fn () => $this->deadInventory($brand->id), null),
             // Is the data current for this window? The SPA prompts a fresh sync
-            // before trusting the numbers when this says we're behind.
-            'freshness'  => $this->freshness($brand->id, $end),
+            // before trusting the numbers when this says we're behind. On error,
+            // default to "up to date" so a freshness glitch never blocks the view.
+            'freshness'  => $this->safely('freshness', fn () => $this->freshness($brand->id, $end), [
+                'upToDate' => true, 'lastSynced' => null, 'staleDays' => 0, 'windowEnd' => $end,
+            ]),
         ];
+    }
+
+    /**
+     * Run an optional report section in isolation: on any failure, log it with
+     * the section name + location and fall back to $default, so a single broken
+     * enrichment degrades just that section instead of 500-ing the whole report.
+     *
+     * @param \Closure(): mixed $fn
+     */
+    private function safely(string $section, \Closure $fn, mixed $default): mixed
+    {
+        try {
+            return $fn();
+        } catch (Throwable $e) {
+            Log::warning('report.section_failed', [
+                'section' => $section,
+                'error'   => $e->getMessage(),
+                'at'      => $e->getFile() . ':' . $e->getLine(),
+            ]);
+
+            return $default;
+        }
     }
 
     /**
