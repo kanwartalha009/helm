@@ -75,11 +75,15 @@ class ShopifySyncInventoryCommand extends Command
                     continue;
                 }
 
-                $records = [];
+                $records   = [];
+                $withStock = 0;
                 foreach ($rows as $r) {
                     $key = trim((string) $r['key']);
                     if ($key === '') {
                         continue;
+                    }
+                    if ((int) ($r['ending_units'] ?? 0) > 0) {
+                        $withStock++;
                     }
                     $records[] = [
                         'brand_id'          => $brand->id,
@@ -104,7 +108,10 @@ class ShopifySyncInventoryCommand extends Command
                 }
 
                 $totalRows += count($records);
-                $this->info("· {$brand->name} [{$type}]: " . count($records) . " inventory rows captured ({$capturedOn}, {$window}d window).");
+                $this->info("· {$brand->name} [{$type}]: " . count($records) . " inventory rows captured, {$withStock} with stock on hand ({$capturedOn}, {$window}d window).");
+                if (count($records) > 0 && $withStock === 0) {
+                    $this->warn("  ↳ every {$type} reports 0 stock — this brand isn't tracking inventory quantities in Shopify, so there's no dead-stock to report.");
+                }
 
                 usleep(200_000);
             }
