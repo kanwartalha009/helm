@@ -210,24 +210,31 @@ GQL;
             ]);
         }
 
-        $revenueNet = round($revenue - $refundsAmount, 2);
-
-        // net_sales: Shopify's own figure via ShopifyQL (one-day window). Null
-        // if ShopifyQL is unavailable — missing, not zero.
+        // net_sales / total_sales: Shopify's own figures via ShopifyQL (one-day
+        // window). Null if ShopifyQL is unavailable — missing, not zero.
         $netByDay   = $this->netSalesByDay($client, $dateStr, $dateStr);
         $dayFigures = $netByDay[$dateStr] ?? null;
         $netSales   = $dayFigures['net'] ?? null;
         $totalSales = $dayFigures['total'] ?? null;
 
-        // Confirmed-zero day: the order scan above succeeded and returned no
-        // orders, and ShopifyQL has no sales row for the day — so it's a real €0
-        // day, not missing data. Store 0 (not null) so it renders as €0 complete
-        // instead of a perpetual "—"/Partial. (If the scan had failed it would
-        // have thrown above; we only reach here on a clean read.)
-        if ($dayFigures === null && $orders === 0) {
-            $netSales   = 0.0;
-            $totalSales = 0.0;
+        // Refunds: prefer Shopify's own `returns` (the exact figure total_sales
+        // nets out) over the order-by-order scan above — one consistent source,
+        // reliable on high-volume brands. Falls back to the scan if ShopifyQL
+        // didn't return this day.
+        if (($dayFigures['returns'] ?? null) !== null) {
+            $refundsAmount = (float) $dayFigures['returns'];
         }
+
+        // Confirmed-zero day: the order scan succeeded with no orders and
+        // ShopifyQL has no sales row — a real €0 day, not missing. Store 0 so it
+        // renders €0 complete instead of a perpetual "—"/Partial.
+        if ($dayFigures === null && $orders === 0) {
+            $netSales      = 0.0;
+            $totalSales    = 0.0;
+            $refundsAmount = 0.0;
+        }
+
+        $revenueNet = round($revenue - $refundsAmount, 2);
 
         $todayLocal = CarbonImmutable::now($tz)->startOfDay();
         $isComplete = $date->setTimezone($tz)->startOfDay()->lessThan($todayLocal);
@@ -382,8 +389,12 @@ GQL;
         foreach ($dates as $date) {
             $totals = $byDay[$date] ?? ['revenue' => 0.0, 'orders' => 0, 'refunds' => 0.0, 'refunded' => 0];
 
-            $revenue    = round($totals['revenue'], 2);
-            $refunds    = round($totals['refunds'], 2);
+            $revenue = round($totals['revenue'], 2);
+
+            // Refunds from Shopify's own `returns` (the figure total_sales nets
+            // out — consistent + reliable), falling back to the order-scan amount
+            // only when ShopifyQL didn't return this day.
+            $refunds    = $netByDay[$date]['returns'] ?? round($totals['refunds'], 2);
             $revenueNet = round($revenue - $refunds, 2);
 
             // A day with no orders AND no ShopifyQL sales row is a confirmed zero
@@ -548,13 +559,17 @@ GQL;
      * paging thousands of orders/day is fragile — still get a reliable, fast
      * count that's always consistent with the revenue on the same row.
      *
-     * @return array<string, array{net: float, total: ?float, orders: ?int}>  [Y-m-d => figures]
+     * `returns` is the refund magnitude that total_sales already nets out. We
+     * keep it (as a positive number) so the dashboard can show "Total sales +
+     * refunds" — revenue gross of returns — from one consistent source.
+     *
+     * @return array<string, array{net: float, total: ?float, orders: ?int, returns: ?float}>  [Y-m-d => figures]
      */
     private function netSalesByDay(ShopifyClient $client, string $sinceStr, string $untilStr): array
     {
         // Strip quotes so the channel value can't break out of the WHERE literal.
         $channel = str_replace("'", '', $this->shopifyqlChannel());
-        $ql = "FROM sales SHOW net_sales, total_sales, orders GROUP BY day "
+        $ql = "FROM sales SHOW net_sales, total_sales, orders, returns GROUP BY day "
             . "SINCE {$sinceStr} UNTIL {$untilStr} "
             . "WHERE sales_channel = '{$channel}' ORDER BY day";
 
@@ -594,7 +609,7 @@ GQL;
         }
 
         // The grouping (day) column is the only non-metric column.
-        $metricCols = ['net_sales', 'total_sales', 'orders'];
+        $metricCols = ['net_sales', 'total_sales', 'orders', 'returns'];
         $dayCol = null;
         foreach ($columns as $c) {
             $name = (string) ($c['name'] ?? '');
@@ -618,10 +633,14 @@ GQL;
             $day = substr((string) $rawDay, 0, 10);
             $ts  = $row['total_sales'] ?? null;
             $od  = $row['orders'] ?? null;
+            $rt  = $row['returns'] ?? null;
             $out[$day] = [
-                'net'    => round((float) $ns, 2),
-                'total'  => $ts !== null ? round((float) $ts, 2) : null,
-                'orders' => $od !== null ? (int) $od : null,
+                'net'     => round((float) $ns, 2),
+                'total'   => $ts !== null ? round((float) $ts, 2) : null,
+                'orders'  => $od !== null ? (int) $od : null,
+                // Positive refund magnitude (Shopify reports returns as the
+                // amount total_sales already subtracted) — sign-normalised.
+                'returns' => $rt !== null ? round(abs((float) $rt), 2) : null,
             ];
         }
 

@@ -209,13 +209,18 @@ final class OverallPerformanceReport implements ReportType
         $disp = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
         $usdc = static fn (string $col): string => "{$col} * COALESCE(fx_rate_to_usd, 1)";
 
+        // Total revenue = Shopify total_sales WITH refunds added back (Bosco
+        // 2026-06-25) — total_sales already nets returns out, so add them back.
+        // AOV and blended ROAS derive from this, so they follow automatically.
+        $revCol = '(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))';
+
         $c = DailyMetric::query()
             ->where('brand_id', $brandId)
             ->where('platform', 'shopify')
             ->whereBetween('date', [$start, $end])
             ->selectRaw("
-                COALESCE(SUM({$disp('total_sales')}), 0) AS revenue,
-                COALESCE(SUM({$usdc('total_sales')}), 0) AS revenue_usd,
+                COALESCE(SUM({$disp($revCol)}), 0) AS revenue,
+                COALESCE(SUM({$usdc($revCol)}), 0) AS revenue_usd,
                 COALESCE(SUM({$disp('net_sales')}), 0)   AS net_sales,
                 COALESCE(SUM(orders), 0)                 AS orders
             ")

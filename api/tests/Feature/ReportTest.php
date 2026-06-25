@@ -270,6 +270,37 @@ class ReportTest extends TestCase
         $this->assertSame(50, $out['deadUnits']);
     }
 
+    public function test_total_revenue_adds_refunds_back(): void
+    {
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = Brand::factory()->create([
+            'base_currency' => 'EUR',
+            'timezone'      => 'Europe/Madrid',
+            'status'        => 'active',
+        ]);
+
+        (new DailyMetric())->forceFill([
+            'brand_id'       => $brand->id,
+            'platform'       => 'shopify',
+            'date'           => now('Europe/Madrid')->subDays(3)->toDateString(),
+            'total_sales'    => 1000,   // already net of returns
+            'net_sales'      => 900,
+            'refunds_amount' => 150,    // the returns total_sales subtracted
+            'orders'         => 5,
+            'currency'       => 'EUR',
+            'is_complete'    => true,
+            'pulled_at'      => now(),
+        ])->save();
+
+        Sanctum::actingAs($user);
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/overall-performance?period=last30&compare=none")->assertOk();
+
+        // Total revenue = total_sales (1000) + refunds (150).
+        $this->assertEquals(1150, $res->json('kpis.revenue.value'));
+        // AOV follows: 1150 / 5 orders.
+        $this->assertEquals(230, $res->json('kpis.aov.value'));
+    }
+
     public function test_report_freshness_flags_stale_then_clears_after_sync(): void
     {
         $user  = User::factory()->create(['role' => 'master_admin']);

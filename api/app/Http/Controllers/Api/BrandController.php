@@ -261,9 +261,12 @@ class BrandController extends Controller
             $d = $r->date->toDateString();
             $rev = (float) ($r->revenue ?? 0);   // Total revenue (gross, before returns) — the toggle option
             $net = (float) ($r->net_sales ?? 0);   // Net sales (hidden in UI, still aggregated)
-            $tot = (float) ($r->total_sales ?? 0); // Total revenue = Shopify Total sales — the live metric
-            $ord = (int)   ($r->orders ?? 0);
+            // Total revenue = Shopify Total sales WITH refunds added back (Bosco
+            // 2026-06-25): total_sales already nets returns out, so we add them
+            // back. The Refunds figure ($ref) is still surfaced on its own.
             $ref = (float) ($r->refunds_amount ?? 0);
+            $tot = (float) ($r->total_sales ?? 0) + $ref;
+            $ord = (int)   ($r->orders ?? 0);
 
             $allTile['revenue'] += $rev;
             $allTile['netSales']   += $net;
@@ -344,7 +347,11 @@ class BrandController extends Controller
 
             if ($r->platform === 'shopify') {
                 $daily[$i]['netSales']   = $r->net_sales !== null ? (float) $r->net_sales : null;
-                $daily[$i]['totalSales'] = $r->total_sales !== null ? (float) $r->total_sales : null;
+                // Total revenue = total_sales + refunds (Bosco 2026-06-25); the
+                // Refunds column still shows the refund amount on its own.
+                $daily[$i]['totalSales'] = $r->total_sales !== null
+                    ? (float) $r->total_sales + (float) ($r->refunds_amount ?? 0)
+                    : null;
                 $daily[$i]['orders']     = $r->orders;
                 $daily[$i]['refunds']    = $r->refunds_amount !== null ? (float) $r->refunds_amount : null;
                 $daily[$i]['currency']   = $r->currency;

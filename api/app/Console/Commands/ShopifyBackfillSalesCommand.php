@@ -85,15 +85,16 @@ class ShopifyBackfillSalesCommand extends Command
                 $day = $cursor->toDateString();
                 $fig = $map[$day] ?? null;
                 $rows[] = [
-                    'brand_id'    => $brand->id,
-                    'platform'    => 'shopify',
-                    'date'        => $day,
-                    'net_sales'   => $fig['net']    ?? 0,
-                    'total_sales' => $fig['total']  ?? 0,
-                    'orders'      => $fig['orders'] ?? 0,
-                    'currency'    => $brand->base_currency,
-                    'is_complete' => $day !== $tzToday,   // today is still partial
-                    'pulled_at'   => now(),
+                    'brand_id'       => $brand->id,
+                    'platform'       => 'shopify',
+                    'date'           => $day,
+                    'net_sales'      => $fig['net']     ?? 0,
+                    'total_sales'    => $fig['total']   ?? 0,
+                    'orders'         => $fig['orders']  ?? 0,
+                    'refunds_amount' => $fig['returns'] ?? 0,
+                    'currency'       => $brand->base_currency,
+                    'is_complete'    => $day !== $tzToday,   // today is still partial
+                    'pulled_at'      => now(),
                 ];
                 $cursor = $cursor->addDay();
             }
@@ -108,7 +109,7 @@ class ShopifyBackfillSalesCommand extends Command
                 DailyMetric::upsert(
                     $chunk,
                     ['brand_id', 'platform', 'date'],
-                    ['net_sales', 'total_sales', 'orders', 'is_complete', 'pulled_at'],
+                    ['net_sales', 'total_sales', 'orders', 'refunds_amount', 'is_complete', 'pulled_at'],
                 );
             }
 

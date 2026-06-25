@@ -80,7 +80,12 @@ final class DashboardQuery
         $grossExpr   = $usd ? 'revenue * COALESCE(fx_rate_to_usd, 1)'        : 'revenue';
         $refundsExpr = $usd ? 'refunds_amount * COALESCE(fx_rate_to_usd, 1)' : 'refunds_amount';
         $netExpr     = $usd ? 'net_sales * COALESCE(fx_rate_to_usd, 1)'      : 'net_sales';
-        $totalExpr   = $usd ? 'total_sales * COALESCE(fx_rate_to_usd, 1)'    : 'total_sales';
+        // Total revenue = Shopify total_sales WITH refunds added back (Bosco,
+        // 2026-06-25). total_sales already nets returns out, so we add the stored
+        // refund magnitude back to show revenue gross of refunds. COALESCE so a
+        // null on either column never nulls the whole sum.
+        $totalCol    = '(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))';
+        $totalExpr   = $usd ? "{$totalCol} * COALESCE(fx_rate_to_usd, 1)" : $totalCol;
 
         // Year-over-year comparison (Bosco, 2026-06-19). Only the periods the UI
         // enabled are computed, so this is a no-op cost when Comparison is off.
@@ -89,7 +94,7 @@ final class DashboardQuery
             array_filter(array_map('trim', explode(',', (string) ($params['compare'] ?? '')))),
             ['yesterday', 'last7', 'last30', 'mtd'],
         ));
-        $compareCol  = (($params['metric'] ?? 'total') === 'net') ? 'net_sales' : 'total_sales';
+        $compareCol  = (($params['metric'] ?? 'total') === 'net') ? 'net_sales' : $totalCol;
 
         $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr, $totalExpr, $comparePeriods, $compareCol): array {
             $tz             = $b->timezone ?: 'UTC';
