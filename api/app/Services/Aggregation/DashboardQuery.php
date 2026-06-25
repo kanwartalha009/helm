@@ -144,10 +144,10 @@ final class DashboardQuery
             // the filter).
             $ySpendUsd  = $this->spendUsd([$yMeta, $yGoogle, $yTikTok]);
             $dSpendUsd  = $this->spendUsd([$dMeta, $dGoogle, $dTikTok]);
-            $yRoasNet   = $this->ratio($yesterdayRow, 'net_sales',   $ySpendUsd);
-            $yRoasTotal = $this->ratio($yesterdayRow, 'total_sales', $ySpendUsd);
-            $dRoasNet   = $this->ratio($dayBeforeRow, 'net_sales',   $dSpendUsd);
-            $dRoasTotal = $this->ratio($dayBeforeRow, 'total_sales', $dSpendUsd);
+            $yRoasNet   = $this->ratio($yesterdayRow, 'net_sales', $ySpendUsd);
+            $yRoasTotal = $this->ratioTotal($yesterdayRow, $ySpendUsd);
+            $dRoasNet   = $this->ratio($dayBeforeRow, 'net_sales', $dSpendUsd);
+            $dRoasTotal = $this->ratioTotal($dayBeforeRow, $dSpendUsd);
 
             // Compute net = gross − refunds explicitly at read time. The
             // `revenue_net` column is also maintained at write time, but
@@ -269,8 +269,10 @@ final class DashboardQuery
                     'netSales'    => ($yesterdayRow && $yesterdayRow->net_sales !== null)
                         ? round((float) $yesterdayRow->net_sales * $yMult, 2)
                         : null,
+                    // Total revenue = total_sales + refunds (Bosco 2026-06-25);
+                    // refundsAmount below still surfaces the refund on its own.
                     'totalSales'  => ($yesterdayRow && $yesterdayRow->total_sales !== null)
-                        ? round((float) $yesterdayRow->total_sales * $yMult, 2)
+                        ? round(((float) $yesterdayRow->total_sales + (float) $yesterdayRow->refunds_amount) * $yMult, 2)
                         : null,
                     'refundsAmount' => $yesterdayRow
                         ? round((float) $yesterdayRow->refunds_amount * $yMult, 2)
@@ -294,7 +296,7 @@ final class DashboardQuery
                         ? round((float) $dayBeforeRow->net_sales * $dMult, 2)
                         : null,
                     'totalSales'  => ($dayBeforeRow && $dayBeforeRow->total_sales !== null)
-                        ? round((float) $dayBeforeRow->total_sales * $dMult, 2)
+                        ? round(((float) $dayBeforeRow->total_sales + (float) $dayBeforeRow->refunds_amount) * $dMult, 2)
                         : null,
                     'refundsAmount' => $dayBeforeRow
                         ? round((float) $dayBeforeRow->refunds_amount * $dMult, 2)
@@ -545,6 +547,21 @@ final class DashboardQuery
             return null;
         }
         $revUsd = (float) $revRow->{$field} * (float) ($revRow->fx_rate_to_usd ?? 1.0);
+
+        return round($revUsd / $spendUsd, 2);
+    }
+
+    /**
+     * ROAS for total revenue = (total_sales + refunds) ÷ spend, USD-normalized
+     * (Bosco 2026-06-25) — mirrors the headline revenue, which adds refunds back.
+     */
+    private function ratioTotal(?DailyMetric $revRow, float $spendUsd): ?float
+    {
+        if ($revRow === null || $revRow->total_sales === null || $spendUsd <= 0.0) {
+            return null;
+        }
+        $revUsd = ((float) $revRow->total_sales + (float) $revRow->refunds_amount)
+            * (float) ($revRow->fx_rate_to_usd ?? 1.0);
 
         return round($revUsd / $spendUsd, 2);
     }
