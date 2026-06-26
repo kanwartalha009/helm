@@ -53,7 +53,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
     + (showAdRollup ? 1 : 0)   // ROAS
     + 1; // L7d
 
-  const revenueLabel = metric === 'net' ? 'Net sales' : 'Total revenue';
+  const revenueLabel = metric === 'net' ? 'Net sales' : 'Total Revenue Before Returns';
 
   return (
     <Card style={{ overflowX: 'auto' }}>
