@@ -50,14 +50,19 @@ final class TikTokAdapter implements PlatformAdapter
 
     /**
      * Every advertiser under the agency Business Center(s). We discover the BCs
-     * the token owns via /bc/get/, then list each BC's advertisers via
-     * /bc/advertiser/get/ — so only the BC token is needed (no bc_id config).
+     * the token owns via /bc/get/, then list each BC's advertisers as ASSETS via
+     * /bc/asset/get/ with asset_type=ADVERTISER — there is NO /bc/advertiser/get/
+     * endpoint (it 404s). bc/asset/get/ returns the advertiser IDs; names +
+     * currency are enriched via /advertiser/info/ (best-effort — that needs the
+     * Ad Account Management scope, so we fall back to the asset name / ID if the
+     * call isn't permitted). Only the BC token is needed (no bc_id config).
      *
      * @return array<int, array{external_id: string, name: string, currency: string}>
      */
     public function listAvailableAccounts(PlatformConnection $conn): array
     {
-        $advertisers = [];
+        // advertiser_id => best-known name from the asset list (may be null).
+        $assetNames = [];
 
         foreach ($this->client->paged('bc/get/') as $bc) {
             $bcId = (string) ($bc['bc_id'] ?? ($bc['bc_info']['bc_id'] ?? ''));
@@ -65,21 +70,66 @@ final class TikTokAdapter implements PlatformAdapter
                 continue;
             }
 
-            foreach ($this->client->paged('bc/advertiser/get/', ['bc_id' => $bcId]) as $adv) {
-                $id = (string) ($adv['advertiser_id'] ?? '');
+            foreach ($this->client->paged('bc/asset/get/', ['bc_id' => $bcId, 'asset_type' => 'ADVERTISER']) as $asset) {
+                $id = (string) ($asset['asset_id'] ?? $asset['advertiser_id'] ?? '');
                 if ($id === '') {
                     continue;
                 }
                 // Dedupe across BCs — an advertiser can appear under more than one.
-                $advertisers[$id] = [
-                    'external_id' => $id,
-                    'name'        => (string) ($adv['advertiser_name'] ?? $adv['name'] ?? $id),
-                    'currency'    => (string) ($adv['currency'] ?? ''),
-                ];
+                $assetNames[$id] = $asset['asset_name'] ?? $asset['advertiser_name'] ?? $asset['name'] ?? ($assetNames[$id] ?? null);
             }
         }
 
-        return array_values($advertisers);
+        if ($assetNames === []) {
+            return [];
+        }
+
+        $details = $this->advertiserInfo(array_keys($assetNames));
+
+        $out = [];
+        foreach ($assetNames as $id => $assetName) {
+            $info = $details[$id] ?? [];
+            $out[] = [
+                'external_id' => (string) $id,
+                'name'        => (string) ($info['name'] ?? $assetName ?? $id),
+                'currency'    => (string) ($info['currency'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Names + currency for a set of advertiser IDs via /advertiser/info/ (max 100
+     * per call). Best-effort: a missing Ad Account Management scope makes this
+     * throw, which we swallow so the picker still lists advertisers by ID.
+     *
+     * @param array<int, int|string> $advertiserIds
+     * @return array<string, array{name: ?string, currency: ?string}>
+     */
+    private function advertiserInfo(array $advertiserIds): array
+    {
+        $out = [];
+        foreach (array_chunk(array_values($advertiserIds), 100) as $chunk) {
+            try {
+                $resp = $this->client->get('advertiser/info/', [
+                    'advertiser_ids' => json_encode(array_map('strval', $chunk)),
+                    'fields'         => json_encode(['advertiser_id', 'name', 'currency']),
+                ]);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('tiktok.advertiser_info_failed', ['error' => $e->getMessage()]);
+                continue;
+            }
+
+            foreach (($resp['list'] ?? []) as $a) {
+                $aid = (string) ($a['advertiser_id'] ?? '');
+                if ($aid !== '') {
+                    $out[$aid] = ['name' => $a['name'] ?? null, 'currency' => $a['currency'] ?? null];
+                }
+            }
+        }
+
+        return $out;
     }
 
     public function attachAccount(PlatformConnection $conn, string $externalId): void

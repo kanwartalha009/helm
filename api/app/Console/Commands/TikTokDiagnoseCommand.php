@@ -47,18 +47,19 @@ class TikTokDiagnoseCommand extends Command
                 continue;
             }
             try {
-                $advs = $client->paged('bc/advertiser/get/', ['bc_id' => $bcId]);
+                // Advertisers are BC assets — bc/asset/get/ (there is no
+                // bc/advertiser/get/ endpoint; it 404s).
+                $advs = $client->paged('bc/asset/get/', ['bc_id' => $bcId, 'asset_type' => 'ADVERTISER']);
                 $this->line('  BC ' . $bcId . ': ' . count($advs) . ' advertiser(s)');
                 foreach (array_slice($advs, 0, 15) as $a) {
                     $this->line(sprintf(
-                        '    - %s  %s  %s',
-                        (string) ($a['advertiser_name'] ?? $a['name'] ?? '?'),
-                        (string) ($a['advertiser_id'] ?? '?'),
-                        (string) ($a['currency'] ?? '')
+                        '    - %s  %s',
+                        (string) ($a['asset_id'] ?? $a['advertiser_id'] ?? '?'),
+                        (string) ($a['asset_name'] ?? $a['advertiser_name'] ?? $a['name'] ?? '')
                     ));
                 }
             } catch (Throwable $e) {
-                $this->warn('  BC ' . $bcId . ' advertiser list failed: ' . $e->getMessage());
+                $this->warn('  BC ' . $bcId . ' asset list failed: ' . $e->getMessage());
             }
         }
 
