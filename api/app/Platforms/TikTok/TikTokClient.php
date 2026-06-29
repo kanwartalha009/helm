@@ -28,7 +28,10 @@ final class TikTokClient
 
     private const MAX_RETRIES = 3;
     private const MAX_SLEEP_SECS = 30;
-    private const PAGE_SIZE = 100;
+    // TikTok's Business Center endpoints (bc/get/, bc/advertiser/get/) cap
+    // page_size at 50 — anything larger returns error 40002. 50 is safe for
+    // every endpoint (report/* allow more, but paging just fans out further).
+    private const PAGE_SIZE = 50;
 
     private readonly Client $http;
 
