@@ -20,11 +20,10 @@ import type { AudienceColumn, AudienceResponse, AudienceRow } from '@/types/doma
  */
 
 // Categorical segment palette, consumed in column order (New, Engaged, …).
-// Bootstrap-style hues (Kanwar, 2026-06-30): green / yellow / orange lead, so on
-// the audience axis New=green, Engaged=yellow, Existing=orange; blue/purple/teal
-// extend it for the higher-cardinality axes (placement, country, …). Unknown and
-// the remainder stay grey so colour = measured demand.
-const SEGMENT_COLORS = ['#198754', '#ffc107', '#fd7e14', '#0d6efd', '#6f42c1', '#20c997'];
+// Anchored on the main dashboard's green (var(--success) ≈ #15803D) per Kanwar
+// (2026-06-30): green leads, with smooth-bright companions chosen to harmonise
+// with it. Unknown and the remainder stay grey so colour = measured demand.
+const SEGMENT_COLORS = ['var(--success)', '#2563EB', '#F59E0B', '#8B5CF6', '#06B6D4', '#EC4899'];
 const UNKNOWN_SHADE = '#6c757d';
 const REMAINDER_SHADE = '#adb5bd';
 const REMAINDER_HATCH =
@@ -70,8 +69,8 @@ export function AudienceTable({ data }: Props) {
       <table className="data-table wide-table audience-table">
         <thead>
           <tr>
-            <th className="brand-col group-head" rowSpan={2}>Brand</th>
-            <th className="num group-head group-start" rowSpan={2} style={{ minWidth: 150 }}>Total</th>
+            <th className="brand-col group-head">Brand</th>
+            <th className="num group-head group-start" style={{ minWidth: 150 }}>Total</th>
             {columns.map((col) => (
               <th
                 key={col.key}
@@ -84,14 +83,6 @@ export function AudienceTable({ data }: Props) {
                   {col.label}
                 </span>
               </th>
-            ))}
-          </tr>
-          <tr>
-            {columns.map((col) => (
-              <Fragment key={col.key}>
-                <th className="num group-head group-start" style={{ fontWeight: 400, opacity: 0.7 }}>€</th>
-                <th className="num group-head" style={{ fontWeight: 400, opacity: 0.7 }}>%</th>
-              </Fragment>
             ))}
           </tr>
         </thead>

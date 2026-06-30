@@ -43,6 +43,46 @@ const AUDIENCE_PERIODS: { key: AudiencePeriod; label: string }[] = [
   { key: 'mtd', label: 'Month to date' },
 ];
 
+// Resolve a period to its actual [from, to] window. Mirrors the backend
+// (AudienceQuery::periodWindow): the window ENDS YESTERDAY — today is partial and
+// always excluded. Computed in the viewer's local date as a display hint; each
+// brand's real window is in its own timezone (noted in the context line).
+function audienceWindow(period: AudiencePeriod): { from: Date; to: Date } {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const to = new Date(today);
+  to.setDate(today.getDate() - 1); // yesterday
+
+  let from: Date;
+  if (period === 'last7') {
+    from = new Date(today);
+    from.setDate(today.getDate() - 7);
+  } else if (period === 'last30') {
+    from = new Date(today);
+    from.setDate(today.getDate() - 30);
+  } else {
+    from = new Date(today.getFullYear(), today.getMonth(), 1); // month to date
+  }
+  if (from > to) from = new Date(to); // 1st-of-month edge: window collapses to yesterday
+  return { from, to };
+}
+
+// "23–29 Jun" (same month) or "31 May – 29 Jun" — compact, for the dropdown.
+function audienceRangeShort(period: AudiencePeriod): string {
+  const { from, to } = audienceWindow(period);
+  const sameMonth = from.getMonth() === to.getMonth() && from.getFullYear() === to.getFullYear();
+  const d = (x: Date) => x.toLocaleDateString('en-GB', { day: 'numeric' });
+  const dm = (x: Date) => x.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return sameMonth ? `${d(from)}–${dm(to)}` : `${dm(from)} – ${dm(to)}`;
+}
+
+// "23 Jun – 29 Jun 2026" — full, for the context line.
+function audienceRangeFull(period: AudiencePeriod): string {
+  const { from, to } = audienceWindow(period);
+  const dmy = (x: Date) => x.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${dmy(from)} – ${dmy(to)}`;
+}
+
 const COMPARE_PERIODS = [
   { key: 'yesterday', label: 'Yesterday' },
   { key: 'last7', label: 'Last 7 days' },
@@ -352,11 +392,12 @@ export function DashboardPage() {
                 </button>
               }
             >
-              <PopoverLabel>Period</PopoverLabel>
+              <PopoverLabel>Period (ends yesterday)</PopoverLabel>
               {AUDIENCE_PERIODS.map((o) => (
                 <PopoverItem
                   key={o.key}
                   active={audiencePeriod === o.key}
+                  meta={audienceRangeShort(o.key)}
                   onClick={() => setAudiencePeriod(o.key)}
                 >
                   {o.label}
@@ -484,14 +525,28 @@ export function DashboardPage() {
           </div>
         </>
       ) : (
-        <div style={{ marginTop: 16 }}>
-          {audienceLoading && !audience ? (
-            <Card>
-              <div className="text-sm muted" style={{ padding: 48, textAlign: 'center' }}>
-                Loading audience breakdown…
-              </div>
-            </Card>
-          ) : audience && filteredAudienceRows.length > 0 ? (
+        <>
+          <div className="compare-context">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="16" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12.01" y2="8" />
+            </svg>
+            <span>
+              <strong>Meta spend only</strong> — Google and TikTok aren’t included in the breakdown. Showing{' '}
+              <strong>{periodLabel.toLowerCase()}</strong>: {audienceRangeFull(audiencePeriod)} — today is excluded
+              (each brand in its own timezone).
+            </span>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            {audienceLoading && !audience ? (
+              <Card>
+                <div className="text-sm muted" style={{ padding: 48, textAlign: 'center' }}>
+                  Loading audience breakdown…
+                </div>
+              </Card>
+            ) : audience && filteredAudienceRows.length > 0 ? (
             <>
               <AudienceTable data={{ ...audience, rows: filteredAudienceRows }} />
               <div className="flex items-center justify-between mt-24">
@@ -510,7 +565,8 @@ export function DashboardPage() {
               </div>
             </Card>
           )}
-        </div>
+          </div>
+        </>
       )}
     </AppLayout>
   );
