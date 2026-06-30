@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar, Card, Dot, Tag } from '@/components/ui';
 import { formatMoney, formatPercent } from '@/lib/formatters';
@@ -7,25 +8,24 @@ import type { AudienceColumn, AudienceResponse, AudienceRow } from '@/types/doma
  * Audience view table — each brand's Meta spend split across the breakdown's
  * segments, with the Non-ASC (or Other) remainder as the trailing column.
  *
- * Design (Bosco-approved, 2026-06-29): monochrome stone ramp, NOT a categorical
- * palette — segments read as one quantity sliced, not unrelated buckets. Each
- * value cell shows the number first, then a thin share-of-total bar (the client
- * asked for "number then progress bar"). The final Composition column stacks the
- * whole mix into one bar so the split is legible at a glance, remainder included.
+ * Design (Bosco update, 2026-06-30): categorical palette — New = blue, Engaged
+ * = purple, Existing = orange, Unknown = gray, Sin breakdown / Other = light
+ * gray. Each segment shows the € value AND its share % side by side, with a
+ * colored share-of-total bar next to the percentage. The Total column (second,
+ * right after the brand) carries the whole mix as one multi-color stacked bar.
  *
  * Missing data is never €0 (spec rule #9): a brand with spend but no breakdown
  * rows for this axis shows an amber "Breakdown pending" state instead of dumping
  * all spend into the remainder; a brand with zero spend renders muted.
  */
 
-// Warm-stone ramp, darkest first — the most strategic segment (e.g. New) reads
-// heaviest. Six shades cover audience (≤5) and the top-N high-cardinality axes.
-const SEGMENT_SHADES = ['#1C1917', '#44403C', '#57534E', '#78716C', '#A8A29E', '#D6D3D1'];
-// The remainder isn't a real segment — flat light stone in cells, a hatch in the
-// stacked bar so "Non-ASC / Other" is visually distinct from measured segments.
-const REMAINDER_SHADE = '#E7E5E4';
+// Categorical segment palette, consumed in column order (New, Engaged, …).
+// Unknown and the remainder are intentionally gray so colored = measured demand.
+const SEGMENT_COLORS = ['#2563EB', '#8B5CF6', '#F59E0B', '#EC4899', '#0EA5E9', '#14B8A6'];
+const UNKNOWN_SHADE = '#9CA3AF';
+const REMAINDER_SHADE = '#D1D5DB';
 const REMAINDER_HATCH =
-  'repeating-linear-gradient(45deg, #E7E5E4, #E7E5E4 3px, #D6D3D1 3px, #D6D3D1 6px)';
+  'repeating-linear-gradient(45deg, #E5E7EB, #E5E7EB 3px, #D1D5DB 3px, #D1D5DB 6px)';
 
 const PERIOD_LABEL: Record<string, string> = {
   last7: 'last 7 days',
@@ -37,38 +37,58 @@ interface Props {
   data: AudienceResponse;
 }
 
-export function AudienceTable({ data }: Props) {
-  const { columns, rows, currency } = data;
+const isUnknown = (col: AudienceColumn): boolean =>
+  col.kind !== 'remainder' &&
+  (String(col.key).toLowerCase() === 'unknown' || col.label.toLowerCase().includes('unknown'));
 
-  // Stable shade per column key: segment columns consume the ramp in order;
-  // the remainder always gets its own light stone regardless of position.
+function buildShades(columns: AudienceColumn[]): Map<string, string> {
   const shadeByKey = new Map<string, string>();
   let segIdx = 0;
   for (const col of columns) {
     if (col.kind === 'remainder') {
       shadeByKey.set(col.key, REMAINDER_SHADE);
+    } else if (isUnknown(col)) {
+      shadeByKey.set(col.key, UNKNOWN_SHADE);
     } else {
-      shadeByKey.set(col.key, SEGMENT_SHADES[segIdx % SEGMENT_SHADES.length]);
+      shadeByKey.set(col.key, SEGMENT_COLORS[segIdx % SEGMENT_COLORS.length]);
       segIdx += 1;
     }
   }
+  return shadeByKey;
+}
+
+export function AudienceTable({ data }: Props) {
+  const { columns, rows, currency } = data;
+  const shadeByKey = buildShades(columns);
 
   return (
     <Card style={{ overflowX: 'auto' }}>
       <table className="data-table wide-table audience-table">
         <thead>
           <tr>
-            <th className="brand-col group-head">Brand</th>
+            <th className="brand-col group-head" rowSpan={2}>Brand</th>
+            <th className="num group-head group-start" rowSpan={2} style={{ minWidth: 150 }}>Total</th>
             {columns.map((col) => (
-              <th key={col.key} className="num group-head" style={{ minWidth: 116 }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+              <th
+                key={col.key}
+                className="num group-head group-start"
+                colSpan={2}
+                style={{ textAlign: 'center', minWidth: 150 }}
+              >
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
                   <ColorSwatch column={col} shade={shadeByKey.get(col.key)!} />
                   {col.label}
                 </span>
               </th>
             ))}
-            <th className="num group-head group-start">Total</th>
-            <th className="group-head" style={{ minWidth: 180 }}>Composition</th>
+          </tr>
+          <tr>
+            {columns.map((col) => (
+              <Fragment key={col.key}>
+                <th className="num group-head group-start" style={{ fontWeight: 400, opacity: 0.7 }}>€</th>
+                <th className="num group-head" style={{ fontWeight: 400, opacity: 0.7 }}>%</th>
+              </Fragment>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -93,7 +113,7 @@ export function AudienceTable({ data }: Props) {
           </>
         ) : (
           <>
-            <strong>Other</strong> folds together the smaller segments beyond the top {SEGMENT_SHADES.length}.
+            <strong>Other</strong> folds together the smaller segments beyond the top {SEGMENT_COLORS.length}.
           </>
         )}
       </div>
@@ -125,7 +145,7 @@ function ColorSwatch({ column, shade }: { column: AudienceColumn; shade: string 
       style={{
         width: 9,
         height: 9,
-        borderRadius: 2,
+        borderRadius: 9,
         flex: '0 0 auto',
         background: column.kind === 'remainder' ? REMAINDER_HATCH : shade,
         border: column.kind === 'remainder' ? '1px solid var(--border-strong)' : 'none',
@@ -155,6 +175,7 @@ function AudienceTableRow({
   //   spend + breakdown   → the real split
   const noSpend = !row.hasSpend || total <= 0;
   const pending = row.hasSpend && total > 0 && !row.hasBreakdown;
+  const segSpan = Math.max(columns.length * 2, 1);
 
   return (
     <tr>
@@ -170,12 +191,31 @@ function AudienceTableRow({
         </Link>
       </td>
 
+      <td className="num group-start" style={{ verticalAlign: 'middle' }}>
+        <div style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+          {noSpend ? <span className="muted">—</span> : formatMoney(total, currency)}
+        </div>
+        {noSpend || pending ? (
+          <div
+            style={{
+              height: 6,
+              borderRadius: 3,
+              marginTop: 5,
+              background: 'var(--surface-subtle)',
+              border: pending ? '1px solid var(--warning-border)' : '1px solid var(--border)',
+            }}
+          />
+        ) : (
+          <StackedBar row={row} columns={columns} shadeByKey={shadeByKey} total={total} />
+        )}
+      </td>
+
       {noSpend ? (
-        <td className="num" colSpan={Math.max(columns.length, 1)} style={{ textAlign: 'center' }}>
+        <td className="num group-start" colSpan={segSpan} style={{ textAlign: 'center' }}>
           <span className="muted">No Meta spend this period</span>
         </td>
       ) : pending ? (
-        <td className="num" colSpan={Math.max(columns.length, 1)} style={{ textAlign: 'center' }}>
+        <td className="num group-start" colSpan={segSpan} style={{ textAlign: 'center' }}>
           <Tag variant="warning">
             <Dot variant="warning" />
             Breakdown pending
@@ -186,60 +226,50 @@ function AudienceTableRow({
           const value = row.segments[col.key] ?? 0;
           const pct = total > 0 ? (value / total) * 100 : 0;
           const shade = shadeByKey.get(col.key)!;
+          const dim = value <= 0;
           return (
-            <td key={col.key} className="num">
-              <div style={{ fontVariantNumeric: 'tabular-nums' }}>{formatMoney(value, currency)}</div>
-              <ShareBar pct={pct} shade={shade} remainder={col.kind === 'remainder'} />
-            </td>
+            <Fragment key={col.key}>
+              <td className="num group-start" style={{ fontVariantNumeric: 'tabular-nums', opacity: dim ? 0.45 : 1 }}>
+                {value > 0 ? formatMoney(value, currency) : '—'}
+              </td>
+              <td className="num">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', opacity: dim ? 0.45 : 1, minWidth: 42, textAlign: 'right' }}>
+                    {formatPercent(pct, { decimals: 1 })}
+                  </span>
+                  <ShareBar pct={pct} shade={shade} remainder={col.kind === 'remainder'} />
+                </div>
+              </td>
+            </Fragment>
           );
         })
       )}
-
-      <td className="num group-start" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
-        {noSpend ? <span className="muted">—</span> : formatMoney(total, currency)}
-      </td>
-
-      <td>
-        {noSpend || pending ? (
-          <div
-            className="aud-compose"
-            style={{
-              height: 8,
-              borderRadius: 4,
-              background: 'var(--surface-subtle)',
-              border: pending ? '1px solid var(--warning-border)' : '1px solid var(--border)',
-            }}
-          />
-        ) : (
-          <StackedBar row={row} columns={columns} shadeByKey={shadeByKey} total={total} />
-        )}
-      </td>
     </tr>
   );
 }
 
-// Thin share-of-total bar under each value (the "progress bar" in every column).
+// Short colored share-of-total bar shown next to each percentage.
 function ShareBar({ pct, shade, remainder }: { pct: number; shade: string; remainder: boolean }) {
   const w = Math.max(0, Math.min(100, pct));
   return (
     <div
-      title={formatPercent(pct, { decimals: 1 })}
-      style={{ height: 4, borderRadius: 2, background: 'var(--surface-subtle)', marginTop: 5, overflow: 'hidden' }}
+      aria-hidden
+      style={{ width: 48, height: 6, borderRadius: 3, background: 'var(--surface-subtle)', overflow: 'hidden', flex: '0 0 auto' }}
     >
       <div
         style={{
           height: '100%',
           width: `${w}%`,
           background: remainder ? REMAINDER_HATCH : shade,
-          borderRadius: 2,
+          borderRadius: 3,
         }}
       />
     </div>
   );
 }
 
-// The whole mix in one stacked bar — every column laid left→right by its share,
-// remainder hatched. This is where "Non-ASC in the stacked bar" lives.
+// The whole mix in one stacked bar (lives under the Total) — every column laid
+// left→right by its share, in its categorical color, remainder hatched.
 function StackedBar({
   row,
   columns,
@@ -256,10 +286,11 @@ function StackedBar({
       className="aud-compose"
       style={{
         display: 'flex',
-        height: 8,
-        borderRadius: 4,
+        height: 6,
+        borderRadius: 3,
+        marginTop: 5,
         overflow: 'hidden',
-        border: '1px solid var(--border)',
+        gap: 1,
         background: 'var(--surface-subtle)',
       }}
     >
