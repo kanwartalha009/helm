@@ -91,11 +91,12 @@ class MetaBackfillBreakdownCommand extends Command
                     }
 
                     try {
-                        $fetched = $meta->fetchBreakdownRange($conn, $breakdowns, $cursor, $chunkEnd);
+                        $fetched = $this->fetchWithSplit($meta, $conn, $breakdowns, $cursor, $chunkEnd);
                     } catch (Throwable $e) {
                         $this->error("· {$brand->name} [{$type}] {$cursor->toDateString()}: {$e->getMessage()}");
                         $failed = true;
-                        break;
+                        $cursor = $chunkEnd->addDay(); // skip just this window, keep going
+                        continue;
                     }
 
                     if ($fetched !== []) {
@@ -123,6 +124,39 @@ class MetaBackfillBreakdownCommand extends Command
         $this->info("Done. {$totalRows} breakdown rows upserted across {$brands->count()} brand(s).");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Fetch a breakdown window, halving it on Meta's "reduce the amount of data"
+     * error (code 1) and retrying each half — recursing down to a single day.
+     * country / age_gender over a whole month blow Meta's per-query row estimate;
+     * splitting keeps each call small without losing any days (windows are
+     * disjoint, so the upsert can't double-count).
+     *
+     * @param array<int, string> $breakdowns
+     * @return array<int, array<string, mixed>>
+     */
+    private function fetchWithSplit(InsightsFetcher $meta, $conn, array $breakdowns, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        try {
+            return $meta->fetchBreakdownRange($conn, $breakdowns, $from, $to);
+        } catch (Throwable $e) {
+            $msg     = strtolower($e->getMessage());
+            $tooMuch = str_contains($msg, 'reduce the amount of data')
+                || str_contains($msg, 'error 1:')
+                || $e->getCode() === 1;
+
+            if (! $tooMuch || $from->greaterThanOrEqualTo($to)) {
+                throw $e; // genuine error, or already a single day → give up
+            }
+
+            $mid = $from->addDays(intdiv((int) $from->diffInDays($to), 2));
+
+            return array_merge(
+                $this->fetchWithSplit($meta, $conn, $breakdowns, $from, $mid),
+                $this->fetchWithSplit($meta, $conn, $breakdowns, $mid->addDay(), $to),
+            );
+        }
     }
 
     /**
