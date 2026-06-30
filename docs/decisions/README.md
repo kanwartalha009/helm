@@ -27,6 +27,7 @@ the tiebreaker for "what is true today," and the spec remains the tiebreaker for
 | D-014 | 2026-06-21 | **Build reporting + creative-intelligence in-platform, replacing Motion** — all figures inside Helm | extends §00 Phase 2 | Kill the €3k/mo + 5-person Motion cost; agency generates branded reports in minutes | Active — spec `feature-specs/reporting-and-creative-intelligence.md` |
 | D-015 | 2026-06-21 | Creative **video: embed + refresh URL on expiry; store thumbnails only** (no video storage) | new | Video storage too costly at scale. Live dashboard refreshes the source; already-sent PDFs/links fall back to the thumbnail | Ratified |
 | D-016 | 2026-06-21 | Introduce an **LLM for report strategy/narrative** (rules own the numbers, LLM owns the narrative, edited before send) | §02 (outside the locked stack) | Per-brand strategy to improve conversions. LLM gets a read-only scoped query layer, never writes figures | OPEN — provider + cost + data-privacy decision pending |
+| D-017 | 2026-06-29 | **Productize Helm as a multi-tenant SaaS for other agencies** — keep the stack (Laravel/PHP/MySQL/Redis/React), evolve the architecture for tenancy | extends §00, §01, §02 | Strategic: sell to other agencies. Stack stays; the work is tenant scoping + per-tenant creds + billing + onboarding, and add-not-replace at scale. Includes the canonical tech-stack reference | Proposed — `D-017-productization-multi-tenant.md` |
 
 ## When to split this into files
 

@@ -187,6 +187,71 @@ final class InsightsFetcher
     }
 
     /**
+     * Daily insights split by a BREAKDOWN dimension over a date range — powers
+     * the dashboard's Audience view. $breakdowns is the Meta breakdown list for
+     * the chosen axis, e.g. ['age','gender'], ['publisher_platform','platform_position'],
+     * or the ASC audience-segment key. The segment is the joined breakdown values
+     * on each row. Returns flat native-currency rows; the backfill stamps fx.
+     *
+     * @param array<int, string> $breakdowns
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchBreakdownRange(PlatformConnection $conn, array $breakdowns, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $accountIds = $this->accountIdsFor($conn);
+        if ($accountIds === [] || $breakdowns === []) {
+            return [];
+        }
+
+        $fallbackCcy = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+
+        $out = [];
+        foreach ($accountIds as $accountId) {
+            $rows = $this->client->paged(self::normalizeAccountId($accountId) . '/insights', [
+                'level'                           => 'account',
+                'fields'                          => 'spend,impressions,clicks,actions,action_values,account_currency',
+                'breakdowns'                      => implode(',', $breakdowns),
+                'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
+                'time_range'                       => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
+                'time_increment'                  => 1,
+                'use_account_attribution_setting' => 'false',
+                'limit'                           => 500,
+            ]);
+
+            foreach ($rows as $row) {
+                $day = (string) ($row['date_start'] ?? '');
+                if ($day === '') {
+                    continue;
+                }
+                // The segment is the combination of the requested breakdown fields
+                // present on the row (e.g. age + gender → "25-34 · female").
+                $parts = [];
+                foreach ($breakdowns as $b) {
+                    $v = $row[$b] ?? null;
+                    if ($v !== null && $v !== '') {
+                        $parts[] = (string) $v;
+                    }
+                }
+                $segment = $parts === [] ? 'unknown' : implode(' · ', $parts);
+
+                $out[] = [
+                    'date'             => $day,
+                    'segment_key'      => $segment,
+                    'segment_label'    => $segment,
+                    'spend'            => isset($row['spend']) ? round((float) $row['spend'], 2) : 0.0,
+                    'impressions'      => (int) ($row['impressions'] ?? 0),
+                    'clicks'           => (int) ($row['clicks'] ?? 0),
+                    'conversions'      => (int) round(self::attributedTotal($row['actions'] ?? [], self::PURCHASE_ACTION_TYPES)),
+                    'conversion_value' => round(self::attributedTotal($row['action_values'] ?? [], self::PURCHASE_ACTION_TYPES), 2),
+                    'currency'         => strtoupper((string) ($row['account_currency'] ?? $fallbackCcy)),
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * The ad accounts to pull for this brand: the selected list when present,
      * otherwise the single external_id (legacy / one-account connection).
      *

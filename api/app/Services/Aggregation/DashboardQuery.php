@@ -366,6 +366,7 @@ final class DashboardQuery
      *   manager = 'me' (default) → the signed-in user's assigned brands
      *   manager = 'all'          → every brand (privileged only; limited roles
      *                              stay confined by the global access scope)
+     *   manager = 'unassigned'   → brands with NO user/manager assigned at all
      *   manager = <user id>      → that user's assigned brands
      *
      * Soft default: a privileged user defaulting to "my brands" who has no
@@ -381,6 +382,15 @@ final class DashboardQuery
             $manager = 'me';
         }
         if ($manager === 'all') {
+            return;
+        }
+
+        if ($manager === 'unassigned') {
+            // Brands nobody is assigned to — no brand_user_access rows at all.
+            // Privileged users (who see this filter) aren't access-scope-confined,
+            // so this surfaces every orphaned brand for triage.
+            $query->whereDoesntHave('users');
+
             return;
         }
 

@@ -135,6 +135,8 @@ export function DashboardPage() {
       ? 'My brands'
       : manager === 'all'
       ? 'All brands'
+      : manager === 'unassigned'
+      ? 'No user assigned'
       : managerUsers.find((u) => String(u.id) === manager)?.name ?? 'Manager';
 
   // Only show the full "add your first brand" CTA for the default view. When a
@@ -225,6 +227,9 @@ export function DashboardPage() {
             </PopoverItem>
             <PopoverItem active={manager === 'all'} onClick={() => setManager('all')}>
               All brands
+            </PopoverItem>
+            <PopoverItem active={manager === 'unassigned'} onClick={() => setManager('unassigned')}>
+              No user assigned
             </PopoverItem>
             {managerUsers.filter((u) => u.status === 'active').length > 0 && (
               <>

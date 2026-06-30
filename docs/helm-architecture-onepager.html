@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How it works — architecture overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#161514;--ink-2:#45433f;--ink-3:#7a766f;--ink-4:#a8a39a;--line:#e7e4dd;--line-2:#d6d2c8;
+  --paper:#fff;--bg:#f7f6f3;--accent:#1f6f5c;--accent-soft:#eaf3f0;
+  --display:'Fraunces',Georgia,serif;--sans:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+.page{max-width:920px;margin:0 auto;padding:48px 46px;background:var(--bg)}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:28px;border-bottom:1.5px solid var(--ink);padding-bottom:22px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.eyebrow::before{content:'';width:20px;height:2px;background:var(--accent)}
+h1{font-family:var(--display);font-size:46px;font-weight:600;line-height:.95;letter-spacing:-.02em}
+.brand-sub{font-size:13px;color:var(--ink-3);margin-top:12px;max-width:580px}
+.head-meta{text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-3);line-height:1.9}
+.head-meta strong{color:var(--ink);font-weight:600;font-family:var(--sans)}
+.rule{height:3px;background:linear-gradient(90deg,var(--accent),#0f3d33);border-radius:2px;margin:0 0 32px}
+.callout{background:var(--paper);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:12px;padding:22px 26px;margin-top:34px}
+.callout .tag{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:10px}
+.callout .tag::before{content:'✦'}
+.callout p{font-size:15px;line-height:1.7;color:var(--ink-2)}
+.callout b{color:var(--ink);font-weight:600}
+.sec-title{font-family:var(--display);font-size:24px;font-weight:600;letter-spacing:-.01em;margin:40px 0 6px}
+.sec-sub{font-size:12.5px;color:var(--ink-3);margin-bottom:18px}
+.diagram{background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:24px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+.col{background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:20px 22px}
+.col h3{font-size:14px;font-weight:700;margin-bottom:9px}
+.col p{font-size:12.5px;color:var(--ink-2);line-height:1.65}
+.col b{color:var(--ink);font-weight:600}
+.stack{background:var(--accent-soft);border:1px solid #bfe0c8;border-radius:13px;padding:18px 22px;margin-top:16px;display:flex;flex-wrap:wrap;gap:10px 26px}
+.stack .grp{font-size:12px;color:var(--ink-2)}
+.stack .grp b{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
+.foot{display:flex;justify-content:space-between;align-items:flex-end;border-top:1.5px solid var(--line-2);padding-top:22px;margin-top:40px}
+.foot-brand{font-family:var(--display);font-size:20px;font-weight:600}
+.foot-powered{font-size:10.5px;color:var(--ink-4);margin-top:3px}
+.foot-note{font-family:var(--mono);font-size:10px;color:var(--ink-4);text-align:right}
+@media print{body{background:#fff}.page{padding:24px}}
+@media (max-width:680px){.head{flex-direction:column;align-items:flex-start}.head-meta{text-align:left}h1{font-size:36px}.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="head">
+    <div>
+      <div class="eyebrow">Architecture overview</div>
+      <h1>How the platform works</h1>
+      <div class="brand-sub">A multi-brand analytics platform that consolidates Shopify revenue and Meta / Google / TikTok ad spend across a portfolio of DTC brands into one dashboard and client-ready reports.</div>
+    </div>
+    <div class="head-meta">
+      <div><strong>Document</strong> Architecture overview</div>
+      <div><strong>Updated</strong> 2026</div>
+    </div>
+  </header>
+  <div class="rule" style="margin-top:0"></div>
+
+  <div class="callout">
+    <div class="tag">The short answer</div>
+    <p>The platform runs on a <b>data warehouse</b>. Every connected platform is synced on a schedule into a database; the dashboard and API read from that stored data, <b>not</b> from live platform calls at request time. Because the history is persisted, <b>month-over-month and year-over-year comparisons are simply queries over stored data</b> — not something recomputed live on each request.</p>
+  </div>
+
+  <h2 class="sec-title">The pipeline</h2>
+  <div class="sec-sub">Scheduled ingest → warehouse → dashboards &amp; reports. Nothing is queried live or thrown away.</div>
+  <div class="diagram">
+    <svg viewBox="0 0 880 220" xmlns="http://www.w3.org/2000/svg" role="img" font-family="Inter,system-ui,sans-serif">
+      <title>Warehouse-sync pipeline</title>
+      <defs><marker id="a" markerWidth="9" markerHeight="9" refX="5" refY="4" orient="auto"><path d="M0,0 L7,4 L0,8" fill="none" stroke="#a8a39a" stroke-width="1.4"/></marker></defs>
+
+      <!-- stage boxes -->
+      <g>
+        <rect x="8" y="58" width="158" height="104" rx="10" fill="#fff" stroke="#d6d2c8"/>
+        <text x="22" y="80" font-family="JetBrains Mono,monospace" font-size="9" letter-spacing="0.1em" fill="#7a766f">SOURCES</text>
+        <text x="22" y="102" font-size="13" font-weight="600" fill="#161514">Ad &amp; commerce</text>
+        <text x="22" y="120" font-size="13" font-weight="600" fill="#161514">platforms</text>
+        <text x="22" y="142" font-family="JetBrains Mono,monospace" font-size="9" fill="#45433f">Shopify · Meta</text>
+        <text x="22" y="155" font-family="JetBrains Mono,monospace" font-size="9" fill="#45433f">Google · TikTok</text>
+      </g>
+
+      <line x1="170" y1="110" x2="196" y2="110" stroke="#a8a39a" stroke-width="1.4" marker-end="url(#a)"/>
+      <text x="183" y="100" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#a8a39a">pull</text>
+
+      <g>
+        <rect x="200" y="58" width="158" height="104" rx="10" fill="#fff" stroke="#d6d2c8"/>
+        <rect x="200" y="58" width="4" height="104" rx="2" fill="#1f6f5c"/>
+        <text x="216" y="80" font-family="JetBrains Mono,monospace" font-size="9" letter-spacing="0.1em" fill="#1f6f5c">SYNC</text>
+        <text x="216" y="102" font-size="13" font-weight="600" fill="#161514">Scheduled</text>
+        <text x="216" y="120" font-size="13" font-weight="600" fill="#161514">sync engine</text>
+        <text x="216" y="142" font-family="JetBrains Mono,monospace" font-size="9" fill="#45433f">workers ·</text>
+        <text x="216" y="155" font-family="JetBrains Mono,monospace" font-size="9" fill="#45433f">12h + on-demand</text>
+      </g>
+
+      <line x1="362" y1="110" x2="388" y2="110" stroke="#a8a39a" stroke-width="1.4" marker-end="url(#a)"/>
+      <text x="375" y="100" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#a8a39a">store</text>
+
+      <g>
+        <rect x="392" y="58" width="158" height="104" rx="10" fill="#fff" stroke="#d6d2c8"/>
+        <rect x="392" y="58" width="4" height="104" rx="2" fill="#1f6f5c"/>
+        <text x="408" y="80" font-family="JetBrains Mono,monospace" font-size="9" letter-spacing="0.1em" fill="#1f6f5c">WAREHOUSE</text>
+        <text x="408" y="102" font-size="13" font-weight="600" fill="#161514">Relational store</text>
+        <text x="408" y="124" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#45433f">metrics · commerce</text>
+        <text x="408" y="137" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#45433f">campaigns · inventory</text>
+        <text x="408" y="153" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#7a766f">+ in-memory cache</text>
+      </g>
+
+      <line x1="554" y1="110" x2="580" y2="110" stroke="#a8a39a" stroke-width="1.4" marker-end="url(#a)"/>
+      <text x="567" y="100" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#a8a39a">read</text>
+
+      <g>
+        <rect x="584" y="58" width="138" height="104" rx="10" fill="#fff" stroke="#d6d2c8"/>
+        <rect x="584" y="58" width="4" height="104" rx="2" fill="#1f6f5c"/>
+        <text x="600" y="80" font-family="JetBrains Mono,monospace" font-size="9" letter-spacing="0.1em" fill="#1f6f5c">API</text>
+        <text x="600" y="102" font-size="13" font-weight="600" fill="#161514">Backend API</text>
+        <text x="600" y="124" font-family="JetBrains Mono,monospace" font-size="9" fill="#45433f">aggregates +</text>
+        <text x="600" y="137" font-family="JetBrains Mono,monospace" font-size="9" fill="#45433f">serves JSON</text>
+        <text x="600" y="153" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#7a766f">token auth</text>
+      </g>
+
+      <line x1="726" y1="110" x2="752" y2="110" stroke="#a8a39a" stroke-width="1.4" marker-end="url(#a)"/>
+      <text x="739" y="100" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8" fill="#a8a39a">serve</text>
+
+      <g>
+        <rect x="756" y="58" width="116" height="104" rx="10" fill="#fff" stroke="#d6d2c8"/>
+        <rect x="756" y="58" width="4" height="104" rx="2" fill="#1f6f5c"/>
+        <text x="772" y="80" font-family="JetBrains Mono,monospace" font-size="9" letter-spacing="0.1em" fill="#1f6f5c">APP</text>
+        <text x="772" y="102" font-size="13" font-weight="600" fill="#161514">Web app</text>
+        <text x="772" y="124" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#45433f">dashboards</text>
+        <text x="772" y="137" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#45433f">+ reports</text>
+      </g>
+
+      <text x="8" y="32" font-family="JetBrains Mono,monospace" font-size="10" letter-spacing="0.06em" fill="#7a766f">SCHEDULED INGEST</text>
+      <text x="872" y="32" text-anchor="end" font-family="JetBrains Mono,monospace" font-size="10" letter-spacing="0.06em" fill="#7a766f">USER-FACING READS</text>
+      <line x1="8" y1="190" x2="358" y2="190" stroke="#e7e4dd"/>
+      <line x1="392" y1="190" x2="872" y2="190" stroke="#e7e4dd"/>
+      <text x="183" y="206" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#a8a39a">runs in the background</text>
+      <text x="632" y="206" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="8.5" fill="#a8a39a">sub-second · reads stored data</text>
+    </svg>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <h3>What it connects</h3>
+      <p><b>Shopify</b> (revenue, orders, inventory, products), <b>Meta Ads</b>, <b>Google Ads</b>, and <b>TikTok Ads</b> — each through its own integration adapter. Auth differs by platform: some are simple (a single token), others are involved — TikTok needs a Business Center app, review and asset endpoints, and Amazon is similar. That complexity is encapsulated per platform, so adding a new one is an isolated, repeatable piece of work rather than a rebuild.</p>
+    </div>
+    <div class="col">
+      <h3>Why history &amp; comparisons work</h3>
+      <p>Every day's figures are normalized into one consistent shape and stored permanently — revenue, spend, orders, refunds, broken down by brand, country, product, campaign and inventory. <b>Month-over-month / year-over-year</b>, dead-stock trends, and re-generating any past month's report all read from that stored history. Backfill jobs load the past on demand, so a brand connected today can still show last year.</p>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="grp"><b>Backend</b>PHP · Laravel · queue workers · token auth</div>
+    <div class="grp"><b>Frontend</b>React · Vite · TypeScript</div>
+    <div class="grp"><b>Data</b>Relational DB · in-memory cache</div>
+    <div class="grp"><b>Model</b>Scheduled warehouse sync</div>
+  </div>
+
+  <footer class="foot">
+    <div>
+      <div class="foot-brand">Multi-brand ad &amp; commerce analytics</div>
+      <div class="foot-powered">Warehouse-sync architecture</div>
+    </div>
+    <div class="foot-note">Architecture overview · 2026</div>
+  </footer>
+
+</div>
+</body>
+</html>
