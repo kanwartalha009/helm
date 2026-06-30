@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Sync;
 
 use App\Models\AdCampaignDailyMetric;
+use App\Models\MetaBreakdownDaily;
 use App\Models\PlatformConnection;
 use App\Platforms\Google\ReportsFetcher;
 use App\Platforms\Meta\InsightsFetcher;
@@ -92,6 +93,81 @@ final class CampaignSync
                 $chunk,
                 ['brand_id', 'platform', 'date', 'campaign_id'],
                 ['campaign_name', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+            );
+        }
+
+        return count($records);
+    }
+
+    /**
+     * Sync one day's Meta spend for a breakdown axis (default: audience — the ASC
+     * new/engaged/existing/unknown segments via user_segment_key) into
+     * meta_breakdown_daily, powering the dashboard's Audience view. Meta-only and
+     * best-effort: a failure is logged and swallowed so it never fails the day's
+     * main sync. The one-off meta:backfill-breakdown fills history; this keeps it
+     * fresh. Only `audience` is synced daily — other axes are backfill-on-demand.
+     */
+    public function syncMetaBreakdown(PlatformConnection $conn, CarbonImmutable $date, string $type = 'audience'): int
+    {
+        if ($conn->platform !== 'meta') {
+            return 0;
+        }
+        $breakdowns = (array) config("meta_breakdowns.{$type}", []);
+        if ($breakdowns === []) {
+            return 0;
+        }
+
+        try {
+            $rows = $this->meta->fetchBreakdownRange($conn, $breakdowns, $date, $date);
+        } catch (Throwable $e) {
+            Log::warning('sync.meta_breakdown.failed', [
+                'brand_id' => $conn->brand_id,
+                'type'     => $type,
+                'date'     => $date->toDateString(),
+                'error'    => $e->getMessage(),
+            ]);
+
+            return 0;
+        }
+
+        if ($rows === []) {
+            return 0;
+        }
+
+        $brandId  = (int) $conn->brand_id;
+        $fallback = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+
+        $records = [];
+        foreach ($rows as $r) {
+            $seg = trim((string) ($r['segment_key'] ?? ''));
+            if ($seg === '') {
+                $seg = 'unknown';
+            }
+            $rowCcy = strtoupper((string) ($r['currency'] ?? $fallback));
+
+            $records[] = [
+                'brand_id'         => $brandId,
+                'date'             => $date->toDateString(),
+                'breakdown_type'   => $type,
+                'segment_key'      => mb_substr($seg, 0, 191),
+                'segment_label'    => mb_substr((string) ($r['segment_label'] ?? $seg), 0, 191),
+                'spend'            => (float) ($r['spend'] ?? 0),
+                'impressions'      => (int) ($r['impressions'] ?? 0),
+                'clicks'           => (int) ($r['clicks'] ?? 0),
+                'conversions'      => (int) ($r['conversions'] ?? 0),
+                'conversion_value' => (float) ($r['conversion_value'] ?? 0),
+                'currency'         => $rowCcy,
+                'fx_rate_to_usd'   => $this->fx->cachedToUsd($rowCcy, $date),
+                'is_complete'      => true,
+                'pulled_at'        => now(),
+            ];
+        }
+
+        foreach (array_chunk($records, 500) as $chunk) {
+            MetaBreakdownDaily::upsert(
+                $chunk,
+                ['brand_id', 'date', 'breakdown_type', 'segment_key'],
+                ['segment_label', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
             );
         }
 

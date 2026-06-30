@@ -144,6 +144,11 @@ class SyncBrandDayJob implements ShouldQueue
             // — syncDay guards the platform and swallows its own errors, so it can
             // never fail the day sync that has already succeeded above.
             $campaignSync->syncDay($this->platformConnection, $this->date);
+
+            // Meta audience-segment spend (ASC new/engaged/existing/unknown) for
+            // the dashboard's Audience view. Meta-only + best-effort (self-guards
+            // and swallows its own errors), so it never affects the main sync.
+            $campaignSync->syncMetaBreakdown($this->platformConnection, $this->date);
         } catch (Throwable $e) {
             $log->update([
                 'status'        => 'failed',
