@@ -3,7 +3,12 @@ import * as mockApi from '@/lib/mockApi';
 import { api } from '@/lib/api';
 import { toast } from '@/stores/toastStore';
 import { useFiltersStore } from '@/stores/filtersStore';
-import type { DashboardRow } from '@/types/domain';
+import type {
+  AudienceBreakdown,
+  AudiencePeriod,
+  AudienceResponse,
+  DashboardRow,
+} from '@/types/domain';
 
 // Real /api/dashboard call. Returns [] when the user has no brands yet —
 // the DashboardPage renders an empty-state CTA in that case. The currency
@@ -34,6 +39,33 @@ export function useDashboardData(
         params: Object.keys(params).length ? params : undefined,
       });
       return Array.isArray(data) ? data : data.rows ?? [];
+    },
+  });
+}
+
+// Real /api/dashboard/audience call — Meta spend split by a breakdown axis over
+// a period, per brand. Currency mirrors the dashboard toggle (server converts on
+// ?currency=USD); breakdown + period are part of the key so changing either
+// refetches. Empty `rows` means no Meta brands in scope — the page shows an
+// empty state in that case.
+export function useAudienceData(
+  manager: string = 'me',
+  breakdown: AudienceBreakdown = 'audience',
+  period: AudiencePeriod = 'last30',
+  enabled: boolean = true,
+) {
+  const currency = useFiltersStore((s) => s.currency);
+  return useQuery({
+    queryKey: ['audience', currency, manager, breakdown, period],
+    // The audience query is heavier than the dashboard — don't fire it until the
+    // user actually opens the Audience view.
+    enabled,
+    queryFn: async (): Promise<AudienceResponse> => {
+      const params: Record<string, string> = { breakdown, period };
+      if (currency === 'usd') params.currency = 'USD';
+      if (manager && manager !== 'me') params.manager = manager;
+      const { data } = await api.get<AudienceResponse>('/dashboard/audience', { params });
+      return data;
     },
   });
 }

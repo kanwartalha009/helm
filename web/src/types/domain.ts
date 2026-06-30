@@ -175,6 +175,69 @@ export interface DashboardRow {
   >;
 }
 
+/* ---- Audience view (Meta spend by breakdown axis) -------------------- */
+
+// The breakdown axes the Audience view can split Meta spend by. `audience` is
+// the ASC segment split (new/engaged/existing/unknown) synced daily; the rest
+// are backfill-on-demand (`meta:backfill-breakdown --type=…`).
+export type AudienceBreakdown =
+  | 'audience'
+  | 'age_gender'
+  | 'placement'
+  | 'country'
+  | 'device';
+
+export type AudiencePeriod = 'last7' | 'last30' | 'mtd';
+
+// One column in the audience table. `kind: 'remainder'` is the synthetic
+// trailing column — "Non-ASC" for the audience axis (account total minus the
+// ASC segments), "Other" for high-cardinality axes (the non-top-N tail). The
+// frontend renders it with a distinct (lighter / hatched) stone shade.
+export interface AudienceColumn {
+  key: string;
+  label: string;
+  kind: 'segment' | 'remainder';
+}
+
+// Lean brand block for an audience row — only what the table needs. Not the
+// full Brand (no timezone/status) because the audience endpoint returns just
+// the display fields.
+export interface AudienceBrand {
+  id: number;
+  name: string;
+  slug: string;
+  initials: string;
+  baseCurrency: string;
+  groupTag: string | null;
+  region: string;
+  platforms?: Platform[];
+  platformHealth?: Partial<Record<Platform, PlatformHealth>>;
+}
+
+export interface AudienceRow {
+  brand: AudienceBrand;
+  // Authoritative account-level Meta spend for the period (display currency).
+  // Segment values + the remainder reconcile to this.
+  total: number;
+  // Spend per column, keyed by AudienceColumn.key (includes the remainder key).
+  segments: Record<string, number>;
+  // False when the brand has Meta spend but no breakdown rows for this axis yet
+  // (e.g. a non-audience axis that hasn't been backfilled) — the table shows an
+  // amber "breakdown pending" state rather than a fake all-Non-ASC composition.
+  hasBreakdown: boolean;
+  // False when the brand had zero Meta spend in the window — renders muted, not €0.
+  hasSpend: boolean;
+  isComplete: boolean;
+}
+
+export interface AudienceResponse {
+  breakdown: AudienceBreakdown;
+  period: AudiencePeriod;
+  currency: 'native' | 'usd';
+  columns: AudienceColumn[];
+  rows: AudienceRow[];
+}
+
 export interface SyncLog {
   id: number;
   brand: Pick<Brand, 'id' | 'name' | 'initials'>;

@@ -1805,3 +1805,14 @@ td.col-group-start {
 .wide-table tbody tr:last-child td {
   border-bottom: 0;
 }
+
+/* Audience view — Meta spend split by a breakdown axis. Numbers sit at the top
+   of each cell with their share bar beneath, so figures line up across the row
+   for scanning; the composition bar is nudged to meet the number baseline. */
+.audience-table td {
+  vertical-align: top;
+}
+
+.audience-table .aud-compose {
+  margin-top: 3px;
+}

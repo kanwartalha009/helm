@@ -2,21 +2,42 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { BrandsTableWide } from '@/components/dashboard/BrandsTableWide';
+import { AudienceTable } from '@/components/dashboard/AudienceTable';
 import {
   Banner,
   Button,
+  Card,
   Popover,
   PopoverDivider,
   PopoverItem,
   PopoverLabel,
   Segmented,
 } from '@/components/ui';
-import { useDashboardData, useMasterSync } from '@/hooks/useDashboardData';
+import { useAudienceData, useDashboardData, useMasterSync } from '@/hooks/useDashboardData';
 import { useUsers } from '@/hooks/useApiData';
 import { useCurrentUser } from '@/hooks/useSettings';
 import { useFiltersStore } from '@/stores/filtersStore';
 import { useUiStore } from '@/stores/uiStore';
-import type { DashboardRow, Platform } from '@/types/domain';
+import type {
+  AudienceBreakdown,
+  AudiencePeriod,
+  DashboardRow,
+  Platform,
+} from '@/types/domain';
+
+const BREAKDOWN_OPTIONS: { key: AudienceBreakdown; label: string }[] = [
+  { key: 'audience', label: 'Audience segments' },
+  { key: 'placement', label: 'Placement' },
+  { key: 'age_gender', label: 'Age & gender' },
+  { key: 'country', label: 'Country' },
+  { key: 'device', label: 'Device' },
+];
+
+const AUDIENCE_PERIODS: { key: AudiencePeriod; label: string }[] = [
+  { key: 'last7', label: 'Last 7 days' },
+  { key: 'last30', label: 'Last 30 days' },
+  { key: 'mtd', label: 'Month to date' },
+];
 
 const COMPARE_PERIODS = [
   { key: 'yesterday', label: 'Yesterday' },
@@ -46,6 +67,19 @@ export function DashboardPage() {
   const togglePeriod = (key: string) =>
     setComparePeriods((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   const { data: rows = [], isLoading } = useDashboardData(manager, metric, activeCompare);
+  // Dashboard view: Performance (revenue/ROAS table) or Audience (Meta spend
+  // split by a breakdown axis). The two share the Brands + Manager + currency
+  // filters; everything else in the bar is view-specific. The audience query is
+  // gated on the view so it doesn't fire until opened.
+  const [view, setView] = useState<'performance' | 'audience'>('performance');
+  const [breakdown, setBreakdown] = useState<AudienceBreakdown>('audience');
+  const [audiencePeriod, setAudiencePeriod] = useState<AudiencePeriod>('last30');
+  const { data: audience, isLoading: audienceLoading } = useAudienceData(
+    manager,
+    breakdown,
+    audiencePeriod,
+    view === 'audience',
+  );
   const { data: managerUsers = [] } = useUsers(canFilterByManager);
   const masterSync = useMasterSync();
   // Sort control: best/worst performing (by the chosen metric, last 7 days) or A–Z.
@@ -130,6 +164,18 @@ export function DashboardPage() {
   const sortLabel =
     sortBy === 'best' ? 'Best performing' : sortBy === 'worst' ? 'Worst performing' : 'Name';
 
+  // Audience rows honor the same client-side brand-group filter as Performance.
+  const filteredAudienceRows = useMemo(() => {
+    if (!audience) return [];
+    if (!brandGroup) return audience.rows;
+    return audience.rows.filter((r) => r.brand.groupTag === brandGroup);
+  }, [audience, brandGroup]);
+
+  const breakdownLabel =
+    BREAKDOWN_OPTIONS.find((o) => o.key === breakdown)?.label ?? 'Audience segments';
+  const periodLabel =
+    AUDIENCE_PERIODS.find((o) => o.key === audiencePeriod)?.label ?? 'Last 30 days';
+
   const managerLabel =
     manager === 'me'
       ? 'My brands'
@@ -170,6 +216,14 @@ export function DashboardPage() {
         rewrite that accepts arbitrary date ranges.
       */}
       <div className="filter-bar mb-12">
+        <Segmented
+          options={[
+            { value: 'performance', label: 'Performance' },
+            { value: 'audience', label: 'Audience' },
+          ]}
+          value={view}
+          onChange={setView}
+        />
         <Popover
           wide
           trigger={
@@ -265,38 +319,85 @@ export function DashboardPage() {
           onChange={setMetric}
         />
         */}
-        <button
-          className="filter-btn"
-          style={
-            comparisonOn
-              ? { background: 'var(--accent)', color: 'var(--accent-fg)', borderColor: 'var(--accent)' }
-              : undefined
-          }
-          onClick={() => setComparisonOn((v) => !v)}
-        >
-          Comparison
-        </button>
-        <Popover
-          trigger={
-            <button className="filter-btn">
-              Sort: <strong style={{ fontWeight: 500 }}>{sortLabel}</strong>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+        {view === 'audience' && (
+          <>
+            <Popover
+              trigger={
+                <button className="filter-btn">
+                  Breakdown: <strong style={{ fontWeight: 500 }}>{breakdownLabel}</strong>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+              }
+            >
+              <PopoverLabel>Split Meta spend by</PopoverLabel>
+              {BREAKDOWN_OPTIONS.map((o) => (
+                <PopoverItem key={o.key} active={breakdown === o.key} onClick={() => setBreakdown(o.key)}>
+                  {o.label}
+                </PopoverItem>
+              ))}
+            </Popover>
+            <Popover
+              trigger={
+                <button className="filter-btn">
+                  Period: <strong style={{ fontWeight: 500 }}>{periodLabel}</strong>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+              }
+            >
+              <PopoverLabel>Period</PopoverLabel>
+              {AUDIENCE_PERIODS.map((o) => (
+                <PopoverItem
+                  key={o.key}
+                  active={audiencePeriod === o.key}
+                  onClick={() => setAudiencePeriod(o.key)}
+                >
+                  {o.label}
+                </PopoverItem>
+              ))}
+            </Popover>
+          </>
+        )}
+
+        {view === 'performance' && (
+          <>
+            <button
+              className="filter-btn"
+              style={
+                comparisonOn
+                  ? { background: 'var(--accent)', color: 'var(--accent-fg)', borderColor: 'var(--accent)' }
+                  : undefined
+              }
+              onClick={() => setComparisonOn((v) => !v)}
+            >
+              Comparison
             </button>
-          }
-        >
-          <PopoverLabel>Sort by</PopoverLabel>
-          <PopoverItem active={sortBy === 'best'} onClick={() => setSortBy('best')}>
-            Best performing
-          </PopoverItem>
-          <PopoverItem active={sortBy === 'worst'} onClick={() => setSortBy('worst')}>
-            Worst performing
-          </PopoverItem>
-          <PopoverItem active={sortBy === 'name'} onClick={() => setSortBy('name')}>
-            Name (A–Z)
-          </PopoverItem>
-        </Popover>
+            <Popover
+              trigger={
+                <button className="filter-btn">
+                  Sort: <strong style={{ fontWeight: 500 }}>{sortLabel}</strong>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+              }
+            >
+              <PopoverLabel>Sort by</PopoverLabel>
+              <PopoverItem active={sortBy === 'best'} onClick={() => setSortBy('best')}>
+                Best performing
+              </PopoverItem>
+              <PopoverItem active={sortBy === 'worst'} onClick={() => setSortBy('worst')}>
+                Worst performing
+              </PopoverItem>
+              <PopoverItem active={sortBy === 'name'} onClick={() => setSortBy('name')}>
+                Name (A–Z)
+              </PopoverItem>
+            </Popover>
+          </>
+        )}
 
         {/*
           Master Sync now — fires the same fan-out as the per-brand Sync now
@@ -317,7 +418,7 @@ export function DashboardPage() {
         )}
       </div>
 
-      {comparisonOn && (
+      {view === 'performance' && comparisonOn && (
         <div className="filter-bar mb-12" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <span className="text-xs muted">Compare vs last year:</span>
           {COMPARE_PERIODS.map((p) => (
@@ -337,44 +438,76 @@ export function DashboardPage() {
         </div>
       )}
 
-      <div className="compare-context">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-          <rect x="3" y="4" width="18" height="18" rx="2" />
-          <line x1="16" y1="2" x2="16" y2="6" />
-          <line x1="8" y1="2" x2="8" y2="6" />
-          <line x1="3" y1="10" x2="21" y2="10" />
-        </svg>
-        Showing yesterday vs day before, with the last 7 days rolling block to the right. Dates are in each brand’s own timezone.
-      </div>
+      {view === 'performance' ? (
+        <>
+          <div className="compare-context">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
+            Showing yesterday vs day before, with the last 7 days rolling block to the right. Dates are in each brand’s own timezone.
+          </div>
 
-      <Banner
-        variant="info"
-        icon={
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="16" x2="12" y2="12" />
-            <line x1="12" y1="8" x2="12.01" y2="8" />
-          </svg>
-        }
-      >
-        Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Figures are <strong>total revenue</strong> (Shopify’s Total sales). Blended ROAS is revenue ÷ ad spend. Online Store channel only.
-      </Banner>
+          <Banner
+            variant="info"
+            icon={
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+            }
+          >
+            Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Figures are <strong>total revenue</strong> (Shopify’s Total sales). Blended ROAS is revenue ÷ ad spend. Online Store channel only.
+          </Banner>
 
-      <div style={{ marginTop: 16 }}>
-        <BrandsTableWide
-          rows={sortedRows}
-          metric={metric}
-          visibleAdPlatforms={visibleAdPlatforms}
-          comparePeriods={activeCompare}
-        />
-      </div>
+          <div style={{ marginTop: 16 }}>
+            <BrandsTableWide
+              rows={sortedRows}
+              metric={metric}
+              visibleAdPlatforms={visibleAdPlatforms}
+              comparePeriods={activeCompare}
+            />
+          </div>
 
-      <div className="flex items-center justify-between mt-24">
-        <div className="text-xs muted">
-          Showing {filteredRows.length} brand{filteredRows.length === 1 ? '' : 's'}
-          {brandGroup ? ` in “${brandGroup}”` : ''}.
+          <div className="flex items-center justify-between mt-24">
+            <div className="text-xs muted">
+              Showing {filteredRows.length} brand{filteredRows.length === 1 ? '' : 's'}
+              {brandGroup ? ` in “${brandGroup}”` : ''}.
+            </div>
+          </div>
+        </>
+      ) : (
+        <div style={{ marginTop: 16 }}>
+          {audienceLoading && !audience ? (
+            <Card>
+              <div className="text-sm muted" style={{ padding: 48, textAlign: 'center' }}>
+                Loading audience breakdown…
+              </div>
+            </Card>
+          ) : audience && filteredAudienceRows.length > 0 ? (
+            <>
+              <AudienceTable data={{ ...audience, rows: filteredAudienceRows }} />
+              <div className="flex items-center justify-between mt-24">
+                <div className="text-xs muted">
+                  Showing {filteredAudienceRows.length} Meta brand
+                  {filteredAudienceRows.length === 1 ? '' : 's'}
+                  {brandGroup ? ` in “${brandGroup}”` : ''}.
+                </div>
+              </div>
+            </>
+          ) : (
+            <Card>
+              <div className="text-sm muted" style={{ padding: 48, textAlign: 'center' }}>
+                No brands with a Meta connection in this view yet. Connect Meta on a brand to see its
+                audience split here.
+              </div>
+            </Card>
+          )}
         </div>
-      </div>
+      )}
     </AppLayout>
   );
 }

@@ -65,8 +65,10 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
     });
 
     // Dashboard
-    Route::get('dashboard',         [DashboardController::class, 'index']);
-    Route::get('dashboard/summary', [DashboardController::class, 'summary']);
+    Route::get('dashboard',          [DashboardController::class, 'index']);
+    Route::get('dashboard/summary',  [DashboardController::class, 'summary']);
+    // Audience view — Meta spend split by a breakdown axis (audience/placement/…).
+    Route::get('dashboard/audience', [DashboardController::class, 'audience']);
 
     // Reports — list available types. The brand-scoped build + share routes
     // live under the access.brand group below.

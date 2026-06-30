@@ -6,13 +6,17 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Brand;
+use App\Services\Aggregation\AudienceQuery;
 use App\Services\Aggregation\DashboardQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class DashboardController extends Controller
 {
-    public function __construct(private readonly DashboardQuery $query) {}
+    public function __construct(
+        private readonly DashboardQuery $query,
+        private readonly AudienceQuery $audience,
+    ) {}
 
     /**
      * GET /api/dashboard
@@ -35,6 +39,27 @@ class DashboardController extends Controller
         return response()->json([
             'rows' => $this->query->run($params),
         ]);
+    }
+
+    /**
+     * GET /api/dashboard/audience
+     *
+     * Meta spend split by a breakdown axis (audience segments / placement /
+     * age+gender / country / device) over a period, per brand. The manager +
+     * currency filters mirror /dashboard so switching views keeps the filter bar
+     * meaningful. Returns the column set (shared across rows) and one row per
+     * Meta brand. See AudienceQuery for the no-ASC remainder logic.
+     */
+    public function audience(Request $request): JsonResponse
+    {
+        $params = $request->validate([
+            'currency'  => ['nullable', 'string', 'size:3'],
+            'manager'   => ['nullable', 'string', 'max:20'],
+            'breakdown' => ['nullable', 'in:audience,age_gender,placement,country,device'],
+            'period'    => ['nullable', 'in:last7,last30,mtd'],
+        ]);
+
+        return response()->json($this->audience->run($params));
     }
 
     public function summary(Request $request): JsonResponse
