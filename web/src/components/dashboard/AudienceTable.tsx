@@ -20,12 +20,15 @@ import type { AudienceColumn, AudienceResponse, AudienceRow } from '@/types/doma
  */
 
 // Categorical segment palette, consumed in column order (New, Engaged, …).
-// Unknown and the remainder are intentionally gray so colored = measured demand.
-const SEGMENT_COLORS = ['#2563EB', '#8B5CF6', '#F59E0B', '#EC4899', '#0EA5E9', '#14B8A6'];
-const UNKNOWN_SHADE = '#9CA3AF';
-const REMAINDER_SHADE = '#D1D5DB';
+// Bootstrap-style hues (Kanwar, 2026-06-30): green / yellow / orange lead, so on
+// the audience axis New=green, Engaged=yellow, Existing=orange; blue/purple/teal
+// extend it for the higher-cardinality axes (placement, country, …). Unknown and
+// the remainder stay grey so colour = measured demand.
+const SEGMENT_COLORS = ['#198754', '#ffc107', '#fd7e14', '#0d6efd', '#6f42c1', '#20c997'];
+const UNKNOWN_SHADE = '#6c757d';
+const REMAINDER_SHADE = '#adb5bd';
 const REMAINDER_HATCH =
-  'repeating-linear-gradient(45deg, #E5E7EB, #E5E7EB 3px, #D1D5DB 3px, #D1D5DB 6px)';
+  'repeating-linear-gradient(45deg, #ced4da, #ced4da 3px, #adb5bd 3px, #adb5bd 6px)';
 
 const PERIOD_LABEL: Record<string, string> = {
   last7: 'last 7 days',

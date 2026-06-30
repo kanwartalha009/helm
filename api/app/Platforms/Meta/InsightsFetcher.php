@@ -207,45 +207,96 @@ final class InsightsFetcher
 
         $out = [];
         foreach ($accountIds as $accountId) {
-            $rows = $this->client->paged(self::normalizeAccountId($accountId) . '/insights', [
-                'level'                           => 'account',
-                'fields'                          => 'spend,impressions,clicks,actions,action_values,account_currency',
-                'breakdowns'                      => implode(',', $breakdowns),
-                'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
-                'time_range'                       => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
-                'time_increment'                  => 1,
-                'use_account_attribution_setting' => 'false',
-                'limit'                           => 500,
-            ]);
+            $out = array_merge(
+                $out,
+                $this->pullBreakdownAdaptive(self::normalizeAccountId($accountId), $breakdowns, $from, $to, $fallbackCcy),
+            );
+        }
 
-            foreach ($rows as $row) {
-                $day = (string) ($row['date_start'] ?? '');
-                if ($day === '') {
-                    continue;
-                }
-                // The segment is the combination of the requested breakdown fields
-                // present on the row (e.g. age + gender → "25-34 · female").
-                $parts = [];
-                foreach ($breakdowns as $b) {
-                    $v = $row[$b] ?? null;
-                    if ($v !== null && $v !== '') {
-                        $parts[] = (string) $v;
-                    }
-                }
-                $segment = $parts === [] ? 'unknown' : implode(' · ', $parts);
+        return $out;
+    }
 
-                $out[] = [
-                    'date'             => $day,
-                    'segment_key'      => $segment,
-                    'segment_label'    => $segment,
-                    'spend'            => isset($row['spend']) ? round((float) $row['spend'], 2) : 0.0,
-                    'impressions'      => (int) ($row['impressions'] ?? 0),
-                    'clicks'           => (int) ($row['clicks'] ?? 0),
-                    'conversions'      => (int) round(self::attributedTotal($row['actions'] ?? [], self::PURCHASE_ACTION_TYPES)),
-                    'conversion_value' => round(self::attributedTotal($row['action_values'] ?? [], self::PURCHASE_ACTION_TYPES), 2),
-                    'currency'         => strtoupper((string) ($row['account_currency'] ?? $fallbackCcy)),
-                ];
+    /**
+     * Pull one account's breakdown rows for [from, to], halving the window and
+     * retrying on a transport failure. High-cardinality axes (country has 200+
+     * values, placement dozens) over a long window make Meta's query slow enough
+     * that its gateway closes the connection mid-response — cURL 18
+     * (CURLE_PARTIAL_FILE: "transfer closed with outstanding read data"). Each
+     * split shrinks the query until it returns; a single day that still fails is
+     * a real error and rethrows rather than silently dropping data.
+     *
+     * @param array<int, string> $breakdowns
+     * @return array<int, array<string, mixed>>
+     */
+    private function pullBreakdownAdaptive(string $accountId, array $breakdowns, CarbonImmutable $from, CarbonImmutable $to, string $fallbackCcy): array
+    {
+        try {
+            return $this->pullBreakdownWindow($accountId, $breakdowns, $from, $to, $fallbackCcy);
+        } catch (\Throwable $e) {
+            if ($from->greaterThanOrEqualTo($to)) {
+                throw $e; // already a single day — can't narrow further
             }
+
+            $days = (int) $from->diffInDays($to);
+            $mid  = $from->addDays(intdiv(max($days, 1), 2));
+
+            return array_merge(
+                $this->pullBreakdownAdaptive($accountId, $breakdowns, $from, $mid, $fallbackCcy),
+                $this->pullBreakdownAdaptive($accountId, $breakdowns, $mid->addDay(), $to, $fallbackCcy),
+            );
+        }
+    }
+
+    /**
+     * One paged insights call for a single account + window, mapped to flat
+     * native-currency breakdown rows. The page limit is deliberately smaller than
+     * the account/campaign pulls: breakdowns multiply the row count, and an
+     * oversized page is exactly what makes Meta truncate the response.
+     *
+     * @param array<int, string> $breakdowns
+     * @return array<int, array<string, mixed>>
+     */
+    private function pullBreakdownWindow(string $accountId, array $breakdowns, CarbonImmutable $from, CarbonImmutable $to, string $fallbackCcy): array
+    {
+        $rows = $this->client->paged($accountId . '/insights', [
+            'level'                           => 'account',
+            'fields'                          => 'spend,impressions,clicks,actions,action_values,account_currency',
+            'breakdowns'                      => implode(',', $breakdowns),
+            'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
+            'time_range'                      => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
+            'time_increment'                  => 1,
+            'use_account_attribution_setting' => 'false',
+            'limit'                           => 200,
+        ]);
+
+        $out = [];
+        foreach ($rows as $row) {
+            $day = (string) ($row['date_start'] ?? '');
+            if ($day === '') {
+                continue;
+            }
+            // The segment is the combination of the requested breakdown fields
+            // present on the row (e.g. age + gender → "25-34 · female").
+            $parts = [];
+            foreach ($breakdowns as $b) {
+                $v = $row[$b] ?? null;
+                if ($v !== null && $v !== '') {
+                    $parts[] = (string) $v;
+                }
+            }
+            $segment = $parts === [] ? 'unknown' : implode(' · ', $parts);
+
+            $out[] = [
+                'date'             => $day,
+                'segment_key'      => $segment,
+                'segment_label'    => $segment,
+                'spend'            => isset($row['spend']) ? round((float) $row['spend'], 2) : 0.0,
+                'impressions'      => (int) ($row['impressions'] ?? 0),
+                'clicks'           => (int) ($row['clicks'] ?? 0),
+                'conversions'      => (int) round(self::attributedTotal($row['actions'] ?? [], self::PURCHASE_ACTION_TYPES)),
+                'conversion_value' => round(self::attributedTotal($row['action_values'] ?? [], self::PURCHASE_ACTION_TYPES), 2),
+                'currency'         => strtoupper((string) ($row['account_currency'] ?? $fallbackCcy)),
+            ];
         }
 
         return $out;
