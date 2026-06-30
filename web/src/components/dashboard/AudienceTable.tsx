@@ -63,6 +63,7 @@ function buildShades(columns: AudienceColumn[]): Map<string, string> {
 export function AudienceTable({ data }: Props) {
   const { columns, rows, currency } = data;
   const shadeByKey = buildShades(columns);
+  const hasRemainder = columns.some((c) => c.kind === 'remainder');
 
   return (
     <Card style={{ overflowX: 'auto' }}>
@@ -109,16 +110,18 @@ export function AudienceTable({ data }: Props) {
 
       <div className="text-xs muted" style={{ padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
         Meta spend split by {breakdownLabel(data.breakdown)} over the {PERIOD_LABEL[data.period] ?? data.period}, ending
-        yesterday in each brand&rsquo;s timezone. {data.breakdown === 'audience' ? (
-          <>
-            <strong>Non-ASC</strong> is spend outside Advantage+ Shopping campaigns — the account total minus the ASC
-            segments — so the mix always reconciles to 100% of real spend.
-          </>
-        ) : (
-          <>
-            <strong>Other</strong> folds together the smaller segments beyond the top {SEGMENT_COLORS.length}.
-          </>
-        )}
+        yesterday in each brand&rsquo;s timezone.{' '}
+        {hasRemainder &&
+          (data.breakdown === 'audience' ? (
+            <>
+              <strong>Non-ASC</strong> is spend outside Advantage+ Shopping campaigns — the account total minus the ASC
+              segments — so the mix always reconciles to 100% of real spend.
+            </>
+          ) : (
+            <>
+              <strong>Other</strong> folds together the smaller segments beyond the top {SEGMENT_COLORS.length}.
+            </>
+          ))}
       </div>
     </Card>
   );
@@ -130,8 +133,10 @@ function breakdownLabel(b: string): string {
       return 'ASC audience segment';
     case 'age_gender':
       return 'age & gender';
+    case 'placement_platform':
+      return 'placement (by platform)';
     case 'placement':
-      return 'placement';
+      return 'placement (by position)';
     case 'country':
       return 'country';
     case 'device':

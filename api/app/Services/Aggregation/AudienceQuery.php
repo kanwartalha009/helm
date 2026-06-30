@@ -33,7 +33,22 @@ final class AudienceQuery
     use ScopesBrandsByManager;
 
     /** Breakdown axes the view understands → these MUST exist in config/meta_breakdowns.php. */
-    private const VALID_BREAKDOWNS = ['audience', 'age_gender', 'placement', 'country', 'device'];
+    private const VALID_BREAKDOWNS = ['audience', 'age_gender', 'placement_platform', 'placement', 'country', 'device'];
+
+    /**
+     * Pretty labels for the publisher_platform values behind the platform-level
+     * "Placement" view. Meta returns these lowercase; everything else (countries,
+     * age buckets, devices) keeps its stored label.
+     *
+     * @var array<string, string>
+     */
+    private const PLATFORM_LABELS = [
+        'facebook'        => 'Facebook',
+        'instagram'       => 'Instagram',
+        'audience_network' => 'Audience Network',
+        'messenger'       => 'Messenger',
+        'unknown'         => 'Unknown',
+    ];
 
     /**
      * ASC audience segments in funnel order. These are the fixed columns for the
@@ -280,8 +295,13 @@ final class AudienceQuery
         arsort($globalUsd);
         $topKeys = array_slice(array_keys($globalUsd), 0, self::TOP_N);
 
-        // Prefer a human label seen on the rows for each kept key.
-        $labelFor = function (string $key) use ($perBrand): string {
+        // Prefer a human label seen on the rows for each kept key. The platform-
+        // level placement view maps the raw publisher_platform value to a pretty
+        // label (audience_network → "Audience Network").
+        $labelFor = function (string $key) use ($perBrand, $breakdown): string {
+            if ($breakdown === 'placement_platform') {
+                return self::PLATFORM_LABELS[strtolower($key)] ?? ucwords(str_replace('_', ' ', $key));
+            }
             foreach ($perBrand as $entry) {
                 if (isset($entry['segLabels'][$key]) && $entry['segLabels'][$key] !== '') {
                     return (string) $entry['segLabels'][$key];

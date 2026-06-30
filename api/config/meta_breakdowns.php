@@ -14,12 +14,20 @@ declare(strict_types=1);
 |
 | `audience` is synced daily (it's the default view); the others are
 | backfill-on-demand via `meta:backfill-breakdown --type=...`.
+|
+| Placement has TWO axes on purpose. `placement_platform` (publisher_platform
+| only → Facebook / Instagram / Audience Network / Messenger) is the default
+| "Placement" view: ~4 buckets that sum to ~100% of spend, so Audience Network
+| is visible instead of buried. `placement` keeps the granular
+| publisher_platform × platform_position split for the "Placement detail" view —
+| it's long-tailed (15-25 positions) so most spend lands in "Other" there.
 */
 
 return [
-    'audience'   => ['user_segment_key'],
-    'age_gender' => ['age', 'gender'],
-    'placement'  => ['publisher_platform', 'platform_position'],
-    'country'    => ['country'],
-    'device'     => ['impression_device'],
+    'audience'           => ['user_segment_key'],
+    'age_gender'         => ['age', 'gender'],
+    'placement_platform' => ['publisher_platform'],
+    'placement'          => ['publisher_platform', 'platform_position'],
+    'country'            => ['country'],
+    'device'             => ['impression_device'],
 ];

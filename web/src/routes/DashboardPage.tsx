@@ -27,7 +27,11 @@ import type {
 
 const BREAKDOWN_OPTIONS: { key: AudienceBreakdown; label: string }[] = [
   { key: 'audience', label: 'Audience segments' },
-  { key: 'placement', label: 'Placement' },
+  // Placement defaults to platform-level (Facebook / Instagram / Audience
+  // Network / Messenger) — ~4 buckets that sum to ~100%. "Placement detail" is
+  // the granular position split, which is long-tailed (most spend in "Other").
+  { key: 'placement_platform', label: 'Placement' },
+  { key: 'placement', label: 'Placement detail' },
   { key: 'age_gender', label: 'Age & gender' },
   { key: 'country', label: 'Country' },
   { key: 'device', label: 'Device' },

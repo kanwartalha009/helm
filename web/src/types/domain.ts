@@ -183,6 +183,7 @@ export interface DashboardRow {
 export type AudienceBreakdown =
   | 'audience'
   | 'age_gender'
+  | 'placement_platform'
   | 'placement'
   | 'country'
   | 'device';

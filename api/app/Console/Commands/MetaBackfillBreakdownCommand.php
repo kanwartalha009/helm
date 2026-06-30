@@ -15,13 +15,14 @@ use Throwable;
 /**
  * Backfill Meta spend split by a breakdown axis into meta_breakdown_daily for the
  * dashboard's Audience view. Default axis is `audience` (ASC new/engaged/existing/
- * unknown via user_segment_key); --type also accepts age_gender, placement,
- * country, device, or all. Monthly windows, fx-stamped, additive upsert that
- * never touches daily_metrics.
+ * unknown via user_segment_key); --type also accepts age_gender,
+ * placement_platform (FB/IG/Audience Network/Messenger — the default Placement
+ * view), placement (granular position split), country, device, or all. Monthly
+ * windows, fx-stamped, additive upsert that never touches daily_metrics.
  *
- *   php artisan meta:backfill-breakdown                          # all brands, audience, since 2025-01-01
+ *   php artisan meta:backfill-breakdown                                  # all brands, audience, since 2025-01-01
  *   php artisan meta:backfill-breakdown meller --since=2026-04-01
- *   php artisan meta:backfill-breakdown --type=placement
+ *   php artisan meta:backfill-breakdown --type=placement_platform
  *   php artisan meta:backfill-breakdown --type=all
  */
 class MetaBackfillBreakdownCommand extends Command
@@ -29,7 +30,7 @@ class MetaBackfillBreakdownCommand extends Command
     protected $signature = 'meta:backfill-breakdown '
         . '{brand? : slug or id; omit for all active brands} '
         . '{--since=2025-01-01 : first day to pull (Y-m-d)} '
-        . '{--type=audience : audience|age_gender|placement|country|device|all}';
+        . '{--type=audience : audience|age_gender|placement_platform|placement|country|device|all}';
 
     protected $description = 'Backfill Meta spend by audience/placement/etc. breakdown into meta_breakdown_daily.';
 
