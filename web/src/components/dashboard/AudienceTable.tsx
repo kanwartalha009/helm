@@ -84,10 +84,14 @@ export function AudienceTable({ data }: Props) {
                 colSpan={2}
                 style={{ textAlign: 'center', minWidth: 150 }}
               >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
-                  <ColorSwatch column={col} shade={shadeByKey.get(col.key)!} />
-                  {col.label}
-                </span>
+                {col.key === '__gender' ? (
+                  <GenderLegend />
+                ) : (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                    <ColorSwatch column={col} shade={shadeByKey.get(col.key)!} />
+                    {col.label}
+                  </span>
+                )}
               </th>
             ))}
           </tr>
@@ -171,8 +175,30 @@ function ColorSwatch({ column, shade }: { column: AudienceColumn; shade: string 
   );
 }
 
-// The age & gender "Gender" column: a single Male-vs-Female split bar + M/F
+const MALE_COLOR = '#2563EB';
+const FEMALE_COLOR = '#EC4899';
+
+// Full Male / Female legend shown once in the column header (a subheading), so
+// the rows don't repeat the words 77 times — the cell percentages just inherit
+// these colours.
+function GenderLegend() {
+  const item = (color: string, label: string) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ width: 8, height: 8, borderRadius: 8, background: color, flex: '0 0 auto' }} />
+      <span style={{ color, fontWeight: 500 }}>{label}</span>
+    </span>
+  );
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12, justifyContent: 'center' }}>
+      {item(MALE_COLOR, 'Male')}
+      {item(FEMALE_COLOR, 'Female')}
+    </span>
+  );
+}
+
+// The age & gender "Gender" column: a single Male-vs-Female split bar + the two
 // shares (of known-gender spend, so they sum to 100% for a clean head-to-head).
+// Male / Female are named in the header legend, so cells stay compact.
 function GenderCell({ row }: { row: AudienceRow }) {
   const male = row.segments['__gender_male'] ?? 0;
   const female = row.segments['__gender_female'] ?? 0;
@@ -185,13 +211,13 @@ function GenderCell({ row }: { row: AudienceRow }) {
       {known > 0 ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
           <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, whiteSpace: 'nowrap' }}>
-            <span style={{ color: '#2563EB', fontWeight: 500 }}>M&nbsp;{mPct.toFixed(0)}%</span>
+            <span style={{ color: MALE_COLOR, fontWeight: 500 }}>{mPct.toFixed(0)}%</span>
             <span className="muted"> · </span>
-            <span style={{ color: '#EC4899', fontWeight: 500 }}>F&nbsp;{fPct.toFixed(0)}%</span>
+            <span style={{ color: FEMALE_COLOR, fontWeight: 500 }}>{fPct.toFixed(0)}%</span>
           </span>
           <div style={{ display: 'flex', width: 72, height: 6, borderRadius: 3, overflow: 'hidden', background: 'var(--surface-subtle)', flex: '0 0 auto' }}>
-            <div style={{ width: `${mPct}%`, background: '#2563EB' }} />
-            <div style={{ width: `${fPct}%`, background: '#EC4899' }} />
+            <div style={{ width: `${mPct}%`, background: MALE_COLOR }} />
+            <div style={{ width: `${fPct}%`, background: FEMALE_COLOR }} />
           </div>
         </div>
       ) : (
