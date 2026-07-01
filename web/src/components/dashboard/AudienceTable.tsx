@@ -242,12 +242,15 @@ function AudienceTableRow({
   const currency = currencyMode === 'usd' ? 'USD' : brand.baseCurrency || 'USD';
   const total = row.total ?? 0;
 
-  // Three honest states (spec rule #9 — missing is never €0):
-  //   no spend           → muted, the brand simply didn't run Meta this period
+  // Honest states (spec rule #9 — missing is never €0, and a partial window is
+  // never shown as a full one):
+  //   no spend            → muted, the brand simply didn't run Meta this period
+  //   not synced (stale)  → amber, the window isn't fully synced — hide the numbers
   //   spend, no breakdown → amber "pending", don't fake a composition
   //   spend + breakdown   → the real split
   const noSpend = !row.hasSpend || total <= 0;
-  const pending = row.hasSpend && total > 0 && !row.hasBreakdown;
+  const stale = row.hasSpend && total > 0 && !row.isComplete;
+  const pending = row.hasSpend && total > 0 && row.isComplete && !row.hasBreakdown;
   const segSpan = Math.max(columns.length * 2, 1);
 
   return (
@@ -266,16 +269,16 @@ function AudienceTableRow({
 
       <td className="num group-start" style={{ verticalAlign: 'middle' }}>
         <div style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-          {noSpend ? <span className="muted">—</span> : formatMoney(total, currency)}
+          {noSpend || stale ? <span className="muted">—</span> : formatMoney(total, currency)}
         </div>
-        {noSpend || pending ? (
+        {noSpend || stale || pending ? (
           <div
             style={{
               height: 6,
               borderRadius: 3,
               marginTop: 5,
               background: 'var(--surface-subtle)',
-              border: pending ? '1px solid var(--warning-border)' : '1px solid var(--border)',
+              border: stale || pending ? '1px solid var(--warning-border)' : '1px solid var(--border)',
             }}
           />
         ) : (
@@ -286,6 +289,13 @@ function AudienceTableRow({
       {noSpend ? (
         <td className="num group-start" colSpan={segSpan} style={{ textAlign: 'center' }}>
           <span className="muted">No Meta spend this period</span>
+        </td>
+      ) : stale ? (
+        <td className="num group-start" colSpan={segSpan} style={{ textAlign: 'center' }}>
+          <Tag variant="warning" title="This period isn’t fully synced — sync before trusting these numbers.">
+            <Dot variant="warning" />
+            Not synced
+          </Tag>
         </td>
       ) : pending ? (
         <td className="num group-start" colSpan={segSpan} style={{ textAlign: 'center' }}>

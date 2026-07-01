@@ -18,6 +18,12 @@ interface MetricGroup {
    * the brand has an active connection for this platform.
    */
   platform?: 'shopify' | 'meta' | 'google' | 'tiktok';
+  /**
+   * The window backing this group isn't fully synced (e.g. L7d missing days).
+   * When set, the group renders a clickable "Not synced" state instead of the
+   * (nulled) partial figure — we never show a partial number (Bosco, 2026-06-30).
+   */
+  incomplete?: boolean;
 }
 
 interface Props {
@@ -281,7 +287,16 @@ function Row({
   if (showTotalSpend) {
     groups.push({ label: 'Total', yesterday: yesterday.totalSpend, dayBefore: dayBefore.totalSpend, kind: 'money' });
   }
-  groups.push({ label: 'L7d', yesterday: l7Rev, dayBefore: l7Prev, kind: 'money', platform: 'shopify' });
+  groups.push({
+    label: 'L7d',
+    yesterday: l7Rev,
+    dayBefore: l7Prev,
+    kind: 'money',
+    platform: 'shopify',
+    // The 7-day sum only shows when all 7 days synced (backend already nulls it
+    // otherwise); flag it so the cell renders "Not synced" rather than "—".
+    incomplete: connected.has('shopify') && !last7d.isComplete,
+  });
 
   return (
     <tr>
@@ -327,6 +342,8 @@ function Row({
           index={i + 1}
           connected={connected}
           health={health}
+          onSync={() => triggerSync.mutate(brand.slug)}
+          syncing={triggerSync.isPending}
         />
       ))}
     </tr>
@@ -380,6 +397,34 @@ function MetricCells({
           <Tag variant="warning">
             <Dot variant="warning" />
             {syncing ? 'Syncing…' : errored ? 'Retry sync' : 'Sync now'}
+          </Tag>
+        </button>
+      </td>
+    );
+  }
+
+  // The window backing this group isn't fully synced (e.g. L7d missing a day).
+  // The backend already nulled the partial figure; render a clickable "Not
+  // synced" state so nobody reads a short-window sum as a full one.
+  if (group.incomplete) {
+    return (
+      <td className={cn(cellClass, groupStart)} colSpan={3} style={{ textAlign: 'center' }}>
+        <button
+          type="button"
+          onClick={onSync}
+          disabled={syncing || !onSync}
+          title="This window isn’t fully synced yet — sync this brand for complete numbers."
+          style={{
+            background: 'none',
+            border: 0,
+            padding: 0,
+            cursor: onSync && !syncing ? 'pointer' : 'default',
+            fontFamily: 'inherit',
+          }}
+        >
+          <Tag variant="warning">
+            <Dot variant="warning" />
+            {syncing ? 'Syncing…' : 'Not synced'}
           </Tag>
         </button>
       </td>

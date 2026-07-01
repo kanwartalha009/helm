@@ -146,6 +146,7 @@ export interface DashboardRow {
     totalSpend: number | null;
     roas: number | null;
     roasTotal: number | null;
+    isComplete: boolean;
   };
   last7d: {
     // `revenue` and `revenuePrior7d` are NET sums (gross − refunds).

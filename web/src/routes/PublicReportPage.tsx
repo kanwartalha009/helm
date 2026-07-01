@@ -11,6 +11,12 @@ export function PublicReportPage() {
   const { token } = useParams();
   const { data, isLoading, isError } = usePublicReport(token);
 
+  // Freshness is recomputed live on every view (publicShow rebuilds the report),
+  // so a client NEVER sees a stale/partial report — even if the operator created
+  // the link while data was behind. No "show anyway" here: this is the client's
+  // view (Bosco, 2026-06-30).
+  const stale = !!data?.freshness && !data.freshness.upToDate;
+
   return (
     <div style={{ minHeight: '100vh', background: '#efeee9', padding: '28px 16px' }}>
       <style>{`@media print{.rpt-public-bar{display:none}}`}</style>
@@ -18,7 +24,7 @@ export function PublicReportPage() {
         className="rpt-public-bar"
         style={{ maxWidth: 1040, margin: '0 auto 16px', display: 'flex', justifyContent: 'flex-end' }}
       >
-        {data && (
+        {data && !stale && (
           <button
             onClick={() => window.print()}
             style={{
@@ -44,7 +50,27 @@ export function PublicReportPage() {
           This report link is invalid or has expired.
         </div>
       )}
-      {data && <ReportDocument data={data} editable={false} />}
+      {data &&
+        (stale ? (
+          <div
+            style={{
+              maxWidth: 1040,
+              margin: '0 auto',
+              background: '#fff',
+              borderRadius: 12,
+              padding: '64px 32px',
+              textAlign: 'center',
+            }}
+          >
+            <h2 style={{ color: '#0f0f0f', marginBottom: 10 }}>This report is being updated</h2>
+            <p style={{ color: '#767676', maxWidth: 460, margin: '0 auto', lineHeight: 1.6 }}>
+              The latest figures are still syncing, so we’re holding the report back rather than show
+              you partial numbers. Please check this link again shortly.
+            </p>
+          </div>
+        ) : (
+          <ReportDocument data={data} editable={false} />
+        ))}
     </div>
   );
 }

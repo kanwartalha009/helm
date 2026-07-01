@@ -152,8 +152,18 @@ final class AudienceQuery
                 ->where('brand_id', $brand->id)
                 ->where('platform', 'meta')
                 ->whereBetween('date', [$start, $end])
-                ->selectRaw("COALESCE(SUM({$dispExpr}), 0) AS disp, COALESCE(SUM({$usdExpr}), 0) AS usd, COUNT(*) AS n")
+                ->selectRaw("COALESCE(SUM({$dispExpr}), 0) AS disp, COALESCE(SUM({$usdExpr}), 0) AS usd, COUNT(*) AS n,
+                    SUM(CASE WHEN is_complete THEN 1 ELSE 0 END) AS complete_days")
                 ->first();
+
+            // Freshness gate (Bosco, 2026-06-30): the period is only "fresh" when
+            // every day in the window has a finalized Meta row. The daily sync
+            // writes a row per day (a zero row for no-delivery days), so a
+            // complete-day count below the expected span means the sync hasn't
+            // fully run — we render "not synced" rather than a partial-window sum.
+            $expectedDays = (int) CarbonImmutable::parse($start)->diffInDays(CarbonImmutable::parse($end)) + 1;
+            $freshDays    = (int) ($totalRow->complete_days ?? 0);
+            $isFresh      = $expectedDays > 0 && $freshDays >= $expectedDays;
 
             $segDisp = [];
             $segUsd  = [];
@@ -191,7 +201,9 @@ final class AudienceQuery
                 // covers the rare desync where the breakdown pull ran but the
                 // account-level daily_metrics row for the day didn't.
                 'hasSpend'     => ((int) ($totalRow->n ?? 0) > 0) || $segRows->isNotEmpty(),
-                'isComplete'   => $complete,
+                // Fresh only when every day in the window is finalized AND the
+                // present breakdown rows are complete.
+                'isComplete'   => $isFresh && $complete,
                 'conn'         => $conn,
             ];
         }

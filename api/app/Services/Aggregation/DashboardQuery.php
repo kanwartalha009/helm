@@ -142,12 +142,23 @@ final class DashboardQuery
             // net sales and total sales — so the dashboard renders ROAS against
             // whichever the metric toggle selects (Bosco-approved: ROAS follows
             // the filter).
+            // Freshness gate (Bosco, 2026-06-30): a day only counts when its
+            // Shopify row is FINALIZED (is_complete). A partial/in-progress day —
+            // one synced while it was still "today" and never re-synced — must
+            // never surface as a real number; those cells render "not synced"
+            // instead. Showing a half-day's revenue/ROAS to a client is worse
+            // than showing nothing.
+            $yComplete  = (bool) ($yesterdayRow?->is_complete ?? false);
+            $dbComplete = (bool) ($dayBeforeRow?->is_complete ?? false);
+
             $ySpendUsd  = $this->spendUsd([$yMeta, $yGoogle, $yTikTok]);
             $dSpendUsd  = $this->spendUsd([$dMeta, $dGoogle, $dTikTok]);
-            $yRoasNet   = $this->ratio($yesterdayRow, 'net_sales', $ySpendUsd);
-            $yRoasTotal = $this->ratioTotal($yesterdayRow, $ySpendUsd);
-            $dRoasNet   = $this->ratio($dayBeforeRow, 'net_sales', $dSpendUsd);
-            $dRoasTotal = $this->ratioTotal($dayBeforeRow, $dSpendUsd);
+            // ROAS is gated on the revenue day being complete — a ratio built on a
+            // partial numerator is the most dangerous number on the page.
+            $yRoasNet   = $yComplete  ? $this->ratio($yesterdayRow, 'net_sales', $ySpendUsd) : null;
+            $yRoasTotal = $yComplete  ? $this->ratioTotal($yesterdayRow, $ySpendUsd)         : null;
+            $dRoasNet   = $dbComplete ? $this->ratio($dayBeforeRow, 'net_sales', $dSpendUsd) : null;
+            $dRoasTotal = $dbComplete ? $this->ratioTotal($dayBeforeRow, $dSpendUsd)         : null;
 
             // Compute net = gross − refunds explicitly at read time. The
             // `revenue_net` column is also maintained at write time, but
@@ -260,21 +271,24 @@ final class DashboardQuery
                     // toggle swaps between them at render time. Net is
                     // computed at query time as `revenue − refunds_amount`
                     // (see selectRaw above), not read from `revenue_net`.
-                    'revenue'     => $yesterdayRow
+                    // All revenue figures are gated on $yComplete — a partial
+                    // (still-syncing) yesterday returns null so the row renders a
+                    // "not synced" state, never a half-day number.
+                    'revenue'     => $yComplete
                         ? round((float) $yesterdayRow->revenue * $yMult, 2)
                         : null,
-                    'revenueNet'  => $yesterdayRow
+                    'revenueNet'  => $yComplete
                         ? round(((float) $yesterdayRow->revenue - (float) $yesterdayRow->refunds_amount) * $yMult, 2)
                         : null,
-                    'netSales'    => ($yesterdayRow && $yesterdayRow->net_sales !== null)
+                    'netSales'    => ($yComplete && $yesterdayRow->net_sales !== null)
                         ? round((float) $yesterdayRow->net_sales * $yMult, 2)
                         : null,
                     // Total revenue = total_sales + refunds (Bosco 2026-06-25);
                     // refundsAmount below still surfaces the refund on its own.
-                    'totalSales'  => ($yesterdayRow && $yesterdayRow->total_sales !== null)
+                    'totalSales'  => ($yComplete && $yesterdayRow->total_sales !== null)
                         ? round(((float) $yesterdayRow->total_sales + (float) $yesterdayRow->refunds_amount) * $yMult, 2)
                         : null,
-                    'refundsAmount' => $yesterdayRow
+                    'refundsAmount' => $yComplete
                         ? round((float) $yesterdayRow->refunds_amount * $yMult, 2)
                         : null,
                     'metaSpend'   => $yMetaSpend,
@@ -286,19 +300,20 @@ final class DashboardQuery
                     'isComplete'  => (bool) ($yesterdayRow?->is_complete ?? false),
                 ],
                 'dayBefore' => [
-                    'revenue'     => $dayBeforeRow
+                    // Gated on $dbComplete — same rule as yesterday.
+                    'revenue'     => $dbComplete
                         ? round((float) $dayBeforeRow->revenue * $dMult, 2)
                         : null,
-                    'revenueNet'  => $dayBeforeRow
+                    'revenueNet'  => $dbComplete
                         ? round(((float) $dayBeforeRow->revenue - (float) $dayBeforeRow->refunds_amount) * $dMult, 2)
                         : null,
-                    'netSales'    => ($dayBeforeRow && $dayBeforeRow->net_sales !== null)
+                    'netSales'    => ($dbComplete && $dayBeforeRow->net_sales !== null)
                         ? round((float) $dayBeforeRow->net_sales * $dMult, 2)
                         : null,
-                    'totalSales'  => ($dayBeforeRow && $dayBeforeRow->total_sales !== null)
+                    'totalSales'  => ($dbComplete && $dayBeforeRow->total_sales !== null)
                         ? round(((float) $dayBeforeRow->total_sales + (float) $dayBeforeRow->refunds_amount) * $dMult, 2)
                         : null,
-                    'refundsAmount' => $dayBeforeRow
+                    'refundsAmount' => $dbComplete
                         ? round((float) $dayBeforeRow->refunds_amount * $dMult, 2)
                         : null,
                     'metaSpend'   => $dMetaSpend,
@@ -307,16 +322,20 @@ final class DashboardQuery
                     'totalSpend'  => $dTotalSpend,
                     'roas'        => $dRoasNet,
                     'roasTotal'   => $dRoasTotal,
+                    'isComplete'  => $dbComplete,
                 ],
                 'last7d' => [
-                    'revenue'             => $last7dCount > 0 ? round($last7dNet, 2)          : null,
-                    'revenueGross'        => $last7dCount > 0 ? round($last7dGross, 2)        : null,
-                    'netSales'            => $last7dCount > 0 ? round($last7dNetSales, 2)     : null,
-                    'totalSales'          => $last7dCount > 0 ? round($last7dTotalSales, 2)   : null,
-                    'revenuePrior7d'      => $prior7dCount > 0 ? round($prior7dNet, 2)        : null,
-                    'revenueGrossPrior7d' => $prior7dCount > 0 ? round($prior7dGross, 2)      : null,
-                    'netSalesPrior7d'     => $prior7dCount > 0 ? round($prior7dNetSales, 2)   : null,
-                    'totalSalesPrior7d'   => $prior7dCount > 0 ? round($prior7dTotalSales, 2) : null,
+                    // Strict: the whole 7-day window must be synced (all 7 days
+                    // complete) or NOTHING shows — a 3-of-7-day sum labelled "L7d"
+                    // is exactly the partial number that misleads (Bosco, 2026-06-30).
+                    'revenue'             => $last7dCount >= 7 ? round($last7dNet, 2)          : null,
+                    'revenueGross'        => $last7dCount >= 7 ? round($last7dGross, 2)        : null,
+                    'netSales'            => $last7dCount >= 7 ? round($last7dNetSales, 2)     : null,
+                    'totalSales'          => $last7dCount >= 7 ? round($last7dTotalSales, 2)   : null,
+                    'revenuePrior7d'      => $prior7dCount >= 7 ? round($prior7dNet, 2)        : null,
+                    'revenueGrossPrior7d' => $prior7dCount >= 7 ? round($prior7dGross, 2)      : null,
+                    'netSalesPrior7d'     => $prior7dCount >= 7 ? round($prior7dNetSales, 2)   : null,
+                    'totalSalesPrior7d'   => $prior7dCount >= 7 ? round($prior7dTotalSales, 2) : null,
                     'isComplete'          => $last7dCount >= 7,
                 ],
                 'comparison' => $comparison,

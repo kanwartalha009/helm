@@ -57,37 +57,37 @@ const DASHBOARD_ROWS: DashboardRow[] = [
   {
     brand: BRANDS[0],
     yesterday: { revenue: 8420, revenueNet: 8420, netSales: 8420, totalSales: 10104, refundsAmount: 0, metaSpend: 1520, googleSpend: 680, tiktokSpend: 330, totalSpend: 2530, roas: 3.33, roasTotal: 3.99, isComplete: true },
-    dayBefore: { revenue: 7489, revenueNet: 7489, netSales: 7489, totalSales: 8987, refundsAmount: 0, metaSpend: 1460, googleSpend: 680, tiktokSpend: 278, totalSpend: 2418, roas: 3.10, roasTotal: 3.72 },
+    dayBefore: { revenue: 7489, revenueNet: 7489, netSales: 7489, totalSales: 8987, refundsAmount: 0, metaSpend: 1460, googleSpend: 680, tiktokSpend: 278, totalSpend: 2418, roas: 3.10, roasTotal: 3.72, isComplete: true },
     last7d:    { revenue: 52860, revenueGross: 52860, netSales: 52860, totalSales: 63432, revenuePrior7d: 47012, revenueGrossPrior7d: 47012, netSalesPrior7d: 47012, totalSalesPrior7d: 56414, isComplete: true },
   },
   {
     brand: BRANDS[1],
     yesterday: { revenue: 5210, revenueNet: 5210, netSales: 5210, totalSales: 6252, refundsAmount: 0, metaSpend: 890, googleSpend: 380, tiktokSpend: 140, totalSpend: 1410, roas: 3.70, roasTotal: 4.43, isComplete: true },
-    dayBefore: { revenue: 5376, revenueNet: 5376, netSales: 5376, totalSales: 6451, refundsAmount: 0, metaSpend: 901, googleSpend: 383, tiktokSpend: 140, totalSpend: 1424, roas: 3.78, roasTotal: 4.53 },
+    dayBefore: { revenue: 5376, revenueNet: 5376, netSales: 5376, totalSales: 6451, refundsAmount: 0, metaSpend: 901, googleSpend: 383, tiktokSpend: 140, totalSpend: 1424, roas: 3.78, roasTotal: 4.53, isComplete: true },
     last7d:    { revenue: 36040, revenueGross: 36040, netSales: 36040, totalSales: 43248, revenuePrior7d: 37196, revenueGrossPrior7d: 37196, netSalesPrior7d: 37196, totalSalesPrior7d: 44635, isComplete: true },
   },
   {
     brand: BRANDS[2],
     yesterday: { revenue: null, revenueNet: null, netSales: null, totalSales: null, refundsAmount: null, metaSpend: 890, googleSpend: 410, tiktokSpend: null, totalSpend: 1300, roas: null, roasTotal: null, isComplete: false },
-    dayBefore: { revenue: null, revenueNet: null, netSales: null, totalSales: null, refundsAmount: null, metaSpend: 842, googleSpend: 398, tiktokSpend: null, totalSpend: 1240, roas: null, roasTotal: null },
+    dayBefore: { revenue: null, revenueNet: null, netSales: null, totalSales: null, refundsAmount: null, metaSpend: 842, googleSpend: 398, tiktokSpend: null, totalSpend: 1240, roas: null, roasTotal: null, isComplete: false },
     last7d:    { revenue: null, revenueGross: null, netSales: null, totalSales: null, revenuePrior7d: null, revenueGrossPrior7d: null, netSalesPrior7d: null, totalSalesPrior7d: null, isComplete: false },
   },
   {
     brand: BRANDS[3],
     yesterday: { revenue: 4050, revenueNet: 4050, netSales: 4050, totalSales: 4860, refundsAmount: 0, metaSpend: 770, googleSpend: 280, tiktokSpend: 360, totalSpend: 1410, roas: 2.87, roasTotal: 3.45, isComplete: true },
-    dayBefore: { revenue: 3794, revenueNet: 3794, netSales: 3794, totalSales: 4553, refundsAmount: 0, metaSpend: 691, googleSpend: 280, tiktokSpend: 295, totalSpend: 1266, roas: 3.00, roasTotal: 3.60 },
+    dayBefore: { revenue: 3794, revenueNet: 3794, netSales: 3794, totalSales: 4553, refundsAmount: 0, metaSpend: 691, googleSpend: 280, tiktokSpend: 295, totalSpend: 1266, roas: 3.00, roasTotal: 3.60, isComplete: true },
     last7d:    { revenue: 28400, revenueGross: 28400, netSales: 28400, totalSales: 34080, revenuePrior7d: 26592, revenueGrossPrior7d: 26592, netSalesPrior7d: 26592, totalSalesPrior7d: 31910, isComplete: true },
   },
   {
     brand: BRANDS[4],
     yesterday: { revenue: 2810, revenueNet: 2810, netSales: 2810, totalSales: 3372, refundsAmount: 0, metaSpend: 590, googleSpend: 210, tiktokSpend: null, totalSpend: 800, roas: 3.51, roasTotal: 4.22, isComplete: true },
-    dayBefore: { revenue: 2850, revenueNet: 2850, netSales: 2850, totalSales: 3420, refundsAmount: 0, metaSpend: 603, googleSpend: 211, tiktokSpend: null, totalSpend: 814, roas: 3.50, roasTotal: 4.20 },
+    dayBefore: { revenue: 2850, revenueNet: 2850, netSales: 2850, totalSales: 3420, refundsAmount: 0, metaSpend: 603, googleSpend: 211, tiktokSpend: null, totalSpend: 814, roas: 3.50, roasTotal: 4.20, isComplete: true },
     last7d:    { revenue: 19720, revenueGross: 19720, netSales: 19720, totalSales: 23664, revenuePrior7d: 19996, revenueGrossPrior7d: 19996, netSalesPrior7d: 19996, totalSalesPrior7d: 23995, isComplete: true },
   },
   {
     brand: BRANDS[5],
     yesterday: { revenue: 2030, revenueNet: 2030, netSales: 2030, totalSales: 2436, refundsAmount: 0, metaSpend: 410, googleSpend: 160, tiktokSpend: null, totalSpend: 570, roas: 3.56, roasTotal: 4.27, isComplete: true },
-    dayBefore: { revenue: 1948, revenueNet: 1948, netSales: 1948, totalSales: 2338, refundsAmount: 0, metaSpend: 402, googleSpend: 159, tiktokSpend: null, totalSpend: 562, roas: 3.47, roasTotal: 4.16 },
+    dayBefore: { revenue: 1948, revenueNet: 1948, netSales: 1948, totalSales: 2338, refundsAmount: 0, metaSpend: 402, googleSpend: 159, tiktokSpend: null, totalSpend: 562, roas: 3.47, roasTotal: 4.16, isComplete: true },
     last7d:    { revenue: 14210, revenueGross: 14210, netSales: 14210, totalSales: 17052, revenuePrior7d: 13637, revenueGrossPrior7d: 13637, netSalesPrior7d: 13637, totalSalesPrior7d: 16364, isComplete: true },
   },
 ];
