@@ -197,7 +197,10 @@ export type AudiencePeriod = 'last7' | 'last30' | 'mtd';
 export interface AudienceColumn {
   key: string;
   label: string;
-  kind: 'segment' | 'remainder';
+  // 'summary' columns (e.g. the Male / Female split on age & gender) are
+  // aggregates shown alongside the segments — they sit outside the remainder
+  // math and are excluded from the composition bar so nothing double-counts.
+  kind: 'segment' | 'remainder' | 'summary';
 }
 
 // Lean brand block for an audience row — only what the table needs. Not the

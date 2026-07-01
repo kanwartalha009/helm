@@ -63,8 +63,16 @@ final class AudienceQuery
         'unknown'     => 'Unknown',
     ];
 
-    /** High-cardinality axes (placement/country/…) keep their top-N segments; the rest fold into "Other". */
-    private const TOP_N = 6;
+    /**
+     * High-cardinality axes (placement/country/…) show as many top segments as
+     * needed to cover TARGET_COVERAGE of spend — so "Other" stays small — bounded
+     * to [MIN_COLS, MAX_COLS] to keep the table readable. Country is so long-tailed
+     * (brands ship to 50+ markets, each different) that it hits MAX_COLS with a
+     * real remainder; that's inherent to a shared-column table, not a bug.
+     */
+    private const MIN_COLS = 4;
+    private const MAX_COLS = 8;
+    private const TARGET_COVERAGE = 0.90;
 
     /**
      * @param array<string, mixed> $params
@@ -185,6 +193,18 @@ final class AudienceQuery
             $perBrand,
         );
 
+        // Age & gender gets a Male / Female split at the end (Kanwar, 2026-06-30) —
+        // the clearest read on who the prominent buyers are. These are aggregates
+        // over ALL of the brand's gender segments (not just the shown columns) and
+        // reconcile to ~100%, so they sidestep the long-tail "Other" entirely. They
+        // sit OUTSIDE the remainder math (kind='summary'), and the frontend leaves
+        // them out of the composition bar so nothing double-counts.
+        $genderSummary = $breakdown === 'age_gender';
+        if ($genderSummary) {
+            $columns[] = ['key' => '__gender_male',   'label' => 'Male',   'kind' => 'summary'];
+            $columns[] = ['key' => '__gender_female', 'label' => 'Female', 'kind' => 'summary'];
+        }
+
         $health = function (?PlatformConnection $conn): array {
             return [
                 'status'     => $conn?->status ?? 'active',
@@ -216,6 +236,12 @@ final class AudienceQuery
             $remainder = round($total - $shownSum, 2);
             if ($remainderKey !== null) {
                 $segments[$remainderKey] = max($remainder, 0.0);
+            }
+
+            if ($genderSummary) {
+                [$maleDisp, $femaleDisp]     = $this->genderTotals($entry['segDisp']);
+                $segments['__gender_male']   = round($maleDisp, 2);
+                $segments['__gender_female'] = round($femaleDisp, 2);
             }
 
             $rows[] = [
@@ -291,9 +317,23 @@ final class AudienceQuery
             return [$columns, $columnKeys, '__remainder'];
         }
 
-        // High-cardinality axis: rank segments by global USD spend, keep the top N.
+        // High-cardinality axis: rank by global USD spend, then show as many top
+        // segments as needed to cover TARGET_COVERAGE of spend (so "Other" stays
+        // small), bounded to [MIN_COLS, MAX_COLS].
         arsort($globalUsd);
-        $topKeys = array_slice(array_keys($globalUsd), 0, self::TOP_N);
+        $topKeys = [];
+        $cum     = 0.0;
+        foreach (array_keys($globalUsd) as $key) {
+            $topKeys[] = $key;
+            $cum      += (float) $globalUsd[$key];
+            $covered   = $globalTotalUsd > 0 ? $cum / $globalTotalUsd : 1.0;
+            if (count($topKeys) >= self::MAX_COLS) {
+                break;
+            }
+            if (count($topKeys) >= self::MIN_COLS && $covered >= self::TARGET_COVERAGE) {
+                break;
+            }
+        }
 
         // Prefer a human label seen on the rows for each kept key. The platform-
         // level placement view maps the raw publisher_platform value to a pretty
@@ -372,6 +412,31 @@ final class AudienceQuery
         }
 
         return [$start->toDateString(), $yesterday->toDateString()];
+    }
+
+    /**
+     * Sum a brand's age×gender spend into male / female totals for the Age &
+     * gender summary columns. The segment key looks like "25-34 · female", so
+     * check 'female' before 'male' (the former contains the latter). Unknown-
+     * gender rows are excluded from both — the split is about the two audiences.
+     *
+     * @param array<string, float> $segDisp
+     * @return array{0: float, 1: float} [male, female]
+     */
+    private function genderTotals(array $segDisp): array
+    {
+        $male   = 0.0;
+        $female = 0.0;
+        foreach ($segDisp as $key => $val) {
+            $k = strtolower((string) $key);
+            if (str_contains($k, 'female')) {
+                $female += (float) $val;
+            } elseif (str_contains($k, 'male')) {
+                $male += (float) $val;
+            }
+        }
+
+        return [$male, $female];
     }
 
     private function initials(string $name): string

@@ -49,6 +49,12 @@ function buildShades(columns: AudienceColumn[]): Map<string, string> {
   for (const col of columns) {
     if (col.kind === 'remainder') {
       shadeByKey.set(col.key, REMAINDER_SHADE);
+    } else if (col.kind === 'summary') {
+      // Male / Female split — conventional blue / rose so prominence reads instantly.
+      shadeByKey.set(
+        col.key,
+        col.key === '__gender_female' ? '#EC4899' : col.key === '__gender_male' ? '#2563EB' : UNKNOWN_SHADE,
+      );
     } else if (isUnknown(col)) {
       shadeByKey.set(col.key, UNKNOWN_SHADE);
     } else {
@@ -293,19 +299,21 @@ function StackedBar({
         background: 'var(--surface-subtle)',
       }}
     >
-      {columns.map((col) => {
-        const value = row.segments[col.key] ?? 0;
-        const pct = total > 0 ? (value / total) * 100 : 0;
-        if (pct <= 0) return null;
-        const shade = shadeByKey.get(col.key)!;
-        return (
-          <div
-            key={col.key}
-            title={`${col.label}: ${formatPercent(pct, { decimals: 1 })}`}
-            style={{ width: `${pct}%`, background: col.kind === 'remainder' ? REMAINDER_HATCH : shade }}
-          />
-        );
-      })}
+      {columns
+        .filter((col) => col.kind !== 'summary')
+        .map((col) => {
+          const value = row.segments[col.key] ?? 0;
+          const pct = total > 0 ? (value / total) * 100 : 0;
+          if (pct <= 0) return null;
+          const shade = shadeByKey.get(col.key)!;
+          return (
+            <div
+              key={col.key}
+              title={`${col.label}: ${formatPercent(pct, { decimals: 1 })}`}
+              style={{ width: `${pct}%`, background: col.kind === 'remainder' ? REMAINDER_HATCH : shade }}
+            />
+          );
+        })}
     </div>
   );
 }
