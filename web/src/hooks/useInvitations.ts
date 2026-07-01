@@ -144,3 +144,25 @@ export function useDisableUser() {
     },
   });
 }
+
+/**
+ * DELETE /api/users/{id}/permanent — hard-delete a DISABLED user. Irreversible.
+ * The server requires the user to already be disabled and blocks master_admin +
+ * self, so this is only wired to the Disabled tab.
+ */
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      await api.delete(`/users/${id}/permanent`);
+    },
+    onSuccess: (_d, id) => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      qc.invalidateQueries({ queryKey: ['user', String(id)] });
+      toast.success('User removed', 'The account was permanently deleted.');
+    },
+    onError: (err: any) => {
+      toast.error("Couldn't remove user", err?.response?.data?.message ?? err.message);
+    },
+  });
+}

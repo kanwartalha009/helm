@@ -12,7 +12,12 @@ import {
   Tag,
 } from '@/components/ui';
 import { useUsers } from '@/hooks/useApiData';
-import { useInvitations, useRevokeInvitation, type Invitation } from '@/hooks/useInvitations';
+import {
+  useDeleteUser,
+  useInvitations,
+  useRevokeInvitation,
+  type Invitation,
+} from '@/hooks/useInvitations';
 import { useCurrentUser } from '@/hooks/useSettings';
 import { useUiStore } from '@/stores/uiStore';
 import { BrandAccessDrawer } from '@/components/team/BrandAccessDrawer';
@@ -43,6 +48,7 @@ export function TeamPage() {
   const { data: users = [], isLoading, isError, error } = useUsers();
   const { data: invitations = [] } = useInvitations();
   const revokeInvitation = useRevokeInvitation();
+  const deleteUser = useDeleteUser();
   const openInvite = useUiStore((s) => s.setInviteUserDrawerOpen);
   const [assignUser, setAssignUser] = useState<User | null>(null);
 
@@ -343,6 +349,7 @@ export function TeamPage() {
                         <th>Name</th>
                         <th>Role</th>
                         <th>Last seen</th>
+                        <th />
                       </tr>
                     </thead>
                     <tbody>
@@ -354,6 +361,25 @@ export function TeamPage() {
                           </td>
                           <td>{ROLE_LABEL[u.role]}</td>
                           <td className="muted text-sm">{lastSeenLabel(u.lastLoginAt)}</td>
+                          <td className="text-right">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              style={{ color: 'var(--danger)' }}
+                              disabled={deleteUser.isPending}
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `Permanently remove ${u.name} (${u.email})? This deletes the account and their brand access for good — it can't be undone. Their audit-log history is kept.`
+                                  )
+                                ) {
+                                  deleteUser.mutate(u.id);
+                                }
+                              }}
+                            >
+                              Remove permanently
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

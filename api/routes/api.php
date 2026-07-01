@@ -149,6 +149,8 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         Route::get('users/{user}',          [UserController::class, 'show']);
         Route::patch('users/{user}',        [UserController::class, 'update']);
         Route::delete('users/{user}',       [UserController::class, 'destroy']);
+        // Permanent hard-delete — only for an already-disabled user (see controller).
+        Route::delete('users/{user}/permanent', [UserController::class, 'forceDelete']);
         Route::get('invitations',           [UserController::class, 'listInvitations']);
         Route::post('invitations',          [UserController::class, 'invite']);
         Route::delete('invitations/{id}',   [UserController::class, 'revokeInvitation']);

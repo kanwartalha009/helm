@@ -223,6 +223,54 @@ class UserController extends Controller
     }
 
     /**
+     * DELETE /api/users/{user}/permanent — hard-delete a DISABLED user.
+     *
+     * Deliberately a two-step flow: a user must be disabled first (destroy()),
+     * then permanently removed here. Same guards as disabling — never a master
+     * admin, never yourself. FKs do the cleanup: brand_user_access cascades;
+     * audit_logs / invitations / credentials / report_shares null their actor
+     * refs (see migrations), so the audit trail survives with a null actor. The
+     * `user.deleted` entry we write keeps the email for the record.
+     */
+    public function forceDelete(Request $request, User $user): JsonResponse
+    {
+        $this->authorize('disable', $user);
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($user, $request) {
+            $locked = User::query()->lockForUpdate()->findOrFail($user->id);
+
+            if ($locked->role === 'master_admin') {
+                abort(403, "Master admins can't be deleted. Demote them first.");
+            }
+            if ($request->user()?->id === $locked->id) {
+                abort(403, "You can't delete your own account.");
+            }
+            if ($locked->status !== 'disabled') {
+                abort(409, 'Disable the user before deleting them permanently.');
+            }
+
+            $email = $locked->email;
+            $id    = $locked->id;
+
+            // Prune login sessions (indexed by user_id, no FK), then hard-delete.
+            \Illuminate\Support\Facades\DB::table('sessions')->where('user_id', $id)->delete();
+            $locked->delete();
+
+            AuditLog::create([
+                'actor_user_id' => $request->user()?->id,
+                'action'        => 'user.deleted',
+                'target_type'   => 'user',
+                'target_id'     => $id,
+                'metadata'      => ['email' => $email, 'permanent' => true],
+                'ip'            => $request->ip(),
+                'user_agent'    => $request->userAgent(),
+            ]);
+        });
+
+        return response()->json(null, 204);
+    }
+
+    /**
      * Shape an Invitation for the API. Centralised so list + create return the
      * same fields. Status is computed (not stored) — see Invitation::status().
      *
