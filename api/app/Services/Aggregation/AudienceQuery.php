@@ -32,8 +32,12 @@ final class AudienceQuery
 {
     use ScopesBrandsByManager;
 
-    /** Breakdown axes the view understands → these MUST exist in config/meta_breakdowns.php. */
-    private const VALID_BREAKDOWNS = ['audience', 'age_gender', 'placement_platform', 'placement', 'country', 'device'];
+    /**
+     * Breakdown axes the view understands. All but `region` map to a stored
+     * breakdown_type in config/meta_breakdowns.php; `region` is virtual — it reads
+     * stored `country` rows and rolls them up (see $storedType in run()).
+     */
+    private const VALID_BREAKDOWNS = ['audience', 'age_gender', 'placement_platform', 'placement', 'region', 'country', 'device'];
 
     /**
      * Pretty labels for the publisher_platform values behind the platform-level
@@ -84,6 +88,12 @@ final class AudienceQuery
         $period    = $this->resolvePeriod((string) ($params['period'] ?? 'last30'));
         $usd       = strtoupper((string) ($params['currency'] ?? '')) === 'USD';
 
+        // The Region view is a VIRTUAL breakdown: it reads the stored `country`
+        // rows and rolls them up into regions at read time, so it reuses the
+        // existing country backfill (no separate sync). Every other axis reads
+        // its own stored breakdown_type.
+        $storedType = $breakdown === 'region' ? 'country' : $breakdown;
+
         // Display spend follows the currency toggle; USD spend is always computed
         // separately so cross-brand/cross-segment ranking is currency-fair even in
         // Native mode (a EUR brand and a SEK brand rank by a common unit).
@@ -128,7 +138,7 @@ final class AudienceQuery
 
             $segRows = MetaBreakdownDaily::query()
                 ->where('brand_id', $brand->id)
-                ->where('breakdown_type', $breakdown)
+                ->where('breakdown_type', $storedType)
                 ->whereBetween('date', [$start, $end])
                 ->groupBy('segment_key', 'segment_label')
                 ->selectRaw("segment_key, segment_label,
@@ -150,10 +160,16 @@ final class AudienceQuery
             $labels  = [];
             $complete = true;
             foreach ($segRows as $r) {
-                $key           = (string) $r->segment_key;
-                $segDisp[$key] = (float) $r->disp;
-                $segUsd[$key]  = (float) $r->usd;
-                $labels[$key]  = (string) ($r->segment_label ?: $key);
+                // For the Region view, roll the country code up into its region and
+                // ACCUMULATE (many countries → one region), so use += not =. Every
+                // other axis has unique keys, so += behaves like assignment there.
+                $rawKey = (string) $r->segment_key;
+                $key    = $breakdown === 'region' ? $this->countryRegion($rawKey) : $rawKey;
+                $label  = $breakdown === 'region' ? $key : (string) ($r->segment_label ?: $rawKey);
+
+                $segDisp[$key] = ($segDisp[$key] ?? 0.0) + (float) $r->disp;
+                $segUsd[$key]  = ($segUsd[$key] ?? 0.0) + (float) $r->usd;
+                $labels[$key]  = $label;
                 $complete      = $complete && ((int) $r->complete === 1);
 
                 $globalUsd[$key] = ($globalUsd[$key] ?? 0.0) + (float) $r->usd;
@@ -193,16 +209,16 @@ final class AudienceQuery
             $perBrand,
         );
 
-        // Age & gender gets a Male / Female split at the end (Kanwar, 2026-06-30) —
-        // the clearest read on who the prominent buyers are. These are aggregates
-        // over ALL of the brand's gender segments (not just the shown columns) and
-        // reconcile to ~100%, so they sidestep the long-tail "Other" entirely. They
-        // sit OUTSIDE the remainder math (kind='summary'), and the frontend leaves
-        // them out of the composition bar so nothing double-counts.
+        // Age & gender gets a single Male-vs-Female comparison column, placed FIRST
+        // (right after Total) so who-buys-more is the headline read (Kanwar,
+        // 2026-06-30). The per-row male/female values ride in `segments` and the
+        // frontend renders them as one split bar. It's an aggregate over ALL of the
+        // brand's gender segments and reconciles to ~100%, so it sidesteps the
+        // long-tail "Other"; kind='summary' keeps it out of the remainder math and
+        // the composition bar so nothing double-counts.
         $genderSummary = $breakdown === 'age_gender';
         if ($genderSummary) {
-            $columns[] = ['key' => '__gender_male',   'label' => 'Male',   'kind' => 'summary'];
-            $columns[] = ['key' => '__gender_female', 'label' => 'Female', 'kind' => 'summary'];
+            array_unshift($columns, ['key' => '__gender', 'label' => 'Gender', 'kind' => 'summary']);
         }
 
         $health = function (?PlatformConnection $conn): array {
@@ -319,11 +335,14 @@ final class AudienceQuery
 
         // High-cardinality axis: rank by global USD spend, then show as many top
         // segments as needed to cover TARGET_COVERAGE of spend (so "Other" stays
-        // small), bounded to [MIN_COLS, MAX_COLS].
+        // small), bounded to [MIN_COLS, MAX_COLS]. Generic catch-all keys (device
+        // "other", all-unknown combos) are dropped from the running so they fold
+        // into the single "Other" remainder instead of doubling it.
         arsort($globalUsd);
+        $ranked  = array_filter(array_keys($globalUsd), fn (string $k): bool => ! $this->isCatchAll($k));
         $topKeys = [];
         $cum     = 0.0;
-        foreach (array_keys($globalUsd) as $key) {
+        foreach ($ranked as $key) {
             $topKeys[] = $key;
             $cum      += (float) $globalUsd[$key];
             $covered   = $globalTotalUsd > 0 ? $cum / $globalTotalUsd : 1.0;
@@ -437,6 +456,38 @@ final class AudienceQuery
         }
 
         return [$male, $female];
+    }
+
+    /**
+     * Map an ISO-2 country code to its region label for the Region view. Unknown
+     * or unlisted codes fall back to "Other" so regions always reconcile to 100%.
+     */
+    private function countryRegion(string $code): string
+    {
+        $labels = (array) config('country_regions.labels', []);
+        $map    = (array) config('country_regions.map', []);
+        $key    = $map[strtoupper(trim($code))] ?? 'other';
+
+        return (string) ($labels[$key] ?? 'Other');
+    }
+
+    /**
+     * True when EVERY part of a segment key is a generic catch-all (unknown /
+     * other / not-set) — e.g. device "other", or an all-unknown combo. For
+     * non-audience axes these fold into the single "Other" remainder rather than
+     * standing as their own column, so the table never shows two competing
+     * "Other"-ish columns (the device view had exactly that).
+     */
+    private function isCatchAll(string $key): bool
+    {
+        $parts = array_map('trim', explode(' · ', strtolower($key)));
+        foreach ($parts as $p) {
+            if (! in_array($p, ['', 'unknown', 'other', 'others', '(not set)', 'not set', 'none'], true)) {
+                return false;
+            }
+        }
+
+        return $parts !== [];
     }
 
     private function initials(string $name): string

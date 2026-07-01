@@ -185,6 +185,7 @@ export type AudienceBreakdown =
   | 'age_gender'
   | 'placement_platform'
   | 'placement'
+  | 'region'
   | 'country'
   | 'device';
 

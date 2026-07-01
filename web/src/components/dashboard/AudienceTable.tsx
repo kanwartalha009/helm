@@ -134,6 +134,8 @@ function breakdownLabel(b: string): string {
       return 'placement (by platform)';
     case 'placement':
       return 'placement (by position)';
+    case 'region':
+      return 'region';
     case 'country':
       return 'country';
     case 'device':
@@ -144,6 +146,16 @@ function breakdownLabel(b: string): string {
 }
 
 function ColorSwatch({ column, shade }: { column: AudienceColumn; shade: string }) {
+  // The gender comparison column gets a split blue/rose swatch so the header
+  // reads as "Male vs Female" at a glance.
+  if (column.key === '__gender') {
+    return (
+      <span aria-hidden style={{ display: 'inline-flex', width: 14, height: 9, borderRadius: 2, overflow: 'hidden', flex: '0 0 auto' }}>
+        <span style={{ width: '50%', background: '#2563EB' }} />
+        <span style={{ width: '50%', background: '#EC4899' }} />
+      </span>
+    );
+  }
   return (
     <span
       aria-hidden
@@ -156,6 +168,36 @@ function ColorSwatch({ column, shade }: { column: AudienceColumn; shade: string 
         border: column.kind === 'remainder' ? '1px solid var(--border-strong)' : 'none',
       }}
     />
+  );
+}
+
+// The age & gender "Gender" column: a single Male-vs-Female split bar + M/F
+// shares (of known-gender spend, so they sum to 100% for a clean head-to-head).
+function GenderCell({ row }: { row: AudienceRow }) {
+  const male = row.segments['__gender_male'] ?? 0;
+  const female = row.segments['__gender_female'] ?? 0;
+  const known = male + female;
+  const mPct = known > 0 ? (male / known) * 100 : 0;
+  const fPct = known > 0 ? (female / known) * 100 : 0;
+
+  return (
+    <td className="num group-start" colSpan={2}>
+      {known > 0 ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+          <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, whiteSpace: 'nowrap' }}>
+            <span style={{ color: '#2563EB', fontWeight: 500 }}>M&nbsp;{mPct.toFixed(0)}%</span>
+            <span className="muted"> · </span>
+            <span style={{ color: '#EC4899', fontWeight: 500 }}>F&nbsp;{fPct.toFixed(0)}%</span>
+          </span>
+          <div style={{ display: 'flex', width: 72, height: 6, borderRadius: 3, overflow: 'hidden', background: 'var(--surface-subtle)', flex: '0 0 auto' }}>
+            <div style={{ width: `${mPct}%`, background: '#2563EB' }} />
+            <div style={{ width: `${fPct}%`, background: '#EC4899' }} />
+          </div>
+        </div>
+      ) : (
+        <span className="muted">—</span>
+      )}
+    </td>
   );
 }
 
@@ -228,6 +270,11 @@ function AudienceTableRow({
         </td>
       ) : (
         columns.map((col) => {
+          // The Male-vs-Female comparison is one column (a split bar), not the
+          // standard €/% pair — render it specially.
+          if (col.key === '__gender') {
+            return <GenderCell key={col.key} row={row} />;
+          }
           const value = row.segments[col.key] ?? 0;
           const pct = total > 0 ? (value / total) * 100 : 0;
           const shade = shadeByKey.get(col.key)!;

@@ -33,6 +33,9 @@ const BREAKDOWN_OPTIONS: { key: AudienceBreakdown; label: string }[] = [
   { key: 'placement_platform', label: 'Placement' },
   { key: 'placement', label: 'Placement detail' },
   { key: 'age_gender', label: 'Age & gender' },
+  // Region rolls countries up into ~6 buckets (reconciles, small Other); Country
+  // is the precise per-country split (long-tailed). Region first, then detail.
+  { key: 'region', label: 'Region' },
   { key: 'country', label: 'Country' },
   { key: 'device', label: 'Device' },
 ];

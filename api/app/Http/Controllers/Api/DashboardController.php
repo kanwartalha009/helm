@@ -55,7 +55,7 @@ class DashboardController extends Controller
         $params = $request->validate([
             'currency'  => ['nullable', 'string', 'size:3'],
             'manager'   => ['nullable', 'string', 'max:20'],
-            'breakdown' => ['nullable', 'in:audience,age_gender,placement_platform,placement,country,device'],
+            'breakdown' => ['nullable', 'in:audience,age_gender,placement_platform,placement,region,country,device'],
             'period'    => ['nullable', 'in:last7,last30,mtd'],
         ]);
 
