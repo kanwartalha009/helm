@@ -47,49 +47,61 @@ final class AdProductFetcher
         if ($accountIds === []) {
             return [];
         }
-        $fallbackCcy = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+        $ccy = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
 
-        // day => key => ['spend' => float, 'ads' => array<adId,true>, 'ccy' => string]
+        // day => key => ['spend' => float, 'ads' => array<adId,true>]
         $agg = [];
 
         foreach ($accountIds as $accountId) {
-            $rows = $this->client->paged($accountId . '/insights', [
-                'level'          => 'ad',
-                'fields'         => 'ad_id,spend,account_currency',
-                'time_range'     => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
-                'time_increment' => 1,
-                'limit'          => 500,
-            ]);
+            // Pull spend ONE DAY AT A TIME. A month-long level=ad, time_increment=1
+            // pull is thousands of ad×day rows and truncates at the first page
+            // (~500), so only the first day-and-a-half of a month landed. A single
+            // day's ads comfortably fit one page → always complete, and each call
+            // is small, which is also gentler on the rate limit.
+            $spendByDayAd = [];   // day => adId => spend
+            $adIds        = [];
 
-            // Collapse to per-(day, ad) spend, and collect the ad ids that spent.
-            $byDayAd = [];
-            $adIds   = [];
-            $ccy     = $fallbackCcy;
-            foreach ($rows as $r) {
-                $day  = (string) ($r['date_start'] ?? '');
-                $adId = (string) ($r['ad_id'] ?? '');
-                $s    = (float) ($r['spend'] ?? 0);
-                if ($day === '' || $adId === '' || $s <= 0) {
+            for ($d = $from; $d->lessThanOrEqualTo($to); $d = $d->addDay()) {
+                $day = $d->toDateString();
+                try {
+                    $body = $this->client->get($accountId . '/insights', [
+                        'level'      => 'ad',
+                        'fields'     => 'ad_id,spend,account_currency',
+                        'time_range' => json_encode(['since' => $day, 'until' => $day]),
+                        'limit'      => 500,
+                    ]);
+                } catch (Throwable $e) {
+                    Log::warning('meta.ad_product.insights_failed', ['account' => $accountId, 'day' => $day, 'error' => $e->getMessage()]);
+                    usleep(400_000);
                     continue;
                 }
-                $byDayAd[$day][$adId] = ($byDayAd[$day][$adId] ?? 0.0) + $s;
-                $adIds[$adId]         = true;
-                if (! empty($r['account_currency'])) {
-                    $ccy = strtoupper((string) $r['account_currency']);
+
+                foreach (($body['data'] ?? []) as $r) {
+                    $adId = (string) ($r['ad_id'] ?? '');
+                    $s    = (float) ($r['spend'] ?? 0);
+                    if ($adId === '' || $s <= 0) {
+                        continue;
+                    }
+                    $spendByDayAd[$day][$adId] = ($spendByDayAd[$day][$adId] ?? 0.0) + $s;
+                    $adIds[$adId]              = true;
+                    if (! empty($r['account_currency'])) {
+                        $ccy = strtoupper((string) $r['account_currency']);
+                    }
                 }
+                usleep(150_000); // pace the per-day calls
             }
+
             if ($adIds === []) {
                 continue;
             }
 
             $keyByAd = $this->resolveAdKeys(array_keys($adIds));
 
-            foreach ($byDayAd as $day => $ads) {
+            foreach ($spendByDayAd as $day => $ads) {
                 foreach ($ads as $adId => $s) {
                     $key = $keyByAd[$adId] ?? self::RESERVED_OTHER;
-                    $agg[$day][$key]['spend']       = ($agg[$day][$key]['spend'] ?? 0.0) + $s;
-                    $agg[$day][$key]['ads'][$adId]  = true;
-                    $agg[$day][$key]['ccy']         = $ccy;
+                    $agg[$day][$key]['spend']      = ($agg[$day][$key]['spend'] ?? 0.0) + $s;
+                    $agg[$day][$key]['ads'][$adId] = true;
                 }
             }
         }
@@ -102,7 +114,7 @@ final class AdProductFetcher
                     'key'      => $key,
                     'spend'    => round((float) $v['spend'], 2),
                     'ads'      => count($v['ads']),
-                    'currency' => (string) ($v['ccy'] ?? $fallbackCcy),
+                    'currency' => $ccy,
                 ];
             }
         }
