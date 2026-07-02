@@ -24,6 +24,7 @@ import { BrandAuditPage } from '@/routes/BrandAuditPage';
 import { ReportsPage } from '@/routes/ReportsPage';
 import { ReportViewPage } from '@/routes/ReportViewPage';
 import { PublicReportPage } from '@/routes/PublicReportPage';
+import { InventoryPage } from '@/routes/InventoryPage';
 
 // /add-brand routes removed — brand creation is now an in-place drawer
 // triggered from the topbar / empty states / search palette.
@@ -93,6 +94,10 @@ export function App() {
           <Route path="/brands/:slug/ads" element={<AuthGate><BrandAdsPage /></AuthGate>} />
           <Route path="/brands/:slug/products" element={<AuthGate><BrandProductsPage /></AuthGate>} />
           <Route path="/brands/:slug/audit" element={<AuthGate><BrandAuditPage /></AuthGate>} />
+
+          {/* Inventory Intelligence — per-brand stock × Meta spend (Phase 2). Top-level
+              hub with an in-page brand switcher, so it's not under /brands/:slug. */}
+          <Route path="/inventory" element={<AuthGate><InventoryPage /></AuthGate>} />
 
           {/* Reporting & Creative Intelligence (Phase 2, slice 2.0) */}
           <Route path="/reports" element={<AuthGate><ReportsPage /></AuthGate>} />

@@ -123,6 +123,13 @@ final class InventoryQuery
         $coll  = (float) ($un->coll ?? 0);
         $other = (float) ($un->other ?? 0);
 
+        // Brand-level blended ROAS uses TOTAL Meta spend — spend attributed to a
+        // product PLUS the unattributed (collection/dynamic) spend. Dropping the
+        // unattributed €-figure from the denominator would flatter the headline
+        // ROAS, so we don't. The product rows still sum only to attributed spend;
+        // the gap is the unattributed banner, which is exactly why it exists.
+        $totalSpend = $sumSpend + $coll + $other;
+
         return [
             'brand'    => ['id' => $brand->id, 'name' => $brand->name, 'slug' => $brand->slug, 'currency' => $ccy],
             'period'   => $period,
@@ -130,16 +137,17 @@ final class InventoryQuery
             'to'       => $to,
             'currency' => $ccy,
             'summary'  => [
-                'products'  => $products->count(),
-                'pause'     => $cPause,
-                'alert'     => $cAlert,
-                'ok'        => $cOk,
-                'netStock'  => $sumStock,
-                'units'     => $sumUnits,
-                'unitsPrev' => $sumUnitsPrev,
-                'metaSpend' => round($sumSpend, 2),
-                'revenue'   => round($sumRev, 2),
-                'roas'      => $sumSpend > 0 ? round($sumRev / $sumSpend, 2) : null,
+                'products'        => $products->count(),
+                'pause'           => $cPause,
+                'alert'           => $cAlert,
+                'ok'              => $cOk,
+                'netStock'        => $sumStock,
+                'units'           => $sumUnits,
+                'unitsPrev'       => $sumUnitsPrev,
+                'metaSpend'       => round($totalSpend, 2),
+                'attributedSpend' => round($sumSpend, 2),
+                'revenue'         => round($sumRev, 2),
+                'roas'            => $totalSpend > 0 ? round($sumRev / $totalSpend, 2) : null,
             ],
             'unattributed' => ['collection' => round($coll, 2), 'other' => round($other, 2), 'total' => round($coll + $other, 2)],
             'products'     => $rows,
