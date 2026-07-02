@@ -82,51 +82,61 @@ class MetaDiagnoseAdUrlsCommand extends Command
         $rows = [];   // [spend, name, status, url, field, class]
 
         foreach ($accountIds as $accountId) {
-            // Spend per ad.
+            // 1) Spend per ad (one insights page — enough to rank top spenders).
             $spendByAd = [];
             try {
-                foreach ($client->paged("{$accountId}/insights", [
-                    'level'       => 'ad',
-                    'fields'      => 'ad_id,spend',
-                    'time_range'  => $range,
-                    'limit'       => 500,
-                ]) as $r) {
-                    $spendByAd[(string) ($r['ad_id'] ?? '')] = (float) ($r['spend'] ?? 0);
+                $ins = $client->get("{$accountId}/insights", [
+                    'level'      => 'ad',
+                    'fields'     => 'ad_id,spend',
+                    'time_range' => $range,
+                    'limit'      => 500,
+                ]);
+                foreach (($ins['data'] ?? []) as $r) {
+                    $s = (float) ($r['spend'] ?? 0);
+                    if ($s > 0) {
+                        $spendByAd[(string) ($r['ad_id'] ?? '')] = $s;
+                    }
                 }
             } catch (Throwable $e) {
                 $this->warn("  {$accountId}: insights failed — {$e->getMessage()}");
                 continue;
             }
 
-            // Ads + creative URL fields.
-            try {
-                $ads = $client->paged("{$accountId}/ads", [
-                    // Request ONLY the URL-bearing sub-fields, not the whole
-                    // object_story_spec / asset_feed_spec objects — Meta's rate
-                    // limit (error 17) is complexity-based, and the full objects
-                    // are very heavy. This keeps the call cheap.
-                    'fields' => 'id,name,effective_status,creative{object_story_spec{link_data{link,call_to_action},video_data{call_to_action},template_data{link}},asset_feed_spec{link_urls},link_url,template_url}',
-                    'limit'  => 100,
-                ]);
-            } catch (Throwable $e) {
-                $this->warn("  {$accountId}: ads fetch failed — {$e->getMessage()}");
+            if ($spendByAd === []) {
+                $this->warn("  {$accountId}: no ad-level spend in window.");
                 continue;
             }
 
-            foreach ($ads as $ad) {
-                $adId  = (string) ($ad['id'] ?? '');
-                $spend = $spendByAd[$adId] ?? 0.0;
-                if ($spend <= 0) {
-                    continue; // only ads that actually spent in the window matter
+            // 2) Fetch creatives for the TOP spenders only, in ONE batch (?ids=)
+            //    call — keeps the probe to two cheap calls per account, dodging the
+            //    error-17 rate limit the full /ads scan tripped.
+            arsort($spendByAd);
+            $topIds = array_slice(array_keys($spendByAd), 0, min($show, 45));
+
+            try {
+                $batch = $client->get('', [
+                    'ids'    => implode(',', $topIds),
+                    'fields' => 'id,name,effective_status,creative{object_story_spec{link_data{link,call_to_action},video_data{call_to_action},template_data{link}},asset_feed_spec{link_urls},link_url,template_url}',
+                ]);
+            } catch (Throwable $e) {
+                $this->warn("  {$accountId}: creatives fetch failed — {$e->getMessage()}");
+                continue;
+            }
+
+            foreach ($topIds as $adId) {
+                $ad = $batch[$adId] ?? null;
+                if (! is_array($ad)) {
+                    continue;
                 }
+                $spend = $spendByAd[$adId];
                 [$url, $field] = $this->extractUrl((array) ($ad['creative'] ?? []));
                 $handle = $url !== '' ? $this->productHandle($url) : null;
                 $class  = $handle !== null ? 'product'
                     : ($url !== '' && stripos($url, '/collections/') !== false ? 'collection'
                     : 'other');
 
-                $grand['spend']  += $spend;
-                $grand[$class]   += $spend;
+                $grand['spend'] += $spend;
+                $grand[$class]  += $spend;
                 if ($handle !== null) {
                     $handles[$handle] = ($handles[$handle] ?? 0) + $spend;
                 }
@@ -157,7 +167,7 @@ class MetaDiagnoseAdUrlsCommand extends Command
 
         $t = $grand['spend'] ?: 1;
         $this->newLine();
-        $this->info('Attribution coverage (by spend):');
+        $this->info('Attribution coverage — top ' . count($rows) . ' ads by spend:');
         $this->line(sprintf('  product URLs:    %s  (%.1f%%)  ← attributable to a model', number_format($grand['product'], 0), $grand['product'] / $t * 100));
         $this->line(sprintf('  collection URLs: %s  (%.1f%%)  ← attributable only if slug maps to a model', number_format($grand['collection'], 0), $grand['collection'] / $t * 100));
         $this->line(sprintf('  other/dynamic:   %s  (%.1f%%)  ← unattributed banner', number_format($grand['other'], 0), $grand['other'] / $t * 100));
