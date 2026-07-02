@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BrandController;
 use App\Http\Controllers\Api\ConnectionController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\PlatformCredentialController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SyncStatusController;
@@ -84,6 +85,9 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
 
         Route::get('brands/{brand}/trend',   [DashboardController::class, 'trend']);
         Route::get('brands/{brand}/metrics', [BrandController::class, 'metrics']);
+
+        // Inventory Intelligence — per-product stock × Meta spend for one brand.
+        Route::get('brands/{brand}/inventory', [InventoryController::class, 'show']);
 
         // Reports — build a report for this brand, and snapshot it to a public
         // share token. Report type is validated against the registry.
