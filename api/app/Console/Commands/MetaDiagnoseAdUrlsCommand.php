@@ -87,7 +87,7 @@ class MetaDiagnoseAdUrlsCommand extends Command
             try {
                 foreach ($client->paged("{$accountId}/insights", [
                     'level'       => 'ad',
-                    'fields'      => 'ad_id,ad_name,spend',
+                    'fields'      => 'ad_id,spend',
                     'time_range'  => $range,
                     'limit'       => 500,
                 ]) as $r) {
@@ -101,8 +101,12 @@ class MetaDiagnoseAdUrlsCommand extends Command
             // Ads + creative URL fields.
             try {
                 $ads = $client->paged("{$accountId}/ads", [
-                    'fields' => 'id,name,effective_status,creative{object_story_spec,asset_feed_spec,link_url,template_url,url_tags}',
-                    'limit'  => 200,
+                    // Request ONLY the URL-bearing sub-fields, not the whole
+                    // object_story_spec / asset_feed_spec objects — Meta's rate
+                    // limit (error 17) is complexity-based, and the full objects
+                    // are very heavy. This keeps the call cheap.
+                    'fields' => 'id,name,effective_status,creative{object_story_spec{link_data{link,call_to_action},video_data{call_to_action},template_data{link}},asset_feed_spec{link_urls},link_url,template_url}',
+                    'limit'  => 100,
                 ]);
             } catch (Throwable $e) {
                 $this->warn("  {$accountId}: ads fetch failed — {$e->getMessage()}");
