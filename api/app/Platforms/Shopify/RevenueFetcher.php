@@ -468,49 +468,25 @@ GQL;
             return [];
         }
 
-        $ql = "FROM sales SHOW total_sales, net_sales, orders "
-            . "GROUP BY day, {$dim} "
-            . "SINCE {$sinceStr} UNTIL {$untilStr} "
-            . "WHERE sales_channel = '{$channel}' ORDER BY day "
-            . "LIMIT " . self::SHOPIFYQL_ROW_LIMIT;
+        // Try the EXTENDED metric set first — it adds gross units
+        // (quantity_ordered = Bosco's "Ordered_Quantity", does NOT subtract
+        // returns) and returns, for the Inventory Intelligence report. If a store
+        // or API version rejects a metric name the whole query parseErrors, so we
+        // fall back to the PROVEN base set: the Country / Product / Category
+        // backfill must never regress just because units aren't available. The
+        // fallback is logged, so a wrong metric name is a one-line fix.
+        $extended = 'total_sales, net_sales, orders, quantity_ordered, returns';
+        $base     = 'total_sales, net_sales, orders';
 
-        $gql = <<<'GQL'
-query ($q: String!) {
-  shopifyqlQuery(query: $q) {
-    tableData { columns { name } rows }
-    parseErrors
-  }
-}
-GQL;
-
-        try {
-            $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
-        } catch (Throwable $e) {
-            Log::warning('shopify.shopifyql.request_failed', ['error' => $e->getMessage(), 'ql' => $ql]);
+        $res = $this->runGroupedSalesQuery($client, $dim, $channel, $extended, $sinceStr, $untilStr)
+            ?? $this->runGroupedSalesQuery($client, $dim, $channel, $base, $sinceStr, $untilStr);
+        if ($res === null) {
             return [];
         }
-
-        $resp = $data['shopifyqlQuery'] ?? null;
-        if (! is_array($resp)) {
-            return [];
-        }
-        if (! empty($resp['parseErrors'])) {
-            $pe = $resp['parseErrors'];
-            Log::warning('shopify.shopifyql.parse_error', [
-                'parseErrors' => is_array($pe) ? json_encode($pe) : (string) $pe,
-                'ql'          => $ql,
-            ]);
-            return [];
-        }
-
-        $columns = $resp['tableData']['columns'] ?? [];
-        $rows    = $resp['tableData']['rows'] ?? [];
-        if (! is_array($rows)) {
-            return [];
-        }
+        [$columns, $rows] = $res;
 
         // Two grouping columns (day + the dimension); the rest are measures.
-        $metricCols = ['total_sales', 'net_sales', 'orders'];
+        $metricCols = ['total_sales', 'net_sales', 'orders', 'quantity_ordered', 'returns'];
         $dayCol = null;
         foreach ($columns as $c) {
             $name = (string) ($c['name'] ?? '');
@@ -531,17 +507,77 @@ GQL;
                 continue;
             }
             $out[] = [
-                'date'   => substr((string) $rawDay, 0, 10),
-                'key'    => (string) $key,
-                'label'  => (string) $key,
-                'total'  => isset($row['total_sales']) ? round((float) $row['total_sales'], 2) : null,
-                'net'    => isset($row['net_sales'])   ? round((float) $row['net_sales'], 2)   : null,
-                'orders' => isset($row['orders'])      ? (int) $row['orders']                  : null,
-                'units'  => null,
+                'date'    => substr((string) $rawDay, 0, 10),
+                'key'     => (string) $key,
+                'label'   => (string) $key,
+                'total'   => isset($row['total_sales'])      ? round((float) $row['total_sales'], 2)         : null,
+                'net'     => isset($row['net_sales'])        ? round((float) $row['net_sales'], 2)           : null,
+                'orders'  => isset($row['orders'])           ? (int) $row['orders']                          : null,
+                // Gross units ordered (before returns) — Bosco's "Uds".
+                'units'   => isset($row['quantity_ordered']) ? (int) round((float) $row['quantity_ordered']) : null,
+                // Shopify reports `returns` as a negative; store the positive
+                // magnitude so revenue-before-returns = total_sales + refunds.
+                'refunds' => isset($row['returns'])          ? round(abs((float) $row['returns']), 2)        : null,
             ];
         }
 
         return $out;
+    }
+
+    /**
+     * One `FROM sales ... GROUP BY day, {dim}` ShopifyQL call. Returns
+     * [columns, rows] on success (rows may legitimately be empty), or NULL on a
+     * transport failure or a parseError — the caller reads NULL as "retry with a
+     * smaller metric set" so an unsupported metric can't wipe the whole backfill.
+     *
+     * @return array{0: array<int, mixed>, 1: array<int, mixed>}|null
+     */
+    private function runGroupedSalesQuery(ShopifyClient $client, string $dim, string $channel, string $show, string $sinceStr, string $untilStr): ?array
+    {
+        $ql = "FROM sales SHOW {$show} "
+            . "GROUP BY day, {$dim} "
+            . "SINCE {$sinceStr} UNTIL {$untilStr} "
+            . "WHERE sales_channel = '{$channel}' ORDER BY day "
+            . "LIMIT " . self::SHOPIFYQL_ROW_LIMIT;
+
+        $gql = <<<'GQL'
+query ($q: String!) {
+  shopifyqlQuery(query: $q) {
+    tableData { columns { name } rows }
+    parseErrors
+  }
+}
+GQL;
+
+        try {
+            $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
+        } catch (Throwable $e) {
+            Log::warning('shopify.shopifyql.request_failed', ['error' => $e->getMessage(), 'ql' => $ql]);
+
+            return null;
+        }
+
+        $resp = $data['shopifyqlQuery'] ?? null;
+        if (! is_array($resp)) {
+            return null;
+        }
+        if (! empty($resp['parseErrors'])) {
+            $pe = $resp['parseErrors'];
+            Log::warning('shopify.shopifyql.parse_error', [
+                'parseErrors' => is_array($pe) ? json_encode($pe) : (string) $pe,
+                'ql'          => $ql,
+            ]);
+
+            return null;
+        }
+
+        $columns = $resp['tableData']['columns'] ?? [];
+        $rows    = $resp['tableData']['rows'] ?? [];
+        if (! is_array($rows) || ! is_array($columns)) {
+            return null;
+        }
+
+        return [$columns, $rows];
     }
 
     /**

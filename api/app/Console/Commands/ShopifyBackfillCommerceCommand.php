@@ -127,7 +127,7 @@ class ShopifyBackfillCommerceCommand extends Command
                         CommerceDailyMetric::upsert(
                             $chunk,
                             ['brand_id', 'date', 'dimension_type', 'dimension_key'],
-                            ['dimension_label', 'orders', 'units', 'net_sales', 'total_sales', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+                            ['dimension_label', 'orders', 'units', 'net_sales', 'total_sales', 'refunds_amount', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                         );
                     }
 
@@ -183,6 +183,7 @@ class ShopifyBackfillCommerceCommand extends Command
                 'units'           => $r['units'] ?? null,
                 'net_sales'       => $r['net'] ?? null,
                 'total_sales'     => $r['total'] ?? null,
+                'refunds_amount'  => $r['refunds'] ?? null,
                 'currency'        => $currency,
                 'fx_rate_to_usd'  => $fxRate,
                 'is_complete'     => true,
