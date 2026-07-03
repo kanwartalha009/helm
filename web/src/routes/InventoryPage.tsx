@@ -55,12 +55,12 @@ export function InventoryPage() {
     return out;
   }, [rows]);
 
-  // Keep a valid selection: default to the first brand, and reset if the current
-  // pick falls out of scope after a manager-filter change.
+  // Don't auto-open a brand — the page lands on a chooser (see below). We only
+  // step IN here: if a chosen brand falls out of scope after a manager-filter
+  // change, drop back to the chooser rather than silently showing a stranger.
   useEffect(() => {
-    if (brands.length === 0) return;
-    if (!selectedSlug || !brands.some((b) => b.slug === selectedSlug)) {
-      setSelectedSlug(brands[0].slug);
+    if (selectedSlug && brands.length > 0 && !brands.some((b) => b.slug === selectedSlug)) {
+      setSelectedSlug(undefined);
     }
   }, [brands, selectedSlug]);
 
@@ -86,15 +86,6 @@ export function InventoryPage() {
     });
   }, [data, search, sort, statusFilter]);
 
-  const managerLabel =
-    manager === 'me'
-      ? 'My brands'
-      : manager === 'all'
-        ? 'All brands'
-        : manager === 'unassigned'
-          ? 'No user assigned'
-          : managerUsers.find((u) => String(u.id) === manager)?.name ?? 'Manager';
-
   // No brands in scope at all — mirror the dashboard's "add a brand" dead-end
   // rather than showing an empty report shell.
   if (!brandsLoading && brands.length === 0) {
@@ -108,6 +99,24 @@ export function InventoryPage() {
               : 'No brands match this manager filter.'}
           </p>
         </div>
+      </AppLayout>
+    );
+  }
+
+  // Land on a brand chooser rather than auto-opening a store. Reads as "pick a
+  // client" — white-label-friendly and scales from one store to a big roster.
+  if (!selectedSlug) {
+    return (
+      <AppLayout title="Inventory intelligence">
+        <BrandChooser
+          brands={brands}
+          loading={brandsLoading}
+          canFilterByManager={canFilterByManager}
+          manager={manager}
+          setManager={setManager}
+          managerUsers={managerUsers}
+          onSelect={setSelectedSlug}
+        />
       </AppLayout>
     );
   }
@@ -126,35 +135,7 @@ export function InventoryPage() {
         <BrandPicker brands={brands} selected={selectedBrand} onSelect={setSelectedSlug} />
 
         {canFilterByManager && (
-          <Menu label={<>Manager: <strong style={{ fontWeight: 500 }}>{managerLabel}</strong></>} width={220}>
-            {(close) => (
-              <>
-                <MenuLabel>Brand manager</MenuLabel>
-                <Item selected={manager === 'me'} onClick={() => { setManager('me'); close(); }}>My brands</Item>
-                <Item selected={manager === 'all'} onClick={() => { setManager('all'); close(); }}>All brands</Item>
-                <Item selected={manager === 'unassigned'} onClick={() => { setManager('unassigned'); close(); }}>
-                  No user assigned
-                </Item>
-                {managerUsers.filter((u) => u.status === 'active').length > 0 && (
-                  <>
-                    <MenuDivider />
-                    <MenuLabel>By user</MenuLabel>
-                    {managerUsers
-                      .filter((u) => u.status === 'active')
-                      .map((u) => (
-                        <Item
-                          key={u.id}
-                          selected={manager === String(u.id)}
-                          onClick={() => { setManager(String(u.id)); close(); }}
-                        >
-                          {u.name}
-                        </Item>
-                      ))}
-                  </>
-                )}
-              </>
-            )}
-          </Menu>
+          <ManagerMenu manager={manager} setManager={setManager} managerUsers={managerUsers} />
         )}
 
         <PeriodPicker
@@ -303,6 +284,180 @@ export function InventoryPage() {
         </>
       ) : null}
     </AppLayout>
+  );
+}
+
+/* ---- Brand chooser (landing) ----------------------------------------- */
+
+function BrandChooser({
+  brands,
+  loading,
+  canFilterByManager,
+  manager,
+  setManager,
+  managerUsers,
+  onSelect,
+}: {
+  brands: DashboardRowBrand[];
+  loading: boolean;
+  canFilterByManager: boolean;
+  manager: string;
+  setManager: (m: string) => void;
+  managerUsers: Array<{ id: number; name: string; status: string }>;
+  onSelect: (slug: string) => void;
+}) {
+  const [q, setQ] = useState('');
+  const filtered = brands.filter((b) => b.name.toLowerCase().includes(q.trim().toLowerCase()));
+  return (
+    <div style={{ maxWidth: 560, margin: '7vh auto 0' }}>
+      <h2 style={{ textAlign: 'center', marginBottom: 6 }}>Choose a brand</h2>
+      <p className="lede" style={{ textAlign: 'center', margin: '0 auto 22px', maxWidth: 440 }}>
+        Open a store to see its stock, Meta spend and blended ROAS by product.
+      </p>
+
+      {canFilterByManager && (
+        <div className="filter-bar" style={{ justifyContent: 'center', marginBottom: 12 }}>
+          <ManagerMenu manager={manager} setManager={setManager} managerUsers={managerUsers} />
+        </div>
+      )}
+
+      <div style={{ position: 'relative' }}>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          width="16"
+          height="16"
+          style={{ position: 'absolute', left: 12, top: 12, color: 'var(--text-muted)', pointerEvents: 'none' }}
+        >
+          <circle cx="11" cy="11" r="8" />
+          <path d="m21 21-4.3-4.3" />
+        </svg>
+        <input
+          autoFocus
+          className="input"
+          style={{ height: 40, paddingLeft: 36, width: '100%' }}
+          placeholder="Search brands…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+      </div>
+
+      <div
+        style={{
+          marginTop: 10,
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-lg)',
+          overflow: 'hidden',
+        }}
+      >
+        {loading ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Loading brands…</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>No brands match.</div>
+        ) : (
+          <div style={{ maxHeight: 420, overflow: 'auto' }}>
+            {filtered.map((b, i) => (
+              <button
+                key={b.slug}
+                type="button"
+                onClick={() => onSelect(b.slug)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 11,
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '11px 14px',
+                  border: 0,
+                  borderTop: i === 0 ? 'none' : '1px solid var(--border)',
+                  background: 'transparent',
+                  font: 'inherit',
+                  cursor: 'pointer',
+                  color: 'var(--text)',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-subtle)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <InitialsBadge initials={b.initials} filled />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500 }}>{b.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {[b.region, b.baseCurrency].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  width="15"
+                  height="15"
+                  style={{ color: 'var(--text-muted)', flex: '0 0 auto' }}
+                >
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {!loading && (
+        <div className="text-xs muted" style={{ textAlign: 'center', marginTop: 12 }}>
+          {filtered.length} of {brands.length} {brands.length === 1 ? 'brand' : 'brands'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---- Manager filter (shared by the bar + the chooser) ---------------- */
+
+function ManagerMenu({
+  manager,
+  setManager,
+  managerUsers,
+}: {
+  manager: string;
+  setManager: (m: string) => void;
+  managerUsers: Array<{ id: number; name: string; status: string }>;
+}) {
+  const label =
+    manager === 'me'
+      ? 'My brands'
+      : manager === 'all'
+        ? 'All brands'
+        : manager === 'unassigned'
+          ? 'No user assigned'
+          : managerUsers.find((u) => String(u.id) === manager)?.name ?? 'Manager';
+  const active = managerUsers.filter((u) => u.status === 'active');
+  return (
+    <Menu label={<>Manager: <strong style={{ fontWeight: 500 }}>{label}</strong></>} width={220}>
+      {(close) => (
+        <>
+          <MenuLabel>Brand manager</MenuLabel>
+          <Item selected={manager === 'me'} onClick={() => { setManager('me'); close(); }}>My brands</Item>
+          <Item selected={manager === 'all'} onClick={() => { setManager('all'); close(); }}>All brands</Item>
+          <Item selected={manager === 'unassigned'} onClick={() => { setManager('unassigned'); close(); }}>
+            No user assigned
+          </Item>
+          {active.length > 0 && (
+            <>
+              <MenuDivider />
+              <MenuLabel>By user</MenuLabel>
+              {active.map((u) => (
+                <Item key={u.id} selected={manager === String(u.id)} onClick={() => { setManager(String(u.id)); close(); }}>
+                  {u.name}
+                </Item>
+              ))}
+            </>
+          )}
+        </>
+      )}
+    </Menu>
   );
 }
 
