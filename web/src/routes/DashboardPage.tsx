@@ -46,6 +46,14 @@ const AUDIENCE_PERIODS: { key: AudiencePeriod; label: string }[] = [
   { key: 'mtd', label: 'Month to date' },
 ];
 
+// Rolling comparison intervals for the Performance table's far-right block.
+// Default 30 (last month). Each is "last N days vs the prior N days".
+const ROLLING_WINDOWS: { days: number; label: string }[] = [
+  { days: 7, label: 'Last 7 days' },
+  { days: 30, label: 'Last 30 days' },
+  { days: 90, label: 'Last 90 days' },
+];
+
 // Resolve a period to its actual [from, to] window. Mirrors the backend
 // (AudienceQuery::periodWindow): the window ENDS YESTERDAY — today is partial and
 // always excluded. Computed in the viewer's local date as a display hint; each
@@ -113,7 +121,10 @@ export function DashboardPage() {
   const activeCompare = comparisonOn ? comparePeriods : [];
   const togglePeriod = (key: string) =>
     setComparePeriods((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
-  const { data: rows = [], isLoading } = useDashboardData(manager, metric, activeCompare);
+  // Rolling comparison interval for the far-right block (7/30/90 days; default
+  // last month). Part of the dashboard query key, so switching it refetches.
+  const [rollingDays, setRollingDays] = useState<number>(30);
+  const { data: rows = [], isLoading } = useDashboardData(manager, metric, activeCompare, rollingDays);
   // Dashboard view: Performance (revenue/ROAS table) or Audience (Meta spend
   // split by a breakdown axis). The two share the Brands + Manager + currency
   // filters; everything else in the bar is view-specific. The audience query is
@@ -182,7 +193,7 @@ export function DashboardPage() {
     const yVal = (r: DashboardRow) =>
       metric === 'net' ? r.yesterday.netSales : r.yesterday.totalSales;
     const wVal = (r: DashboardRow) =>
-      metric === 'net' ? r.last7d.netSales : r.last7d.totalSales;
+      metric === 'net' ? r.rolling.netSales : r.rolling.totalSales;
     const isDead = (v: number | null) => v == null || v === 0;
     const isInactive = (r: DashboardRow) => isDead(yVal(r)) || isDead(wVal(r));
 
@@ -210,6 +221,7 @@ export function DashboardPage() {
 
   const sortLabel =
     sortBy === 'best' ? 'Best performing' : sortBy === 'worst' ? 'Worst performing' : 'Name';
+  const rollingLabel = ROLLING_WINDOWS.find((w) => w.days === rollingDays)?.label ?? 'Last 30 days';
 
   // Audience rows honor the same client-side brand-group filter as Performance.
   const filteredAudienceRows = useMemo(() => {
@@ -426,6 +438,27 @@ export function DashboardPage() {
             <Popover
               trigger={
                 <button className="filter-btn">
+                  Interval: <strong style={{ fontWeight: 500 }}>{rollingLabel}</strong>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+              }
+            >
+              <PopoverLabel>Comparison interval</PopoverLabel>
+              {ROLLING_WINDOWS.map((w) => (
+                <PopoverItem
+                  key={w.days}
+                  active={rollingDays === w.days}
+                  onClick={() => setRollingDays(w.days)}
+                >
+                  {w.label}
+                </PopoverItem>
+              ))}
+            </Popover>
+            <Popover
+              trigger={
+                <button className="filter-btn">
                   Sort: <strong style={{ fontWeight: 500 }}>{sortLabel}</strong>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="6 9 12 15 18 9" />
@@ -495,7 +528,7 @@ export function DashboardPage() {
               <line x1="8" y1="2" x2="8" y2="6" />
               <line x1="3" y1="10" x2="21" y2="10" />
             </svg>
-            Showing yesterday vs day before, with the last 7 days rolling block to the right. Dates are in each brand’s own timezone.
+            Showing yesterday vs day before, with the last {rollingDays} days rolling block to the right. Dates are in each brand’s own timezone.
           </div>
 
           <Banner
@@ -517,6 +550,7 @@ export function DashboardPage() {
               metric={metric}
               visibleAdPlatforms={visibleAdPlatforms}
               comparePeriods={activeCompare}
+              rollingDays={rollingDays}
             />
           </div>
 

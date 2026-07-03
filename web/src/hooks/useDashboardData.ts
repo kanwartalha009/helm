@@ -18,13 +18,16 @@ export function useDashboardData(
   manager: string = 'me',
   metric: 'net' | 'total' = 'total',
   compare: string[] = [],
+  rollingDays: number = 30,
 ) {
   const currency = useFiltersStore((s) => s.currency);
   const compareKey = compare.join(',');
   return useQuery({
     // metric only affects the payload when comparison is on, so it's only in the
     // key then — flipping Net/Total with comparison off stays an instant client swap.
-    queryKey: ['dashboard', currency, manager, compareKey, compareKey ? metric : ''],
+    // rollingDays drives the far-right block's window (7/30/90) — part of the key
+    // so switching the interval refetches.
+    queryKey: ['dashboard', currency, manager, compareKey, compareKey ? metric : '', rollingDays],
     queryFn: async (): Promise<DashboardRow[]> => {
       const params: Record<string, string> = {};
       if (currency === 'usd') params.currency = 'USD';
@@ -35,6 +38,9 @@ export function useDashboardData(
         params.compare = compareKey;
         params.metric = metric;
       }
+      // Rolling window (days). 30 is the backend default, so only send it when the
+      // interval filter picks something else — keeps the default URL clean.
+      if (rollingDays !== 30) params.window = String(rollingDays);
       const { data } = await api.get<{ rows: DashboardRow[] }>('/dashboard', {
         params: Object.keys(params).length ? params : undefined,
       });

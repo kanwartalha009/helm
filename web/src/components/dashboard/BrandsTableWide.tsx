@@ -36,9 +36,11 @@ interface Props {
   visibleAdPlatforms?: Set<Platform>;
   /** Year-over-year comparison periods to append (yesterday|last7|last30|mtd). */
   comparePeriods?: string[];
+  /** Rolling comparison window in days (7|30|90) — drives the far-right block header. */
+  rollingDays?: number;
 }
 
-export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = 'total', comparePeriods = [] }: Props) {
+export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = 'total', comparePeriods = [], rollingDays = 30 }: Props) {
   const showMeta   = visibleAdPlatforms?.has('meta')   ?? false;
   const showGoogle = visibleAdPlatforms?.has('google') ?? false;
   const showTikTok = visibleAdPlatforms?.has('tiktok') ?? false;
@@ -76,7 +78,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
                 {showGoogle && <th className="group-head group-start" colSpan={3}>Google inv.</th>}
                 {showTikTok && <th className="group-head group-start" colSpan={3}>TikTok inv.</th>}
                 {showTotalSpend && <th className="group-head group-start" colSpan={3}>Total inv.</th>}
-                <th className="group-head group-start" colSpan={3}>{revenueLabel} 7d</th>
+                <th className="group-head group-start" colSpan={3}>{revenueLabel} {rollingDays}d</th>
               </tr>
               <tr>
                 {Array.from({ length: groupCount }).map((_, i) => (
@@ -103,7 +105,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
                 {showGoogle && <th className="group-head group-start" rowSpan={2} colSpan={3}>Google inv.</th>}
                 {showTikTok && <th className="group-head group-start" rowSpan={2} colSpan={3}>TikTok inv.</th>}
                 {showTotalSpend && <th className="group-head group-start" rowSpan={2} colSpan={3}>Total inv.</th>}
-                <th className="group-head group-start" rowSpan={2} colSpan={3}>{revenueLabel} 7d</th>
+                <th className="group-head group-start" rowSpan={2} colSpan={3}>{revenueLabel} {rollingDays}d</th>
               </tr>
               <tr>
                 {comparePeriods.map((p) => (
@@ -247,7 +249,7 @@ function Row({
   showAdRollup: boolean;
   comparePeriods: string[];
 }) {
-  const { brand, yesterday, dayBefore, last7d } = row;
+  const { brand, yesterday, dayBefore, rolling } = row;
   const detailHref = `/brands/${brand.slug}`;
   const connected = new Set(brand.platforms ?? []);
   const health = brand.platformHealth ?? {};
@@ -268,8 +270,8 @@ function Row({
   // retained for easy re-enable. Both are Shopify's own ShopifyQL figures.
   const yRev   = metric === 'net' ? yesterday.netSales : yesterday.totalSales;
   const dbRev  = metric === 'net' ? dayBefore.netSales : dayBefore.totalSales;
-  const l7Rev  = metric === 'net' ? last7d.netSales : last7d.totalSales;
-  const l7Prev = metric === 'net' ? last7d.netSalesPrior7d : last7d.totalSalesPrior7d;
+  const l7Rev  = metric === 'net' ? rolling.netSales : rolling.totalSales;
+  const l7Prev = metric === 'net' ? rolling.netSalesPrior : rolling.totalSalesPrior;
   // Blended ROAS follows the same toggle: net-sales ROAS or total-sales ROAS.
   const yRoas  = metric === 'net' ? yesterday.roas : yesterday.roasTotal;
   const dbRoas = metric === 'net' ? dayBefore.roas : dayBefore.roasTotal;
@@ -288,14 +290,14 @@ function Row({
     groups.push({ label: 'Total', yesterday: yesterday.totalSpend, dayBefore: dayBefore.totalSpend, kind: 'money' });
   }
   groups.push({
-    label: 'L7d',
+    label: 'Rolling',
     yesterday: l7Rev,
     dayBefore: l7Prev,
     kind: 'money',
     platform: 'shopify',
-    // The 7-day sum only shows when all 7 days synced (backend already nulls it
+    // The N-day sum only shows when all N days synced (backend already nulls it
     // otherwise); flag it so the cell renders "Not synced" rather than "—".
-    incomplete: connected.has('shopify') && !last7d.isComplete,
+    incomplete: connected.has('shopify') && !rolling.isComplete,
   });
 
   return (

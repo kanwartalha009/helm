@@ -148,17 +148,21 @@ export interface DashboardRow {
     roasTotal: number | null;
     isComplete: boolean;
   };
-  last7d: {
-    // `revenue` and `revenuePrior7d` are NET sums (gross − refunds).
-    // `revenueGross*` are the gross variants; `totalSales*` are Shopify Total sales.
+  // Rolling comparison block — last N days vs the prior N. `windowDays` (N) is
+  // selectable 7 / 30 / 90 from the dashboard's interval filter (default 30).
+  // `revenue`/`*Prior` are NET sums (gross − refunds); `revenueGross*` are the
+  // gross variants; `totalSales*` are Shopify Total sales. Strict: every figure
+  // is null unless all N days synced (`isComplete`) — the cell renders "Not synced".
+  rolling: {
+    windowDays: number;
     revenue: number | null;
     revenueGross: number | null;
     netSales: number | null;
     totalSales: number | null;
-    revenuePrior7d: number | null;
-    revenueGrossPrior7d: number | null;
-    netSalesPrior7d: number | null;
-    totalSalesPrior7d: number | null;
+    revenuePrior: number | null;
+    revenueGrossPrior: number | null;
+    netSalesPrior: number | null;
+    totalSalesPrior: number | null;
     isComplete: boolean;
   };
   // Year-over-year comparison — present only when the Comparison filter is on.

@@ -96,16 +96,24 @@ final class DashboardQuery
         ));
         $compareCol  = (($params['metric'] ?? 'total') === 'net') ? 'net_sales' : $totalCol;
 
-        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr, $totalExpr, $comparePeriods, $compareCol): array {
+        // Rolling comparison window (Bosco, 2026-07-02). The far-right block is
+        // "last N days vs the prior N", N chosen from the dashboard's interval
+        // filter; default 30 (last month). Allowlisted so it's never user SQL.
+        $win = (int) ($params['window'] ?? 30);
+        if (! in_array($win, [7, 30, 90], true)) {
+            $win = 30;
+        }
+
+        $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr, $totalExpr, $comparePeriods, $compareCol, $win): array {
             $tz             = $b->timezone ?: 'UTC';
             $yesterdayDate  = CarbonImmutable::now($tz)->subDay()->startOfDay()->toDateString();
             $dayBeforeDate  = CarbonImmutable::now($tz)->subDays(2)->startOfDay()->toDateString();
-            // L7d window:  [T-7, T-1]   — the 7 days ending yesterday
-            // Prior 7d:    [T-14, T-8]  — the 7 days immediately before that
-            $last7dStart    = CarbonImmutable::now($tz)->subDays(7)->startOfDay()->toDateString();
-            $last7dEnd      = CarbonImmutable::now($tz)->subDay()->startOfDay()->toDateString();
-            $prior7dStart   = CarbonImmutable::now($tz)->subDays(14)->startOfDay()->toDateString();
-            $prior7dEnd     = CarbonImmutable::now($tz)->subDays(8)->startOfDay()->toDateString();
+            // Rolling window: [T-N, T-1]      — the N days ending yesterday
+            // Prior window:   [T-2N, T-(N+1)] — the N days immediately before that
+            $rollStart  = CarbonImmutable::now($tz)->subDays($win)->startOfDay()->toDateString();
+            $rollEnd    = CarbonImmutable::now($tz)->subDay()->startOfDay()->toDateString();
+            $priorStart = CarbonImmutable::now($tz)->subDays($win * 2)->startOfDay()->toDateString();
+            $priorEnd   = CarbonImmutable::now($tz)->subDays($win + 1)->startOfDay()->toDateString();
 
             $yesterdayRow = $this->shopifyRow($b->id, $yesterdayDate);
             $dayBeforeRow = $this->shopifyRow($b->id, $dayBeforeDate);
@@ -165,10 +173,10 @@ final class DashboardQuery
             // recomputing it here keeps the formula visible in code and
             // immunizes the dashboard against any legacy rows that were
             // synced by an older RevenueFetcher (pre-bugfix).
-            $last7dTotals = DailyMetric::query()
+            $rollTotals = DailyMetric::query()
                 ->where('brand_id', $b->id)
                 ->where('platform', 'shopify')
-                ->whereBetween('date', [$last7dStart, $last7dEnd])
+                ->whereBetween('date', [$rollStart, $rollEnd])
                 ->selectRaw("
                     COALESCE(SUM({$grossExpr}), 0)   AS gross,
                     COALESCE(SUM({$refundsExpr}), 0) AS refunds,
@@ -177,16 +185,16 @@ final class DashboardQuery
                 ")
                 ->first();
 
-            $last7dGross      = (float) ($last7dTotals->gross ?? 0);
-            $last7dRefunds    = (float) ($last7dTotals->refunds ?? 0);
-            $last7dNet        = $last7dGross - $last7dRefunds;
-            $last7dNetSales   = (float) ($last7dTotals->net ?? 0);
-            $last7dTotalSales = (float) ($last7dTotals->total_sales ?? 0);
+            $rollGross      = (float) ($rollTotals->gross ?? 0);
+            $rollRefunds    = (float) ($rollTotals->refunds ?? 0);
+            $rollNet        = $rollGross - $rollRefunds;
+            $rollNetSales   = (float) ($rollTotals->net ?? 0);
+            $rollTotalSales = (float) ($rollTotals->total_sales ?? 0);
 
-            $last7dCount = DailyMetric::query()
+            $rollCount = DailyMetric::query()
                 ->where('brand_id', $b->id)
                 ->where('platform', 'shopify')
-                ->whereBetween('date', [$last7dStart, $last7dEnd])
+                ->whereBetween('date', [$rollStart, $rollEnd])
                 ->where('is_complete', true)
                 ->count();
 
@@ -195,10 +203,10 @@ final class DashboardQuery
             // unconditionally but only surface them when at least one day
             // landed in the window — a brand-new store with no prior
             // history shows "—" instead of a misleading €0 delta.
-            $prior7dTotals = DailyMetric::query()
+            $priorTotals = DailyMetric::query()
                 ->where('brand_id', $b->id)
                 ->where('platform', 'shopify')
-                ->whereBetween('date', [$prior7dStart, $prior7dEnd])
+                ->whereBetween('date', [$priorStart, $priorEnd])
                 ->selectRaw("
                     COALESCE(SUM({$grossExpr}), 0)   AS gross,
                     COALESCE(SUM({$refundsExpr}), 0) AS refunds,
@@ -207,16 +215,16 @@ final class DashboardQuery
                 ")
                 ->first();
 
-            $prior7dGross      = (float) ($prior7dTotals->gross ?? 0);
-            $prior7dRefunds    = (float) ($prior7dTotals->refunds ?? 0);
-            $prior7dNet        = $prior7dGross - $prior7dRefunds;
-            $prior7dNetSales   = (float) ($prior7dTotals->net ?? 0);
-            $prior7dTotalSales = (float) ($prior7dTotals->total_sales ?? 0);
+            $priorGross      = (float) ($priorTotals->gross ?? 0);
+            $priorRefunds    = (float) ($priorTotals->refunds ?? 0);
+            $priorNet        = $priorGross - $priorRefunds;
+            $priorNetSales   = (float) ($priorTotals->net ?? 0);
+            $priorTotalSales = (float) ($priorTotals->total_sales ?? 0);
 
-            $prior7dCount = DailyMetric::query()
+            $priorCount = DailyMetric::query()
                 ->where('brand_id', $b->id)
                 ->where('platform', 'shopify')
-                ->whereBetween('date', [$prior7dStart, $prior7dEnd])
+                ->whereBetween('date', [$priorStart, $priorEnd])
                 ->count();
 
             // Per selected period: revenue, ad spend and ROAS this year vs the
@@ -324,19 +332,20 @@ final class DashboardQuery
                     'roasTotal'   => $dRoasTotal,
                     'isComplete'  => $dbComplete,
                 ],
-                'last7d' => [
-                    // Strict: the whole 7-day window must be synced (all 7 days
-                    // complete) or NOTHING shows — a 3-of-7-day sum labelled "L7d"
-                    // is exactly the partial number that misleads (Bosco, 2026-06-30).
-                    'revenue'             => $last7dCount >= 7 ? round($last7dNet, 2)          : null,
-                    'revenueGross'        => $last7dCount >= 7 ? round($last7dGross, 2)        : null,
-                    'netSales'            => $last7dCount >= 7 ? round($last7dNetSales, 2)     : null,
-                    'totalSales'          => $last7dCount >= 7 ? round($last7dTotalSales, 2)   : null,
-                    'revenuePrior7d'      => $prior7dCount >= 7 ? round($prior7dNet, 2)        : null,
-                    'revenueGrossPrior7d' => $prior7dCount >= 7 ? round($prior7dGross, 2)      : null,
-                    'netSalesPrior7d'     => $prior7dCount >= 7 ? round($prior7dNetSales, 2)   : null,
-                    'totalSalesPrior7d'   => $prior7dCount >= 7 ? round($prior7dTotalSales, 2) : null,
-                    'isComplete'          => $last7dCount >= 7,
+                'rolling' => [
+                    // Strict: the whole window must be synced (all N days complete)
+                    // or NOTHING shows — a partial-window sum labelled "last 30 days"
+                    // is exactly the number that misleads (Bosco, 2026-06-30 / 07-02).
+                    'windowDays'        => $win,
+                    'revenue'           => $rollCount >= $win ? round($rollNet, 2)          : null,
+                    'revenueGross'      => $rollCount >= $win ? round($rollGross, 2)        : null,
+                    'netSales'          => $rollCount >= $win ? round($rollNetSales, 2)     : null,
+                    'totalSales'        => $rollCount >= $win ? round($rollTotalSales, 2)   : null,
+                    'revenuePrior'      => $priorCount >= $win ? round($priorNet, 2)        : null,
+                    'revenueGrossPrior' => $priorCount >= $win ? round($priorGross, 2)      : null,
+                    'netSalesPrior'     => $priorCount >= $win ? round($priorNetSales, 2)   : null,
+                    'totalSalesPrior'   => $priorCount >= $win ? round($priorTotalSales, 2) : null,
+                    'isComplete'        => $rollCount >= $win,
                 ],
                 'comparison' => $comparison,
             ];
@@ -354,8 +363,8 @@ final class DashboardQuery
         // bottom and below 0-revenue brands, since at least 0 is a
         // confirmed signal.
         usort($rows, function (array $a, array $b): int {
-            $aRev = $a['last7d']['revenue'];
-            $bRev = $b['last7d']['revenue'];
+            $aRev = $a['rolling']['revenue'];
+            $bRev = $b['rolling']['revenue'];
 
             // Three-tier sort: confirmed revenue > confirmed zero > unknown.
             $aTier = $aRev === null ? 2 : ($aRev > 0 ? 0 : 1);

@@ -77,7 +77,7 @@ function Row({
   showTikTok: boolean;
   showAdRollup: boolean;
 }) {
-  const { brand, yesterday, dayBefore, last7d } = row;
+  const { brand, yesterday, dayBefore, rolling } = row;
   const detailHref = `/brands/${brand.slug}`;
   // USD mode (displayCurrency set) formats every row in USD; otherwise each
   // brand renders in its own native currency.
@@ -93,8 +93,8 @@ function Row({
   // (product − discounts + shipping + taxes, returns not subtracted).
   const yRev   = yesterday.revenue;
   const dbRev  = dayBefore.revenue;
-  const l7Rev  = last7d.revenueGross;
-  const l7Prev = last7d.revenueGrossPrior7d;
+  const l7Rev  = rolling.revenueGross;
+  const l7Prev = rolling.revenueGrossPrior;
 
   const adCell = (platform: 'meta' | 'google' | 'tiktok', value: number | null, prior: number | null) => {
     if (value === null) {
@@ -197,7 +197,7 @@ function Row({
 
       {/* Last 7 days */}
       <td className="num col-group-start">
-        {!last7d.isComplete ? (
+        {!rolling.isComplete ? (
           <Tag variant="warning">
             <Dot variant="warning" />
             Partial
