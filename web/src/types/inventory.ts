@@ -72,3 +72,24 @@ export interface InventoryResponse {
   unattributed: InventoryUnattributed;
   products: InventoryProduct[];
 }
+
+// A collection = every product sharing a model name (the first word of the
+// title, e.g. all "Nayah …" products). Built client-side for the "By collection"
+// view (Bosco, 2026-07-03); metrics are the sum of the member products, ROAS is
+// blended over the group, status/action derive from the aggregate stock.
+export interface CollectionGroup {
+  key: string;          // lowercased model, the group id
+  name: string;         // display model (first word of a member title)
+  productCount: number; // "Colores" — how many products roll up here
+  stock: number;
+  units: number;
+  unitsPrev: number;
+  deltaPct: number | null;
+  spend: number;
+  revenue: number;
+  roas: number | null;
+  ads: number;
+  status: InventoryStatus;
+  action: InventoryAction;
+  products: InventoryProduct[]; // members, shown when the row is expanded
+}

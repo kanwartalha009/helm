@@ -9,7 +9,7 @@ import { useUsers } from '@/hooks/useApiData';
 import { useCurrentUser } from '@/hooks/useSettings';
 import { formatMoney, formatNumber, formatPercent, formatRoas, pctDelta } from '@/lib/formatters';
 import type { DashboardRow, DashboardRowBrand } from '@/types/domain';
-import type { InventoryPeriod, InventoryStatus } from '@/types/inventory';
+import type { CollectionGroup, InventoryPeriod, InventoryStatus } from '@/types/inventory';
 
 type SortKey = 'spend' | 'units' | 'stock' | 'name' | 'status';
 type StatusFilter = 'all' | InventoryStatus;
@@ -35,6 +35,8 @@ export function InventoryPage() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('spend');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  // By product (flat list) vs By collection (model-grouped, expandable) — Bosco.
+  const [groupMode, setGroupMode] = useState<'product' | 'collection'>('product');
 
   // Brand list is the same manager-scoped set the dashboard uses — reused (and
   // cached) rather than adding a second brand endpoint. We only need name / slug
@@ -95,6 +97,60 @@ export function InventoryPage() {
       return b.spend - a.spend;
     });
   }, [data, search, sort, statusFilter]);
+
+  // "By collection" aggregate — group every product by its model (first word of
+  // the title, e.g. all "Nayah …" → one Nayah row). Sum the metrics, blend ROAS,
+  // derive status from the aggregate stock. Built from the full product set.
+  const collections = useMemo<CollectionGroup[]>(() => {
+    if (!data) return [];
+    const map = new Map<string, CollectionGroup>();
+    for (const p of data.products) {
+      const first = p.title.trim().split(/\s+/)[0] || p.title.trim();
+      const key = first.toLowerCase();
+      let g = map.get(key);
+      if (!g) {
+        g = {
+          key, name: first, productCount: 0, stock: 0, units: 0, unitsPrev: 0,
+          deltaPct: null, spend: 0, revenue: 0, roas: null, ads: 0,
+          status: 'ok', action: 'ok', products: [],
+        };
+        map.set(key, g);
+      }
+      g.products.push(p);
+      g.productCount += 1;
+      g.stock += p.stock;
+      g.units += p.units;
+      g.unitsPrev += p.unitsPrev;
+      g.spend += p.spend;
+      g.revenue += p.revenue;
+      g.ads += p.ads;
+    }
+    const groups = [...map.values()];
+    for (const g of groups) {
+      g.roas = g.spend > 0 ? Math.round((g.revenue / g.spend) * 100) / 100 : null;
+      g.deltaPct = g.unitsPrev > 0 ? Math.round(((g.units - g.unitsPrev) / g.unitsPrev) * 100) : null;
+      g.status = g.stock <= 0 ? 'pause' : g.stock <= 20 ? 'alert' : 'ok';
+      g.action = g.status === 'pause' ? 'out_of_stock' : g.status === 'alert' ? 'low_stock' : g.spend <= 0 ? 'no_spend' : 'ok';
+      g.products.sort((a, b) => b.spend - a.spend);
+    }
+    return groups;
+  }, [data]);
+
+  const displayCollections = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = collections.filter(
+      (g) =>
+        (statusFilter === 'all' || g.status === statusFilter) &&
+        (q === '' || g.name.toLowerCase().includes(q) || g.products.some((p) => p.title.toLowerCase().includes(q))),
+    );
+    return [...list].sort((a, b) => {
+      if (sort === 'name') return a.name.localeCompare(b.name);
+      if (sort === 'units') return b.units - a.units;
+      if (sort === 'stock') return b.stock - a.stock;
+      if (sort === 'status') return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.spend - a.spend;
+      return b.spend - a.spend;
+    });
+  }, [collections, search, sort, statusFilter]);
 
   // No brands in scope at all — mirror the dashboard's "add a brand" dead-end
   // rather than showing an empty report shell.
@@ -184,12 +240,22 @@ export function InventoryPage() {
 
         <span style={{ flex: 1 }} />
         <span className="text-xs muted">
-          {data ? `${rangeLabel(data.from, data.to)} · ${data.products.length} products` : selectedBrand?.name}
+          {data
+            ? `${rangeLabel(data.from, data.to)} · ${
+                groupMode === 'collection'
+                  ? `${collections.length} collection${collections.length === 1 ? '' : 's'}`
+                  : `${data.products.length} products`
+              }`
+            : selectedBrand?.name}
         </span>
       </div>
 
-      {/* Sort + status chips. */}
+      {/* View toggle + sort + status chips. */}
       <div className="filter-bar mb-12">
+        <span className="text-xs muted" style={{ marginRight: 2 }}>View</span>
+        <Chip active={groupMode === 'product'} onClick={() => setGroupMode('product')}>By product</Chip>
+        <Chip active={groupMode === 'collection'} onClick={() => setGroupMode('collection')}>By collection</Chip>
+        <span style={{ width: 14 }} />
         <span className="text-xs muted" style={{ marginRight: 2 }}>Sort</span>
         <Chip active={sort === 'spend'} onClick={() => setSort('spend')}>Spend</Chip>
         <Chip active={sort === 'units'} onClick={() => setSort('units')}>Units</Chip>
@@ -216,6 +282,31 @@ export function InventoryPage() {
           ends yesterday (today excluded), in the brand&rsquo;s timezone.
         </span>
       </div>
+
+      {groupMode === 'collection' && (
+        <div
+          className="text-xs muted"
+          style={{ marginTop: -6, marginBottom: 14, display: 'flex', alignItems: 'flex-start', gap: 6 }}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            style={{ flex: '0 0 auto', marginTop: 1 }}
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4M12 8h.01" />
+          </svg>
+          <span>
+            Collections group products by <strong>model name</strong> — the first word of the product title (e.g. every
+            &ldquo;Nayah …&rdquo; product rolls into &ldquo;Nayah&rdquo;). These are Helm groupings, <strong>not</strong>{' '}
+            Shopify collections.
+          </span>
+        </div>
+      )}
 
       {inv.isError ? (
         <StateCard>Couldn&rsquo;t load inventory for this brand. Try refreshing, or check the brand is synced.</StateCard>
@@ -273,8 +364,18 @@ export function InventoryPage() {
             />
           </div>
 
-          {products.length > 0 ? (
-            <InventoryTable products={products} currency={currency} />
+          {groupMode === 'collection' ? (
+            displayCollections.length > 0 ? (
+              <InventoryTable mode="collection" collections={displayCollections} currency={currency} />
+            ) : (
+              <StateCard>
+                {collections.length === 0
+                  ? 'No products in the catalog for this brand yet. Run shopify:sync-catalog for it.'
+                  : 'No collections match your filters.'}
+              </StateCard>
+            )
+          ) : products.length > 0 ? (
+            <InventoryTable mode="product" products={products} currency={currency} />
           ) : (
             <StateCard>
               {data.products.length === 0

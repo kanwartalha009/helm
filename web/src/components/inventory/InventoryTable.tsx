@@ -1,10 +1,17 @@
-import { useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { formatMoney, formatNumber, formatRoas } from '@/lib/formatters';
-import type { InventoryAction, InventoryProduct, InventoryStatus } from '@/types/inventory';
+import type {
+  CollectionGroup,
+  InventoryAction,
+  InventoryProduct,
+  InventoryStatus,
+} from '@/types/inventory';
 
-// Design tokens are pulled from CSS variables so this stays in the Helm system
-// (warm neutrals, single accent, no shadows). The header is near-black to match
-// the approved mockup; everything else is 1px borders on --surface.
+// Design tokens come from CSS variables so this stays in the Helm system (warm
+// neutrals, single accent, no shadows). Header is near-black; rows are 1px
+// borders on --surface. The table renders two shapes: a flat product list
+// ("By product") or model-grouped collections that expand to their members
+// ("By collection"). Both share the same metric columns.
 const STATUS_LABEL: Record<InventoryStatus, string> = { ok: 'OK', alert: 'Alert', pause: 'Pause' };
 
 const STATUS_STYLE: Record<InventoryStatus, { bg: string; fg: string; dot: string }> = {
@@ -13,8 +20,6 @@ const STATUS_STYLE: Record<InventoryStatus, { bg: string; fg: string; dot: strin
   pause: { bg: 'var(--danger-bg, #FEF2F2)', fg: 'var(--danger)', dot: 'var(--danger)' },
 };
 
-// Action copy lives in the UI (the API returns only the enum). Colour follows
-// urgency: out-of-stock is a hard stop, low-stock a warning, the rest neutral.
 const ACTION_LABEL: Record<InventoryAction, string> = {
   out_of_stock: 'Out of stock — pause ads',
   low_stock: 'Low stock — reorder',
@@ -28,7 +33,6 @@ const ACTION_COLOR: Record<InventoryAction, string> = {
   ok: 'var(--text-secondary)',
 };
 
-// Stock colour tiers mirror the status thresholds (≤0 danger, ≤20 warning).
 function stockColor(status: InventoryStatus): string {
   return status === 'pause' ? 'var(--danger)' : status === 'alert' ? 'var(--warning)' : 'var(--success)';
 }
@@ -54,24 +58,39 @@ const tdBase: CSSProperties = {
   fontVariantNumeric: 'tabular-nums',
 };
 const tdL: CSSProperties = { ...tdBase, textAlign: 'left' };
+const SUBTLE = 'var(--surface-subtle)';
 
-export function InventoryTable({
-  products,
-  currency,
-}: {
-  products: InventoryProduct[];
-  currency: string;
-}) {
+// The metric fields shared by a product and a collection — lets one cell
+// renderer serve both a product row and an aggregated collection row.
+type MetricItem = {
+  stock: number;
+  status: InventoryStatus;
+  units: number;
+  unitsPrev: number;
+  deltaPct: number | null;
+  spend: number;
+  revenue: number;
+  roas: number | null;
+  ads: number;
+  action: InventoryAction;
+};
+
+type Props =
+  | { mode: 'product'; products: InventoryProduct[]; currency: string }
+  | { mode: 'collection'; collections: CollectionGroup[]; currency: string };
+
+export function InventoryTable(props: Props) {
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const toggle = (handle: string) =>
+  const toggle = (k: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
-      if (next.has(handle)) next.delete(handle);
-      else next.add(handle);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
       return next;
     });
 
-  const money = (v: number) => formatMoney(v, currency, { whole: true });
+  const money = (v: number) => formatMoney(v, props.currency, { whole: true });
+  const collection = props.mode === 'collection';
 
   return (
     <div
@@ -87,9 +106,9 @@ export function InventoryTable({
           <thead>
             <tr>
               <th style={{ ...thL, width: 34 }}>#</th>
-              <th style={thL}>Product</th>
+              <th style={thL}>{collection ? 'Collection' : 'Product'}</th>
               <th style={thBase}>Stock total</th>
-              <th style={thBase}>Variants</th>
+              {collection && <th style={thBase}>Products</th>}
               <th style={thBase}>Units</th>
               <th style={thBase}>Units prev</th>
               <th style={thBase}>Meta spend</th>
@@ -101,21 +120,30 @@ export function InventoryTable({
             </tr>
           </thead>
           <tbody>
-            {products.map((p, i) => {
-              const isOpen = open.has(p.handle);
-              const st = STATUS_STYLE[p.status];
-              return (
-                <ProductRows
-                  key={p.handle}
-                  p={p}
-                  rank={i + 1}
-                  isOpen={isOpen}
-                  onToggle={() => toggle(p.handle)}
-                  money={money}
-                  statusStyle={st}
-                />
-              );
-            })}
+            {collection
+              ? props.collections.map((g, i) => (
+                  <CollectionRows
+                    key={g.key}
+                    g={g}
+                    rank={i + 1}
+                    isOpen={open.has(g.key)}
+                    onToggle={() => toggle(g.key)}
+                    money={money}
+                  />
+                ))
+              : props.products.map((p, i) => (
+                  <tr
+                    key={p.handle}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = SUBTLE)}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = '')}
+                  >
+                    <td style={{ ...tdL, color: 'var(--text-muted)' }}>{i + 1}</td>
+                    <td style={tdL}>
+                      <div style={{ fontWeight: 500 }}>{p.title}</div>
+                    </td>
+                    {metricCells(p, money, {})}
+                  </tr>
+                ))}
           </tbody>
         </table>
       </div>
@@ -123,27 +151,25 @@ export function InventoryTable({
   );
 }
 
-function ProductRows({
-  p,
+function CollectionRows({
+  g,
   rank,
   isOpen,
   onToggle,
   money,
-  statusStyle,
 }: {
-  p: InventoryProduct;
+  g: CollectionGroup;
   rank: number;
   isOpen: boolean;
   onToggle: () => void;
   money: (v: number) => string;
-  statusStyle: { bg: string; fg: string; dot: string };
 }) {
   return (
     <>
       <tr
         onClick={onToggle}
         style={{ cursor: 'pointer' }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-subtle)')}
+        onMouseEnter={(e) => (e.currentTarget.style.background = SUBTLE)}
         onMouseLeave={(e) => (e.currentTarget.style.background = '')}
       >
         <td style={{ ...tdL, color: 'var(--text-muted)' }}>{rank}</td>
@@ -166,108 +192,91 @@ function ProductRows({
               <path d="m9 18 6-6-6-6" />
             </svg>
             <div>
-              <div style={{ fontWeight: 500 }}>{p.title}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.variantCount} variants</div>
+              <div style={{ fontWeight: 600 }}>{g.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {g.productCount} {g.productCount === 1 ? 'product' : 'products'}
+              </div>
             </div>
           </div>
         </td>
-        <td style={{ ...tdBase, fontWeight: 600, color: stockColor(p.status) }}>
-          {formatNumber(p.stock)}
-        </td>
-        <td style={tdBase}>{p.variantCount}</td>
-        <td style={tdBase}>
-          <div style={{ fontWeight: 600 }}>{formatNumber(p.units)}</div>
-          <div style={{ fontSize: 11, fontWeight: 500, marginTop: 1 }}>
-            <DeltaBadge deltaPct={p.deltaPct} />
-          </div>
-        </td>
-        <td style={{ ...tdBase, color: 'var(--text-muted)' }}>{formatNumber(p.unitsPrev)}</td>
-        <td style={tdBase}>
-          {p.spend > 0 ? money(p.spend) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-        </td>
-        <td style={tdBase}>{money(p.revenue)}</td>
-        <td style={{ ...tdBase, fontWeight: 600, color: p.roas != null && p.roas >= 3 ? 'var(--success)' : undefined }}>
-          {p.roas != null ? formatRoas(p.roas) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-        </td>
-        <td style={tdBase}>{p.ads}</td>
-        <td style={tdL}>
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 12,
-              padding: '3px 9px',
-              borderRadius: 20,
-              fontWeight: 500,
-              background: statusStyle.bg,
-              color: statusStyle.fg,
-            }}
-          >
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusStyle.dot }} />
-            {STATUS_LABEL[p.status]}
-          </span>
-        </td>
-        <td style={{ ...tdL, fontSize: 12.5, color: ACTION_COLOR[p.action] }}>{ACTION_LABEL[p.action]}</td>
+        {metricCells(g, money, { colores: formatNumber(g.productCount) })}
       </tr>
 
-      {isOpen && (
-        <tr>
-          <td colSpan={12} style={{ padding: 0, background: 'var(--surface-subtle)', borderTop: '1px solid var(--border)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <tbody>
-                {p.variants.length === 0 ? (
-                  <tr>
-                    <td style={{ padding: '10px 12px 10px 44px', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                      No variant detail available.
-                    </td>
-                  </tr>
-                ) : (
-                  p.variants.map((v, vi) => {
-                    const low = v.q <= 0;
-                    return (
-                      <tr key={`${v.t}-${vi}`}>
-                        <td
-                          style={{
-                            padding: '8px 12px 8px 44px',
-                            borderTop: vi === 0 ? '1px dashed var(--border-strong, #D6D3D1)' : '1px solid var(--border)',
-                            fontSize: 12.5,
-                            color: 'var(--text-secondary)',
-                            textAlign: 'left',
-                          }}
-                        >
-                          {p.title} · {v.t}
-                        </td>
-                        <td
-                          style={{
-                            padding: '8px 12px',
-                            borderTop: vi === 0 ? '1px dashed var(--border-strong, #D6D3D1)' : '1px solid var(--border)',
-                            fontSize: 12.5,
-                            textAlign: 'right',
-                            fontVariantNumeric: 'tabular-nums',
-                            width: 160,
-                          }}
-                        >
-                          <span style={low ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
-                            {formatNumber(v.q)}
-                          </span>{' '}
-                          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>in stock</span>
-                        </td>
-                        <td
-                          style={{
-                            borderTop: vi === 0 ? '1px dashed var(--border-strong, #D6D3D1)' : '1px solid var(--border)',
-                          }}
-                        />
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </td>
-        </tr>
-      )}
+      {isOpen &&
+        g.products.map((p) => (
+          <tr key={p.handle}>
+            <td style={{ ...tdL, background: SUBTLE }} />
+            <td style={{ ...tdL, background: SUBTLE, paddingLeft: 44 }}>
+              <div style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>{p.title}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'ui-monospace, SFMono-Regular, monospace' }}>
+                {p.handle}
+              </div>
+            </td>
+            {metricCells(p, money, { colores: <span style={{ color: 'var(--text-muted)' }}>—</span>, child: true })}
+          </tr>
+        ))}
     </>
+  );
+}
+
+// Renders every cell after the name: Stock, [Products], Units+Δ, Units prev,
+// Meta spend, Revenue, ROAS, Active ads, Status, Action. `colores` omitted →
+// no Products column (product view). `child` → subtle background for expanded
+// collection members.
+function metricCells(
+  item: MetricItem,
+  money: (v: number) => string,
+  opts: { colores?: ReactNode; child?: boolean },
+): ReactNode {
+  const bg = opts.child ? SUBTLE : undefined;
+  const num: CSSProperties = { ...tdBase, background: bg };
+  const left: CSSProperties = { ...tdL, background: bg };
+  return (
+    <>
+      <td style={{ ...num, fontWeight: 600, color: stockColor(item.status) }}>{formatNumber(item.stock)}</td>
+      {opts.colores !== undefined && <td style={num}>{opts.colores}</td>}
+      <td style={num}>
+        <div style={{ fontWeight: 600 }}>{formatNumber(item.units)}</div>
+        <div style={{ fontSize: 11, fontWeight: 500, marginTop: 1 }}>
+          <DeltaBadge deltaPct={item.deltaPct} />
+        </div>
+      </td>
+      <td style={{ ...num, color: 'var(--text-muted)' }}>{formatNumber(item.unitsPrev)}</td>
+      <td style={num}>
+        {item.spend > 0 ? money(item.spend) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+      </td>
+      <td style={num}>{money(item.revenue)}</td>
+      <td style={{ ...num, fontWeight: 600, color: item.roas != null && item.roas >= 3 ? 'var(--success)' : undefined }}>
+        {item.roas != null ? formatRoas(item.roas) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+      </td>
+      <td style={num}>{item.ads}</td>
+      <td style={left}>
+        <StatusPill status={item.status} />
+      </td>
+      <td style={{ ...left, fontSize: 12.5, color: ACTION_COLOR[item.action] }}>{ACTION_LABEL[item.action]}</td>
+    </>
+  );
+}
+
+function StatusPill({ status }: { status: InventoryStatus }) {
+  const st = STATUS_STYLE[status];
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 12,
+        padding: '3px 9px',
+        borderRadius: 20,
+        fontWeight: 500,
+        background: st.bg,
+        color: st.fg,
+      }}
+    >
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: st.dot }} />
+      {STATUS_LABEL[status]}
+    </span>
   );
 }
 
