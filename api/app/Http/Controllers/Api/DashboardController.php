@@ -34,8 +34,8 @@ class DashboardController extends Controller
             // Year-over-year comparison: comma list of periods + the metric.
             'compare'         => ['nullable', 'string', 'max:60'],
             'metric'          => ['nullable', 'in:net,total'],
-            // Rolling comparison window (days) for the far-right block: 7 / 30.
-            'window'          => ['nullable', 'in:7,30'],
+            // Rolling comparison window (days) for the far-right block: 7 / 30 / 90.
+            'window'          => ['nullable', 'in:7,30,90'],
         ]);
 
         return response()->json([

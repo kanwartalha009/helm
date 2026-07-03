@@ -100,7 +100,7 @@ final class DashboardQuery
         // "last N days vs the prior N", N chosen from the dashboard's interval
         // filter; default 30 (last month). Allowlisted so it's never user SQL.
         $win = (int) ($params['window'] ?? 7);
-        if (! in_array($win, [7, 30], true)) {
+        if (! in_array($win, [7, 30, 90], true)) {
             $win = 7;
         }
 

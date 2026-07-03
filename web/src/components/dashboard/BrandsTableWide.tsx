@@ -97,7 +97,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
                 <th className="group-head group-start" rowSpan={2} colSpan={3}>{revenueLabel}</th>
                 {comparePeriods.map((p) => (
                   <th key={p} className="group-head group-start" colSpan={9}>
-                    {PERIOD_LABEL[p] ?? p} · vs last year
+                    {periodHeader(p)}
                   </th>
                 ))}
                 {showAdRollup && <th className="group-head group-start" rowSpan={2} colSpan={3}>Blended ROAS</th>}
@@ -170,6 +170,19 @@ const PERIOD_LABEL: Record<string, string> = {
   lastmonth: 'Last month',
   mtd: 'Month to date',
 };
+
+// Comparison block title. "Last month" names the actual month on both sides —
+// e.g. "June 2026 vs June 2025" (Bosco, 2026-07-03) — since naming the month is
+// the whole point of that view; every other period reads "… · vs last year".
+function periodHeader(p: string): string {
+  if (p === 'lastmonth') {
+    const now = new Date();
+    const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const m = lm.toLocaleDateString('en-US', { month: 'long' });
+    return `${m} ${lm.getFullYear()} vs ${m} ${lm.getFullYear() - 1}`;
+  }
+  return `${PERIOD_LABEL[p] ?? p} · vs last year`;
+}
 
 function ComparisonSubHeaders() {
   return (
