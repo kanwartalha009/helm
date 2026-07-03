@@ -8,7 +8,7 @@ import { useDashboardData } from '@/hooks/useDashboardData';
 import { useUsers } from '@/hooks/useApiData';
 import { useCurrentUser } from '@/hooks/useSettings';
 import { formatMoney, formatNumber, formatPercent, formatRoas, pctDelta } from '@/lib/formatters';
-import type { DashboardRowBrand } from '@/types/domain';
+import type { DashboardRow, DashboardRowBrand } from '@/types/domain';
 import type { InventoryPeriod, InventoryStatus } from '@/types/inventory';
 
 type SortKey = 'spend' | 'units' | 'stock' | 'name' | 'status';
@@ -44,15 +44,25 @@ export function InventoryPage() {
 
   const brands: DashboardRowBrand[] = useMemo(() => {
     const seen = new Set<string>();
-    const out: DashboardRowBrand[] = [];
+    const uniq: DashboardRow[] = [];
     for (const r of rows) {
       if (!seen.has(r.brand.slug)) {
         seen.add(r.brand.slug);
-        out.push(r.brand);
+        uniq.push(r);
       }
     }
-    out.sort((a, b) => a.name.localeCompare(b.name));
-    return out;
+    // Best-performing first — same default as the main dashboard: rank by the
+    // rolling revenue (Total sales) desc, brands with no revenue last, then A–Z.
+    uniq.sort((a, b) => {
+      const av = a.rolling.totalSales;
+      const bv = b.rolling.totalSales;
+      const aDead = av == null || av === 0;
+      const bDead = bv == null || bv === 0;
+      if (aDead !== bDead) return aDead ? 1 : -1;
+      if (!aDead && !bDead && av !== bv) return (bv as number) - (av as number);
+      return a.brand.name.localeCompare(b.brand.name);
+    });
+    return uniq.map((r) => r.brand);
   }, [rows]);
 
   // Don't auto-open a brand — the page lands on a chooser (see below). We only
