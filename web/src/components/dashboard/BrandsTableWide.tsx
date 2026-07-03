@@ -40,7 +40,7 @@ interface Props {
   rollingDays?: number;
 }
 
-export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = 'total', comparePeriods = [], rollingDays = 30 }: Props) {
+export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = 'total', comparePeriods = [], rollingDays = 7 }: Props) {
   const showMeta   = visibleAdPlatforms?.has('meta')   ?? false;
   const showGoogle = visibleAdPlatforms?.has('google') ?? false;
   const showTikTok = visibleAdPlatforms?.has('tiktok') ?? false;
@@ -167,6 +167,7 @@ const PERIOD_LABEL: Record<string, string> = {
   yesterday: 'Yesterday',
   last7: 'Last 7 days',
   last30: 'Last 30 days',
+  lastmonth: 'Last month',
   mtd: 'Month to date',
 };
 

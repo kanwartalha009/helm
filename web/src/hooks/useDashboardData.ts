@@ -18,7 +18,7 @@ export function useDashboardData(
   manager: string = 'me',
   metric: 'net' | 'total' = 'total',
   compare: string[] = [],
-  rollingDays: number = 30,
+  rollingDays: number = 7,
 ) {
   const currency = useFiltersStore((s) => s.currency);
   const compareKey = compare.join(',');
@@ -38,9 +38,9 @@ export function useDashboardData(
         params.compare = compareKey;
         params.metric = metric;
       }
-      // Rolling window (days). 30 is the backend default, so only send it when the
-      // interval filter picks something else — keeps the default URL clean.
-      if (rollingDays !== 30) params.window = String(rollingDays);
+      // Rolling window (days). 7 is the default, so only send it when the interval
+      // filter picks something else — keeps the default URL clean.
+      if (rollingDays !== 7) params.window = String(rollingDays);
       const { data } = await api.get<{ rows: DashboardRow[] }>('/dashboard', {
         params: Object.keys(params).length ? params : undefined,
       });

@@ -92,16 +92,16 @@ final class DashboardQuery
         // Metric follows the dashboard's Net/Total toggle.
         $comparePeriods = array_values(array_intersect(
             array_filter(array_map('trim', explode(',', (string) ($params['compare'] ?? '')))),
-            ['yesterday', 'last7', 'last30', 'mtd'],
+            ['yesterday', 'last7', 'last30', 'lastmonth', 'mtd'],
         ));
         $compareCol  = (($params['metric'] ?? 'total') === 'net') ? 'net_sales' : $totalCol;
 
         // Rolling comparison window (Bosco, 2026-07-02). The far-right block is
         // "last N days vs the prior N", N chosen from the dashboard's interval
         // filter; default 30 (last month). Allowlisted so it's never user SQL.
-        $win = (int) ($params['window'] ?? 30);
-        if (! in_array($win, [7, 30, 90], true)) {
-            $win = 30;
+        $win = (int) ($params['window'] ?? 7);
+        if (! in_array($win, [7, 30], true)) {
+            $win = 7;
         }
 
         $rows = $brands->map(function (Brand $b) use ($platformsByBrand, $healthByBrand, $usd, $grossExpr, $refundsExpr, $netExpr, $totalExpr, $comparePeriods, $compareCol, $win): array {
@@ -405,6 +405,14 @@ final class DashboardQuery
             'yesterday' => [$yesterday->toDateString(), $yesterday->toDateString()],
             'last7'     => [$now->subDays(7)->startOfDay()->toDateString(), $yesterday->toDateString()],
             'last30'    => [$now->subDays(30)->startOfDay()->toDateString(), $yesterday->toDateString()],
+            // Last FULL calendar month (e.g. June when today is in July) vs the
+            // same month a year ago — the caller shifts the window −1 year for the
+            // last-year side, so this yields e.g. June 2026 vs June 2025. Always a
+            // complete month (today never falls inside it), so no partial-day gate.
+            'lastmonth' => [
+                $now->startOfMonth()->subMonthNoOverflow()->toDateString(),
+                $now->startOfMonth()->subDay()->toDateString(),
+            ],
             'mtd'       => $yesterday->lessThan($now->startOfMonth())
                 ? [null, null]
                 : [$now->startOfMonth()->toDateString(), $yesterday->toDateString()],

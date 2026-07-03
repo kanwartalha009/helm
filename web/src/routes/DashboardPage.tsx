@@ -51,7 +51,6 @@ const AUDIENCE_PERIODS: { key: AudiencePeriod; label: string }[] = [
 const ROLLING_WINDOWS: { days: number; label: string }[] = [
   { days: 7, label: 'Last 7 days' },
   { days: 30, label: 'Last 30 days' },
-  { days: 90, label: 'Last 90 days' },
 ];
 
 // Resolve a period to its actual [from, to] window. Mirrors the backend
@@ -98,6 +97,9 @@ const COMPARE_PERIODS = [
   { key: 'yesterday', label: 'Yesterday' },
   { key: 'last7', label: 'Last 7 days' },
   { key: 'last30', label: 'Last 30 days' },
+  // Last full calendar month vs the same month last year (e.g. June 2026 vs
+  // June 2025) — Bosco, 2026-07-03.
+  { key: 'lastmonth', label: 'Last month' },
   { key: 'mtd', label: 'Month to date' },
 ] as const;
 
@@ -123,7 +125,7 @@ export function DashboardPage() {
     setComparePeriods((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   // Rolling comparison interval for the far-right block (7/30/90 days; default
   // last month). Part of the dashboard query key, so switching it refetches.
-  const [rollingDays, setRollingDays] = useState<number>(30);
+  const [rollingDays, setRollingDays] = useState<number>(7);
   const { data: rows = [], isLoading } = useDashboardData(manager, metric, activeCompare, rollingDays);
   // Dashboard view: Performance (revenue/ROAS table) or Audience (Meta spend
   // split by a breakdown axis). The two share the Brands + Manager + currency
