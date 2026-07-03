@@ -26,7 +26,8 @@ class MetaBackfillAdProductsCommand extends Command
 {
     protected $signature = 'meta:backfill-ad-products '
         . '{brand? : slug or id; omit for all active brands} '
-        . '{--since=2025-01-01 : first day to pull (Y-m-d)}';
+        . '{--since=2025-01-01 : first day to pull (Y-m-d)} '
+        . '{--pause=2 : seconds to wait between brands — every brand shares the one org Meta token, so a cooldown keeps the portfolio run clear of error 17}';
 
     protected $description = 'Backfill Meta spend attributed to Shopify products (by ad landing URL) into ad_product_daily.';
 
@@ -47,6 +48,8 @@ class MetaBackfillAdProductsCommand extends Command
         }
 
         $totalRows = 0;
+        $pause     = max(0, (int) $this->option('pause'));
+        $metaDone  = 0;
 
         foreach ($brands as $brand) {
             $conn = $brand->connections->firstWhere('platform', 'meta');
@@ -54,6 +57,13 @@ class MetaBackfillAdProductsCommand extends Command
                 continue; // brand doesn't run Meta
             }
             $conn->setRelation('brand', $brand);
+
+            // Cool down between brands — the org token is shared, so back-to-back
+            // brands stack onto one rate-limit bucket. Skipped before the first.
+            if ($pause > 0 && $metaDone > 0) {
+                sleep($pause);
+            }
+            $metaDone++;
 
             $tz    = $brand->timezone ?: 'UTC';
             $from  = CarbonImmutable::parse($since, $tz)->startOfDay();
