@@ -269,6 +269,7 @@ export function DashboardPage() {
 
   return (
     <AppLayout title="All brands" tag={tag}>
+      <div className="page-scroll">
       {/*
         Filter bar — only the filters that actually drive the data live here.
         Period chips, comparison baseline, and the columns picker were removed
@@ -547,7 +548,7 @@ export function DashboardPage() {
             Each cell stacks <strong>yesterday</strong> on top and <strong>day before</strong> with the delta below. Figures are <strong>total revenue</strong> (Shopify’s Total sales). Blended ROAS is revenue ÷ ad spend. Online Store channel only.
           </Banner>
 
-          <div style={{ marginTop: 16 }}>
+          <div className="table-region" style={{ marginTop: 16 }}>
             <BrandsTableWide
               rows={sortedRows}
               metric={metric}
@@ -579,7 +580,7 @@ export function DashboardPage() {
             </span>
           </div>
 
-          <div style={{ marginTop: 16 }}>
+          <div className="table-region" style={{ marginTop: 16 }}>
             {audienceLoading && !audience ? (
               <Card>
                 <div className="text-sm muted" style={{ padding: 48, textAlign: 'center' }}>
@@ -608,6 +609,7 @@ export function DashboardPage() {
           </div>
         </>
       )}
+      </div>
     </AppLayout>
   );
 }

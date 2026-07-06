@@ -196,8 +196,9 @@ export function InventoryPage() {
 
   return (
     <AppLayout title="Inventory intelligence" tag={data ? `${data.products.length}` : undefined}>
+      <div className="page-scroll">
       {/* Filter bar — brand, manager, period, product search. */}
-      <div className="filter-bar mb-12" style={{ position: 'relative', zIndex: 20 }}>
+      <div className="filter-bar mb-12" style={{ position: 'sticky', left: 0, zIndex: 20 }}>
         <BrandPicker brands={brands} selected={selectedBrand} onSelect={setSelectedSlug} />
 
         {canFilterByManager && (
@@ -364,6 +365,7 @@ export function InventoryPage() {
             />
           </div>
 
+          <div className="table-region">
           {groupMode === 'collection' ? (
             displayCollections.length > 0 ? (
               <InventoryTable mode="collection" collections={displayCollections} currency={currency} />
@@ -383,6 +385,7 @@ export function InventoryPage() {
                 : 'No products match your filters.'}
             </StateCard>
           )}
+          </div>
 
           <div className="text-xs muted" style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -394,6 +397,7 @@ export function InventoryPage() {
           </div>
         </>
       ) : null}
+      </div>
     </AppLayout>
   );
 }

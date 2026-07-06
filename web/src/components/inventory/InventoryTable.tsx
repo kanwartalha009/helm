@@ -99,8 +99,6 @@ export function InventoryTable(props: Props) {
         background: 'var(--surface)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-lg)',
-        overflow: 'auto',
-        maxHeight: 'calc(100vh - 360px)',
       }}
     >
       <div>

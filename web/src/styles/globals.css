@@ -411,6 +411,24 @@ p {
   flex: 1;
 }
 
+/* Page scroll region — the filters + table scroll together vertically (so the
+   chrome scrolls away and the table's sticky header pins to the top), while
+   horizontal scroll is scoped to the table. Direct children pin to the left on
+   horizontal scroll so filters / banners / cards don't drift sideways with a
+   wide table (they still scroll away vertically — only `left` is sticky). The
+   table region opts out so it scrolls horizontally. Bosco, 2026-07-03. */
+.page-scroll {
+  max-height: calc(100vh - 128px);
+  overflow: auto;
+}
+.page-scroll > * {
+  position: sticky;
+  left: 0;
+}
+.page-scroll > .table-region {
+  position: static;
+}
+
 /* Filter chips */
 .filter-bar {
   display: flex;
