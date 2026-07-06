@@ -1,0 +1,359 @@
+import { type ReactNode, useMemo } from 'react';
+import { AdsRegionMap } from './AdsRegionMap';
+import { formatMoney, formatNumber, formatRoas } from '@/lib/formatters';
+import type {
+  AdsByDevice,
+  AdsCampaignRow,
+  AdsFunnelStep,
+  AdsOverviewResponse,
+  AdsSummary,
+  AdsTrendPoint,
+} from '@/types/ads';
+import '@/styles/ads.css';
+
+type MetricKey = 'roas' | 'revenue' | 'purchases' | 'cpa' | 'aov';
+
+const DEVICE_COLORS = ['#2F6BE8', '#0EA5B7', '#16A34A', '#64748B', '#EC4899'];
+
+export function AdsOverviewView({ data }: { data: AdsOverviewResponse }) {
+  const currency = data.currency === 'usd' ? 'USD' : data.brand.baseCurrency || 'EUR';
+  const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+  const unit = (v: number | null) => formatMoney(v, currency);
+  const s = data.summary;
+
+  const kpis: Array<{ key: MetricKey; label: string; color: string; goodUp: boolean; fmt: (v: number | null) => string; series: (t: AdsTrendPoint) => number; icon: ReactNode }> = [
+    { key: 'roas', label: 'ROAS', color: '#2563EB', goodUp: true, fmt: (v) => formatRoas(v), series: (t) => (t.spend > 0 ? t.revenue / t.spend : 0), icon: <IconTrend /> },
+    { key: 'revenue', label: 'Revenue', color: '#16A34A', goodUp: true, fmt: money, series: (t) => t.revenue, icon: <IconMoney /> },
+    { key: 'purchases', label: 'Purchases', color: '#0EA5B7', goodUp: true, fmt: (v) => formatNumber(v), series: (t) => t.purchases, icon: <IconCart /> },
+    { key: 'cpa', label: 'CPA', color: '#64748B', goodUp: false, fmt: unit, series: (t) => (t.purchases > 0 ? t.spend / t.purchases : 0), icon: <IconTarget /> },
+    { key: 'aov', label: 'AOV', color: '#EC4899', goodUp: true, fmt: unit, series: (t) => (t.purchases > 0 ? t.revenue / t.purchases : 0), icon: <IconBag /> },
+  ];
+
+  return (
+    <div className="ads-root">
+      {/* KPI summary */}
+      <div className="ads-panel">
+        <div className="ads-ph"><h3>Performance summary</h3></div>
+        <div className="ads-psub">Attributed Meta performance · {rangeLabel(data.from, data.to)}</div>
+        <div className="ads-kpis">
+          {kpis.map((k) => (
+            <div className="ads-kpi" key={k.key}>
+              <div className="akpi-top">
+                <span className="akpi-tick" style={{ background: k.color }} />
+                <span className="akpi-icon" style={{ color: k.color }}>{k.icon}</span>
+                <span className="akpi-label">{k.label}</span>
+                <Delta v={s.delta?.[k.key] ?? null} goodUp={k.goodUp} />
+              </div>
+              <div className="akpi-bot">
+                <span className="akpi-val">{k.fmt(s[k.key])}</span>
+                <Spark series={data.trend.map(k.series)} color={k.color} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="ads-eff">
+          <EffStat label="CPM" value={unit(s.cpm)} />
+          <EffStat label="CPC" value={unit(s.cpc)} />
+          <EffStat label="CTR" value={s.ctr != null ? `${s.ctr}%` : '—'} />
+          <EffStat label="Impressions" value={formatNumber(s.impressions)} />
+          <EffStat label="Clicks" value={formatNumber(s.clicks)} />
+        </div>
+      </div>
+
+      {/* Trends + funnel */}
+      <div className="ads-grid-2">
+        <div className="ads-panel">
+          <div className="ads-ph"><h3>Performance trends</h3></div>
+          <div className="ads-psub">Revenue, spend and impressions over time</div>
+          <TrendChart trend={data.trend} />
+        </div>
+
+        <div className="ads-panel">
+          <div className="ads-ph"><h3>Purchase funnel</h3></div>
+          <div className="ads-psub">Impressions → purchases</div>
+          <Funnel steps={data.funnel} />
+        </div>
+      </div>
+
+      {/* Region + device */}
+      <div className="ads-grid-2">
+        <div className="ads-panel">
+          <div className="ads-ph"><h3>Performance by region</h3></div>
+          <div className="ads-psub">Spend and purchases by country</div>
+          {data.byCountry.hasData ? (
+            <div className="aregion">
+              <AdsRegionMap rows={data.byCountry.rows} />
+              <div className="aregion-side">
+                {data.byCountry.top && (
+                  <>
+                    <div className="atr-label">Top region</div>
+                    <div className="atr-card">
+                      <span className="atr-thumb">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--text-secondary)" strokeWidth="1.6"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0Z" /><circle cx="12" cy="10" r="3" /></svg>
+                      </span>
+                      <div style={{ flex: 1 }}>
+                        <div className="atr-name">{data.byCountry.top.label}</div>
+                        <div className="atr-meta">Spend {money(data.byCountry.top.spend)} · CPA {unit(data.byCountry.top.cpa)}</div>
+                      </div>
+                    </div>
+                  </>
+                )}
+                <table className="ads-tbl" style={{ marginTop: 14 }}>
+                  <thead><tr><th className="l">Country</th><th>Spend</th><th>Purch.</th><th>ROAS</th></tr></thead>
+                  <tbody>
+                    {data.byCountry.rows.map((r) => (
+                      <tr key={r.key}>
+                        <td className="l">{r.label}</td>
+                        <td className="num">{money(r.spend)}</td>
+                        <td className="num">{formatNumber(r.purchases)}</td>
+                        <td className="num">{formatRoas(r.roas)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="ads-empty">Country breakdown not synced yet. Run <code>meta:backfill-breakdown country</code> for this brand.</div>
+          )}
+        </div>
+
+        <div className="ads-panel">
+          <div className="ads-ph"><h3>Performance by device</h3></div>
+          <div className="ads-psub">Purchases by device</div>
+          {data.byDevice.hasData ? (
+            <DeviceDonut device={data.byDevice} />
+          ) : (
+            <div className="ads-empty">Device breakdown not synced yet. Run <code>meta:backfill-breakdown device</code> for this brand.</div>
+          )}
+        </div>
+      </div>
+
+      {/* Campaign analysis */}
+      <div className="ads-panel">
+        <div className="acamp-head">
+          <div>
+            <div className="ads-ph"><h3>Campaign analysis</h3></div>
+            <div className="ads-psub">Attributed performance by campaign · click a row to drill in</div>
+          </div>
+        </div>
+        {data.campaigns.length > 0 ? (
+          <CampaignTable rows={data.campaigns} money={money} unit={unit} />
+        ) : (
+          <div className="ads-empty">No campaign data in this window yet. Run <code>ads:backfill-campaigns</code> for this brand.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---- KPI helpers ----------------------------------------------------- */
+
+function Delta({ v, goodUp }: { v: number | null; goodUp: boolean }) {
+  if (v == null) return <span className="akpi-delta">—</span>;
+  const up = v >= 0;
+  const good = goodUp ? up : !up;
+  return (
+    <span className="akpi-delta">
+      <span style={{ color: good ? '#16A34A' : '#B91C1C' }}>{up ? '▲' : '▼'}</span> {Math.abs(v)}%
+    </span>
+  );
+}
+
+function Spark({ series, color }: { series: number[]; color: string }) {
+  const d = useMemo(() => {
+    if (series.length < 2) return '';
+    const min = Math.min(...series);
+    const max = Math.max(...series);
+    const span = max - min || 1;
+    const n = series.length;
+    const pts = series.map((v, i) => {
+      const x = (i / (n - 1)) * 78;
+      const y = 28 - ((v - min) / span) * 24;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    return `M0,32 L${pts.join(' L')} L78,32 Z`;
+  }, [series]);
+  if (!d) return <span className="akpi-spark" />;
+  return (
+    <svg className="akpi-spark" viewBox="0 0 78 32" preserveAspectRatio="none">
+      <path d={d} fill={color} fillOpacity={0.22} />
+    </svg>
+  );
+}
+
+function EffStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="ads-eff-stat">
+      <span className="l">{label}</span>
+      <span className="v num">{value}</span>
+    </div>
+  );
+}
+
+/* ---- Trends (dual axis) ---------------------------------------------- */
+
+function TrendChart({ trend }: { trend: AdsTrendPoint[] }) {
+  if (trend.length < 2) {
+    return <div className="ads-empty" style={{ height: 220 }}>Not enough days to chart yet.</div>;
+  }
+  const W = 900;
+  const H = 210;
+  const top = 8;
+  const bot = 196;
+  const leftMax = Math.max(1, ...trend.map((t) => Math.max(t.revenue, t.spend)));
+  const rightMax = Math.max(1, ...trend.map((t) => t.impressions));
+  const x = (i: number) => (i / (trend.length - 1)) * W;
+  const yL = (v: number) => bot - (v / leftMax) * (bot - top);
+  const yR = (v: number) => bot - (v / rightMax) * (bot - top);
+  const line = (acc: (t: AdsTrendPoint) => number, y: (v: number) => number) =>
+    trend.map((t, i) => `${x(i).toFixed(1)},${y(acc(t)).toFixed(1)}`).join(' ');
+
+  const gridY = [top, top + (bot - top) / 3, top + (2 * (bot - top)) / 3, bot];
+
+  return (
+    <>
+      <div className="atrend-legend" style={{ marginBottom: 6 }}>
+        <span><i style={{ background: '#2563EB' }} />Revenue</span>
+        <span><i style={{ background: '#22C55E' }} />Spend</span>
+        <span><i style={{ background: '#0EA5B7' }} />Impressions</span>
+      </div>
+      <svg className="atrend-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ height: 200 }}>
+        {gridY.map((gy, i) => (
+          <line key={i} x1={0} y1={gy} x2={W} y2={gy} stroke="#E7E5E4" strokeWidth={1} strokeDasharray={i === 0 || i === 3 ? undefined : '2 6'} />
+        ))}
+        <polyline points={line((t) => t.impressions, yR)} fill="none" stroke="#0EA5B7" strokeWidth={1.8} strokeLinejoin="round" />
+        <polyline points={line((t) => t.spend, yL)} fill="none" stroke="#22C55E" strokeWidth={1.8} strokeLinejoin="round" />
+        <polyline points={line((t) => t.revenue, yL)} fill="none" stroke="#2563EB" strokeWidth={2} strokeLinejoin="round" />
+      </svg>
+      <div className="atrend-x">
+        <span>{shortDate(trend[0].date)}</span>
+        <span>{shortDate(trend[Math.floor(trend.length / 2)].date)}</span>
+        <span>{shortDate(trend[trend.length - 1].date)}</span>
+      </div>
+    </>
+  );
+}
+
+/* ---- Funnel ---------------------------------------------------------- */
+
+function Funnel({ steps }: { steps: AdsFunnelStep[] }) {
+  return (
+    <div className="afunnel">
+      <div className="afunnel-col left">
+        {steps.map((st) => (
+          <div key={st.key}>
+            <div className="lb">{st.label}{st.pending && <span className="pend">soon</span>}</div>
+            <div className="vv">{st.value != null ? formatNumber(st.value) : '—'}</div>
+          </div>
+        ))}
+      </div>
+      <svg className="afunnel-svg" viewBox="0 0 150 210" width={128} height={200} preserveAspectRatio="none">
+        <path d="M10,5 L140,5 C122,58 88,100 82,145 L82,205 L68,205 L68,145 C62,100 28,58 10,5 Z" fill="#2F5AE8" />
+      </svg>
+      <div className="afunnel-col right">
+        {steps.map((st, i) => {
+          const prev = steps[i - 1];
+          const rate = prev && prev.value && st.value != null ? Math.round((st.value / prev.value) * 100) : null;
+          return <div className="fd" key={st.key} style={{ color: 'var(--a-muted)' }}>{rate != null ? `${rate}%` : ''}</div>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---- Device donut ---------------------------------------------------- */
+
+function DeviceDonut({ device }: { device: AdsByDevice }) {
+  const rows = device.rows.slice(0, 5);
+  let offset = 0;
+  const arcs = rows.map((r, i) => {
+    const len = Math.max(0, Math.min(100, r.pct));
+    const arc = { color: DEVICE_COLORS[i % DEVICE_COLORS.length], dash: `${Math.max(len - 1.2, 0.5)} ${100 - Math.max(len - 1.2, 0.5)}`, offset: -offset };
+    offset += len;
+    return arc;
+  });
+  return (
+    <>
+      <div className="adev-donut">
+        <svg viewBox="0 0 200 200">
+          <g transform="rotate(-90 100 100)" fill="none" strokeWidth={16} strokeLinecap="round">
+            <circle cx={100} cy={100} r={72} stroke="#EDEBEA" />
+            {arcs.map((a, i) => (
+              <circle key={i} cx={100} cy={100} r={72} stroke={a.color} pathLength={100} strokeDasharray={a.dash} strokeDashoffset={a.offset} />
+            ))}
+          </g>
+        </svg>
+        <div className="adev-center"><span>Total</span><b>{formatNumber(device.total)}</b></div>
+      </div>
+      <div className="adev-leg">
+        {rows.map((r, i) => (
+          <div className="r" key={r.label}>
+            <span className="sw" style={{ background: DEVICE_COLORS[i % DEVICE_COLORS.length] }} />
+            <span className="nm">{r.label}</span>
+            <b>{formatNumber(r.value)}</b>
+            <span className="pct">({r.pct}%)</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ---- Campaign table -------------------------------------------------- */
+
+function CampaignTable({ rows, money, unit }: { rows: AdsCampaignRow[]; money: (v: number | null) => string; unit: (v: number | null) => string }) {
+  const maxSpend = Math.max(1, ...rows.map((r) => r.spend));
+  return (
+    <table className="ads-tbl acamp-tbl">
+      <thead>
+        <tr>
+          <th className="l">Campaign</th>
+          <th className="l">Spend</th>
+          <th>Revenue</th>
+          <th>ROAS</th>
+          <th>Purch.</th>
+          <th>CPA</th>
+          <th>CTR</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.id}>
+            <td className="l acamp-name">{r.name}</td>
+            <td className="l">
+              <span className="acamp-barcell">
+                <span className="acamp-num">{money(r.spend)}</span>
+                <span className="acamp-bar" style={{ width: `${Math.max(6, (r.spend / maxSpend) * 70)}px` }} />
+              </span>
+            </td>
+            <td className="num">{money(r.revenue)}</td>
+            <td className="num">{formatRoas(r.roas)}</td>
+            <td className="num">{formatNumber(r.purchases)}</td>
+            <td className="num">{unit(r.cpa)}</td>
+            <td className="num">{r.ctr != null ? `${r.ctr}%` : '—'}</td>
+            <td className="l"><button type="button" className="acamp-view">View →</button></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/* ---- Icons + date helpers -------------------------------------------- */
+
+function IconTrend() { return <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M3 3v18h18" /><path d="m19 9-5 5-4-4-3 3" /></svg>; }
+function IconMoney() { return <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.9"><line x1="12" y1="2" x2="12" y2="22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>; }
+function IconCart() { return <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.9"><circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" /><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.6L23 6H6" /></svg>; }
+function IconTarget() { return <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.9"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" /></svg>; }
+function IconBag() { return <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></svg>; }
+
+function shortDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+function rangeLabel(from: string, to: string): string {
+  return `${shortDate(from)} – ${shortDate(to)}`;
+}

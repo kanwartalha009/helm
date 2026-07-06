@@ -56,6 +56,16 @@ const NAV: NavSection[] = [
         ),
       },
       {
+        to: '/ads',
+        label: 'Ads',
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+            <path d="M3 11v2a1 1 0 0 0 1 1h3l4 4V6L7 10H4a1 1 0 0 0-1 1z" />
+            <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+          </svg>
+        ),
+      },
+      {
         to: '/reports',
         label: 'Reports',
         icon: (
