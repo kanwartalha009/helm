@@ -42,7 +42,53 @@ class BrandResource extends JsonResource
             // decrypted — usually APP_KEY drift. UI surfaces this as
             // "credentials unreadable — re-enter required".
             'shopifyAppCorrupted' => $this->resource->shopifyAppCorrupted(),
+
+            // List-view extras — present only when the relations are eager-loaded
+            // (BrandController::index), so store/update stay lean and there's no N+1.
+            'platforms'       => $this->when($this->relationLoaded('connections'), fn () => $this->activePlatforms()),
+            'connectionCount' => $this->when($this->relationLoaded('connections'), fn () => count($this->activePlatforms())),
+            'lastSyncAt'      => $this->when($this->relationLoaded('connections'), fn () => $this->latestSyncAt()),
+            'assignedUsers'   => $this->when($this->relationLoaded('users'), fn () => $this->assignedTeam()),
         ];
+    }
+
+    /** @return array<int, string> active platform names, e.g. ['shopify','meta']. */
+    private function activePlatforms(): array
+    {
+        return $this->connections
+            ->filter(fn ($c) => $c->status === 'active')
+            ->pluck('platform')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** ISO-8601 of the freshest connection sync across the brand, or null if never synced. */
+    private function latestSyncAt(): ?string
+    {
+        $latest = $this->connections->pluck('last_sync_at')->filter()->max();
+
+        return $latest ? \Carbon\CarbonImmutable::parse($latest)->toIso8601String() : null;
+    }
+
+    /** @return array<int, array{id:int,name:string,initials:string}> assigned team. */
+    private function assignedTeam(): array
+    {
+        return $this->users->map(fn ($u) => [
+            'id'       => $u->id,
+            'name'     => $u->name,
+            'initials' => $this->initialsFor((string) $u->name),
+        ])->values()->all();
+    }
+
+    private function initialsFor(string $name): string
+    {
+        $parts = preg_split('/\s+/', trim($name)) ?: [$name];
+        if (count($parts) >= 2) {
+            return mb_strtoupper(mb_substr($parts[0], 0, 1) . mb_substr($parts[1], 0, 1));
+        }
+
+        return mb_strtoupper(mb_substr($name, 0, 2));
     }
 
     private function resolveShopDomain(): ?string

@@ -99,10 +99,9 @@ export function InventoryTable(props: Props) {
         background: 'var(--surface)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-lg)',
-        overflow: 'hidden',
       }}
     >
-      <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
+      <div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>

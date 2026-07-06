@@ -4,15 +4,20 @@ import { AppLayout } from '@/components/shell/AppLayout';
 import {
   Avatar,
   Banner,
-  Button,
   Card,
-  Chip,
   PageEmptyState,
   PageHeader,
-  Tag,
 } from '@/components/ui';
 import { useBrandsLive } from '@/hooks/useApiData';
 import { useUiStore } from '@/stores/uiStore';
+import { timeAgo } from '@/lib/formatters';
+
+const PLATFORM_LABEL: Record<string, string> = {
+  shopify: 'Shopify',
+  meta: 'Meta',
+  google: 'Google',
+  tiktok: 'TikTok',
+};
 
 export function BrandsPage() {
   const { data: brands = [], isLoading, isError, error } = useBrandsLive();
@@ -139,21 +144,17 @@ export function BrandsPage() {
           onChange={(e) => setQ(e.target.value)}
           style={{ maxWidth: 280 }}
         />
-        <span style={{ flex: 1 }} />
-        <Chip>All groups</Chip>
-        <Chip>All currencies</Chip>
-        <Chip>All regions</Chip>
       </div>
 
       <Card style={{ overflow: 'hidden' }}>
         <table className="data-table">
           <thead>
             <tr>
-              <th style={{ width: '30%' }}>Brand</th>
+              <th style={{ width: '28%' }}>Brand</th>
               <th>Region</th>
               <th>Connections</th>
+              <th>Assigned</th>
               <th>Last sync</th>
-              <th>Group</th>
               <th />
             </tr>
           </thead>
@@ -178,10 +179,50 @@ export function BrandsPage() {
                   {brand.region} · {brand.baseCurrency}
                 </td>
                 <td>
-                  <span className="muted text-sm">—</span>
+                  {brand.connectionCount ? (
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                      <span style={{ fontWeight: 600 }}>{brand.connectionCount}</span>
+                      <span className="muted text-sm">
+                        {(brand.platforms ?? []).map((p) => PLATFORM_LABEL[p] ?? p).join(' · ')}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="muted text-sm">Not connected</span>
+                  )}
                 </td>
-                <td className="muted text-sm">—</td>
-                <td>{brand.groupTag && <Tag>{brand.groupTag}</Tag>}</td>
+                <td>
+                  {brand.assignedUsers && brand.assignedUsers.length > 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {brand.assignedUsers.slice(0, 3).map((u) => (
+                        <span
+                          key={u.id}
+                          title={u.name}
+                          style={{
+                            width: 24,
+                            height: 24,
+                            borderRadius: '50%',
+                            background: 'var(--surface-subtle)',
+                            border: '1px solid var(--border)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 10,
+                            fontWeight: 500,
+                            color: 'var(--text-secondary)',
+                          }}
+                        >
+                          {u.initials}
+                        </span>
+                      ))}
+                      {brand.assignedUsers.length > 3 && (
+                        <span className="muted text-sm">+{brand.assignedUsers.length - 3}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="muted text-sm">—</span>
+                  )}
+                </td>
+                <td className="muted text-sm">{timeAgo(brand.lastSyncAt)}</td>
                 <td className="text-right">
                   <Link to={`/brands/${brand.slug}`} className="btn btn-ghost btn-sm">
                     Open →
@@ -200,18 +241,8 @@ export function BrandsPage() {
         </table>
       </Card>
 
-      <div className="flex items-center justify-between mt-24">
-        <div className="text-xs muted">
-          Showing {filtered.length} of {brands.length} {brands.length === 1 ? 'brand' : 'brands'}
-        </div>
-        <div className="flex items-center gap-8">
-          <Button size="sm" variant="secondary">
-            Previous
-          </Button>
-          <Button size="sm" variant="secondary">
-            Next
-          </Button>
-        </div>
+      <div className="text-xs muted mt-24">
+        Showing {filtered.length} of {brands.length} {brands.length === 1 ? 'brand' : 'brands'}
       </div>
     </AppLayout>
   );

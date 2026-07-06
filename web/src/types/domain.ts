@@ -60,6 +60,11 @@ export interface Brand {
   // Drives the OAuth flow UI — when false, the Client ID + Secret fields
   // appear; when true, just the shop domain field.
   hasShopifyApp?: boolean;
+  // List-view extras from GET /brands (present on the Brands index only).
+  platforms?: Platform[];
+  connectionCount?: number;
+  lastSyncAt?: string | null;
+  assignedUsers?: { id: number; name: string; initials: string }[];
 }
 
 export interface PlatformConnection {

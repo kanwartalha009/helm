@@ -63,6 +63,24 @@ export function pctDelta(
   return ((current - prior) / prior) * 100;
 }
 
+// Relative time — "2 hours ago", "3 days ago". Null/invalid → "—". Used for
+// last-sync columns where an exact timestamp is noise.
+export function timeAgo(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '—';
+  const mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+  const months = Math.round(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`;
+  return `${Math.round(months / 12)} year${Math.round(months / 12) === 1 ? '' : 's'} ago`;
+}
+
 export type DeltaDirection = 'up' | 'down' | 'flat';
 
 export function deltaDirection(value: number | null): DeltaDirection {

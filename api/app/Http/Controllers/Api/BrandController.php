@@ -29,6 +29,13 @@ class BrandController extends Controller
             ->when($request->query('status'), fn ($q, $v) => $q->where('status', $v))
             ->when($request->query('group_tag'), fn ($q, $v) => $q->where('group_tag', $v))
             ->when($request->query('search'), fn ($q, $v) => $q->where('name', 'ilike', "%{$v}%"))
+            // Eager-load for the list columns: connection summary (count / platforms
+            // / freshest sync) and the assigned team. Also removes the shopDomain
+            // N+1 the resource previously ran once per row.
+            ->with([
+                'connections:id,brand_id,platform,status,last_sync_at,external_id',
+                'users:id,name',
+            ])
             ->orderBy('name')
             ->get();
 
