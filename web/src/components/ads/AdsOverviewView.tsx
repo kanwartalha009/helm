@@ -1,11 +1,14 @@
-import { type ReactNode, useMemo } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { AdsRegionMap } from './AdsRegionMap';
+import { AdsCampaignDrawer } from './AdsCampaignDrawer';
 import { formatMoney, formatNumber, formatRoas } from '@/lib/formatters';
 import type {
   AdsByDevice,
   AdsCampaignRow,
   AdsFunnelStep,
   AdsOverviewResponse,
+  AdsPeriod,
+  AdsPlatform,
   AdsSummary,
   AdsTrendPoint,
 } from '@/types/ads';
@@ -15,11 +18,12 @@ type MetricKey = 'roas' | 'revenue' | 'purchases' | 'cpa' | 'aov';
 
 const DEVICE_COLORS = ['#2F6BE8', '#0EA5B7', '#16A34A', '#64748B', '#EC4899'];
 
-export function AdsOverviewView({ data }: { data: AdsOverviewResponse }) {
+export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOverviewResponse; slug?: string; period: AdsPeriod; platform: AdsPlatform }) {
   const currency = data.currency === 'usd' ? 'USD' : data.brand.baseCurrency || 'EUR';
   const money = (v: number | null) => formatMoney(v, currency, { whole: true });
   const unit = (v: number | null) => formatMoney(v, currency);
   const s = data.summary;
+  const [drill, setDrill] = useState<{ id: string; name: string } | null>(null);
 
   const kpis: Array<{ key: MetricKey; label: string; color: string; goodUp: boolean; fmt: (v: number | null) => string; series: (t: AdsTrendPoint) => number; icon: ReactNode }> = [
     { key: 'roas', label: 'ROAS', color: '#2563EB', goodUp: true, fmt: (v) => formatRoas(v), series: (t) => (t.spend > 0 ? t.revenue / t.spend : 0), icon: <IconTrend /> },
@@ -55,8 +59,8 @@ export function AdsOverviewView({ data }: { data: AdsOverviewResponse }) {
           <EffStat label="CPM" value={unit(s.cpm)} />
           <EffStat label="CPC" value={unit(s.cpc)} />
           <EffStat label="CTR" value={s.ctr != null ? `${s.ctr}%` : '—'} />
-          <EffStat label="Impressions" value={formatNumber(s.impressions)} />
-          <EffStat label="Clicks" value={formatNumber(s.clicks)} />
+          <EffStat label="Reach" value={s.reach != null ? formatNumber(s.reach) : '—'} />
+          <EffStat label="Frequency" value={s.frequency != null ? s.frequency.toFixed(2) : '—'} />
         </div>
       </div>
 
@@ -114,7 +118,7 @@ export function AdsOverviewView({ data }: { data: AdsOverviewResponse }) {
               </div>
             </div>
           ) : (
-            <div className="ads-empty">Country breakdown not synced yet. Run <code>meta:backfill-breakdown country</code> for this brand.</div>
+            <div className="ads-empty">{data.platform === 'meta' ? (<>Country breakdown not synced yet. Run <code>meta:backfill-breakdown country</code> for this brand.</>) : 'Region breakdown is available for Meta only.'}</div>
           )}
         </div>
 
@@ -124,7 +128,7 @@ export function AdsOverviewView({ data }: { data: AdsOverviewResponse }) {
           {data.byDevice.hasData ? (
             <DeviceDonut device={data.byDevice} />
           ) : (
-            <div className="ads-empty">Device breakdown not synced yet. Run <code>meta:backfill-breakdown device</code> for this brand.</div>
+            <div className="ads-empty">{data.platform === 'meta' ? (<>Device breakdown not synced yet. Run <code>meta:backfill-breakdown device</code> for this brand.</>) : 'Device breakdown is available for Meta only.'}</div>
           )}
         </div>
       </div>
@@ -138,11 +142,13 @@ export function AdsOverviewView({ data }: { data: AdsOverviewResponse }) {
           </div>
         </div>
         {data.campaigns.length > 0 ? (
-          <CampaignTable rows={data.campaigns} money={money} unit={unit} />
+          <CampaignTable rows={data.campaigns} money={money} unit={unit} onView={(id, name) => setDrill({ id, name })} />
         ) : (
           <div className="ads-empty">No campaign data in this window yet. Run <code>ads:backfill-campaigns</code> for this brand.</div>
         )}
       </div>
+
+      <AdsCampaignDrawer slug={slug} period={period} platform={platform} campaign={drill} onClose={() => setDrill(null)} />
     </div>
   );
 }
@@ -302,7 +308,7 @@ function DeviceDonut({ device }: { device: AdsByDevice }) {
 
 /* ---- Campaign table -------------------------------------------------- */
 
-function CampaignTable({ rows, money, unit }: { rows: AdsCampaignRow[]; money: (v: number | null) => string; unit: (v: number | null) => string }) {
+function CampaignTable({ rows, money, unit, onView }: { rows: AdsCampaignRow[]; money: (v: number | null) => string; unit: (v: number | null) => string; onView: (id: string, name: string) => void }) {
   const maxSpend = Math.max(1, ...rows.map((r) => r.spend));
   return (
     <table className="ads-tbl acamp-tbl">
@@ -333,7 +339,7 @@ function CampaignTable({ rows, money, unit }: { rows: AdsCampaignRow[]; money: (
             <td className="num">{formatNumber(r.purchases)}</td>
             <td className="num">{unit(r.cpa)}</td>
             <td className="num">{r.ctr != null ? `${r.ctr}%` : '—'}</td>
-            <td className="l"><button type="button" className="acamp-view">View →</button></td>
+            <td className="l"><button type="button" className="acamp-view" onClick={() => onView(r.id, r.name)}>View →</button></td>
           </tr>
         ))}
       </tbody>

@@ -37,6 +37,12 @@ final class MetricSnapshot
         public readonly ?array $metadata = null,
         /** Whether the day is fully closed. False for today (partial), true for any past day. */
         public readonly bool $isComplete = true,
+        // Meta funnel/efficiency fields (Ads hub). Null on non-Meta snapshots and
+        // on rows synced before these columns existed. reach is a daily unique
+        // count — a windowed sum is an upper bound; frequency is derived downstream.
+        public readonly ?int $reach = null,
+        public readonly ?int $linkClicks = null,
+        public readonly ?int $landingPageViews = null,
     ) {}
 
     /**
@@ -75,7 +81,10 @@ final class MetricSnapshot
             'impressions'      => $this->impressions,
             'clicks'           => $this->clicks,
             'conversions'      => $this->conversions,
-            'conversion_value' => $this->conversionValue,
+            'conversion_value'   => $this->conversionValue,
+            'reach'              => $this->reach,
+            'link_clicks'        => $this->linkClicks,
+            'landing_page_views' => $this->landingPageViews,
             'currency'         => $this->currency,
             'fx_rate_to_usd'   => $fxRateToUsd,
             'metadata'         => $metadata,
@@ -90,6 +99,7 @@ final class MetricSnapshot
         return [
             'revenue', 'revenue_net', 'net_sales', 'total_sales', 'orders', 'refunds_amount', 'refunded_orders',
             'spend', 'impressions', 'clicks', 'conversions', 'conversion_value',
+            'reach', 'link_clicks', 'landing_page_views',
             'currency', 'fx_rate_to_usd', 'metadata', 'is_complete', 'pulled_at',
         ];
     }

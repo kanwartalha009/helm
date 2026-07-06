@@ -5,7 +5,7 @@ import { Breadcrumb } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { AdsBrandOverview } from '@/components/ads/AdsBrandOverview';
 import { useBrand } from '@/hooks/useDashboardData';
-import type { AdsPeriod } from '@/types/ads';
+import type { AdsPeriod, AdsPlatform } from '@/types/ads';
 
 const PERIODS: { key: AdsPeriod; label: string }[] = [
   { key: 'last7', label: 'Last 7 days' },
@@ -21,6 +21,7 @@ export function BrandAdsPage() {
   const { slug } = useParams();
   const { data: brand } = useBrand(slug);
   const [period, setPeriod] = useState<AdsPeriod>('last30');
+  const [platform, setPlatform] = useState<AdsPlatform>('meta');
 
   return (
     <AppLayout title="Ad performance">
@@ -40,13 +41,13 @@ export function BrandAdsPage() {
         ))}
         <span style={{ flex: 1 }} />
         <div className="segmented">
-          <button type="button" className="active">Meta</button>
-          <button type="button" disabled title="Coming soon">Google</button>
+          <button type="button" className={platform === 'meta' ? 'active' : ''} onClick={() => setPlatform('meta')}>Meta</button>
+          <button type="button" className={platform === 'google' ? 'active' : ''} onClick={() => setPlatform('google')}>Google</button>
           <button type="button" disabled title="Coming soon">TikTok</button>
         </div>
       </div>
 
-      <AdsBrandOverview slug={slug} period={period} />
+      <AdsBrandOverview slug={slug} period={period} platform={platform} />
     </AppLayout>
   );
 }

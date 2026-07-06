@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Aggregation;
 
 use App\Models\AdCampaignDailyMetric;
+use App\Models\AdCreativeDaily;
 use App\Models\Brand;
 use App\Models\DailyMetric;
 use App\Models\MetaBreakdownDaily;
@@ -42,8 +43,10 @@ final class AdsOverviewQuery
      */
     public function run(Brand $brand, array $params): array
     {
-        $tz  = $brand->timezone ?: 'UTC';
-        $usd = strtoupper((string) ($params['currency'] ?? '')) === 'USD';
+        $tz       = $brand->timezone ?: 'UTC';
+        $usd      = strtoupper((string) ($params['currency'] ?? '')) === 'USD';
+        $platform = $this->resolvePlatform($params);
+        $isMeta   = $platform === 'meta';
 
         [$start, $end]           = $this->window($params, $tz);
         [$priorStart, $priorEnd] = $this->priorWindow($start, $end);
@@ -52,7 +55,7 @@ final class AdsOverviewQuery
         // to every money column so cross-currency views stay comparable.
         $money = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
 
-        $summary = $this->summary((int) $brand->id, $start, $end, $priorStart, $priorEnd, $money);
+        $summary = $this->summary((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money);
 
         return [
             'brand' => [
@@ -63,18 +66,24 @@ final class AdsOverviewQuery
                 'baseCurrency' => $brand->base_currency,
                 'timezone'     => $tz,
             ],
-            'platform'   => self::PLATFORM,
+            'platform'   => $platform,
             'period'     => strtolower((string) ($params['period'] ?? 'last30')),
             'from'       => $start,
             'to'         => $end,
             'currency'   => $usd ? 'usd' : 'native',
             'isComplete' => $summary['isComplete'],
             'summary'    => $summary['metrics'],
-            'trend'      => $this->trend((int) $brand->id, $start, $end, $money),
-            'funnel'     => $this->funnel($summary['metrics']),
-            'byCountry'  => $this->breakdown((int) $brand->id, 'country', $start, $end, $money),
-            'byDevice'   => $this->deviceSplit((int) $brand->id, $start, $end, $money),
-            'campaigns'  => $this->campaigns((int) $brand->id, $start, $end, $priorStart, $priorEnd, $money),
+            'trend'      => $this->trend((int) $brand->id, $platform, $start, $end, $money),
+            'funnel'     => $summary['funnel'],
+            // Breakdowns (map / donut / audience) live in meta_breakdown_daily —
+            // Meta only. For Google/TikTok they're not applicable, so the panels
+            // degrade to a "Meta only" state rather than show Meta's numbers under
+            // a Google view.
+            'byCountry'   => $isMeta ? $this->breakdown((int) $brand->id, 'country', $start, $end, $money) : $this->notApplicable(),
+            'byDevice'    => $isMeta ? $this->deviceSplit((int) $brand->id, $start, $end, $money) : ['hasData' => false, 'metric' => 'purchases', 'total' => 0, 'rows' => []],
+            'byAgeGender' => $isMeta ? $this->breakdown((int) $brand->id, 'age_gender', $start, $end, $money) : $this->notApplicable(),
+            'byPlacement' => $isMeta ? $this->breakdown((int) $brand->id, 'placement_platform', $start, $end, $money) : $this->notApplicable(),
+            'campaigns'   => $this->campaigns((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money),
         ];
     }
 
@@ -83,11 +92,11 @@ final class AdsOverviewQuery
      *
      * @return array{metrics: array<string, mixed>, isComplete: bool}
      */
-    private function summary(int $brandId, string $start, string $end, string $priorStart, string $priorEnd, callable $money): array
+    private function summary(int $brandId, string $platform, string $start, string $end, string $priorStart, string $priorEnd, callable $money): array
     {
         $agg = fn (string $s, string $e) => DailyMetric::query()
             ->where('brand_id', $brandId)
-            ->where('platform', self::PLATFORM)
+            ->where('platform', $platform)
             ->whereBetween('date', [$s, $e])
             ->selectRaw(
                 'COALESCE(SUM(' . $money('spend') . "), 0)            AS spend,
@@ -95,11 +104,18 @@ final class AdsOverviewQuery
                  COALESCE(SUM(conversions), 0)                        AS purchases,
                  COALESCE(SUM(impressions), 0)                        AS impressions,
                  COALESCE(SUM(clicks), 0)                             AS clicks,
+                 COALESCE(SUM(reach), 0)                              AS reach,
+                 COALESCE(SUM(link_clicks), 0)                        AS link_clicks,
+                 COALESCE(SUM(landing_page_views), 0)                 AS landing_page_views,
+                 COUNT(reach)                                         AS reach_n,
+                 COUNT(link_clicks)                                   AS lc_n,
+                 COUNT(landing_page_views)                            AS lpv_n,
                  SUM(CASE WHEN is_complete THEN 1 ELSE 0 END)         AS complete_days"
             )
             ->first();
 
-        $metrics = $this->derive($agg($start, $end));
+        $cur     = $agg($start, $end);
+        $metrics = $this->derive($cur);
         $prior   = $this->derive($agg($priorStart, $priorEnd));
 
         $delta = [];
@@ -111,11 +127,18 @@ final class AdsOverviewQuery
         // Freshness gate (Bosco, 2026-06-30): only "complete" when every day in the
         // window has a finalized Meta row — otherwise the sync hasn't fully run and
         // the frontend renders an amber "not synced", never a partial-window total.
-        $cur          = $agg($start, $end);
+        // reach/frequency — null (not 0) until the funnel fields have been synced
+        // for this window (reach_n = 0 = every day predates the backfill). reach
+        // summed across days is an upper bound, so frequency is an approximation.
+        $reachN = (int) ($cur->reach_n ?? 0);
+        $reach  = (int) ($cur->reach ?? 0);
+        $metrics['reach']     = $reachN > 0 ? $reach : null;
+        $metrics['frequency'] = ($reachN > 0 && $reach > 0) ? round((int) $metrics['impressions'] / $reach, 2) : null;
+
         $expectedDays = (int) CarbonImmutable::parse($start)->diffInDays(CarbonImmutable::parse($end)) + 1;
         $isComplete   = $expectedDays > 0 && (int) ($cur->complete_days ?? 0) >= $expectedDays;
 
-        return ['metrics' => $metrics, 'isComplete' => $isComplete];
+        return ['metrics' => $metrics, 'isComplete' => $isComplete, 'funnel' => $this->funnel($metrics, $cur)];
     }
 
     /**
@@ -163,11 +186,11 @@ final class AdsOverviewQuery
      *
      * @return array<int, array<string, mixed>>
      */
-    private function trend(int $brandId, string $start, string $end, callable $money): array
+    private function trend(int $brandId, string $platform, string $start, string $end, callable $money): array
     {
         return DailyMetric::query()
             ->where('brand_id', $brandId)
-            ->where('platform', self::PLATFORM)
+            ->where('platform', $platform)
             ->whereBetween('date', [$start, $end])
             ->groupBy('date')
             ->orderBy('date')
@@ -192,21 +215,25 @@ final class AdsOverviewQuery
     }
 
     /**
-     * Purchase funnel. Impressions + Purchases are stored today; Link clicks and
-     * Add to cart need the deferred Meta field additions (inline_link_clicks /
-     * the add_to_cart action) — they render as `pending` until that ships, never
-     * as a fake number.
+     * Purchase funnel: Impressions → Link clicks → Landing views → Purchases. A
+     * middle step is `pending` (value null) only when EVERY day in the window
+     * predates the funnel-field sync (its COUNT is 0) — so it reads "not synced",
+     * never a fake 0. Once `ads:backfill-spend` or the daily sync fills the days,
+     * real values appear.
      *
      * @param array<string, mixed> $m
      * @return array<int, array<string, mixed>>
      */
-    private function funnel(array $m): array
+    private function funnel(array $m, object $cur): array
     {
+        $lcN  = (int) ($cur->lc_n ?? 0);
+        $lpvN = (int) ($cur->lpv_n ?? 0);
+
         return [
-            ['key' => 'impressions', 'label' => 'Impressions', 'value' => (int) $m['impressions'], 'pending' => false],
-            ['key' => 'link_clicks', 'label' => 'Link clicks', 'value' => null,                    'pending' => true],
-            ['key' => 'add_to_cart', 'label' => 'Add to cart', 'value' => null,                    'pending' => true],
-            ['key' => 'purchases',   'label' => 'Purchases',   'value' => (int) $m['purchases'],   'pending' => false],
+            ['key' => 'impressions',        'label' => 'Impressions',   'value' => (int) $m['impressions'],                          'pending' => false],
+            ['key' => 'link_clicks',        'label' => 'Link clicks',   'value' => $lcN > 0 ? (int) $cur->link_clicks : null,        'pending' => $lcN === 0],
+            ['key' => 'landing_page_views', 'label' => 'Landing views', 'value' => $lpvN > 0 ? (int) $cur->landing_page_views : null, 'pending' => $lpvN === 0],
+            ['key' => 'purchases',          'label' => 'Purchases',     'value' => (int) $m['purchases'],                            'pending' => false],
         ];
     }
 
@@ -305,11 +332,11 @@ final class AdsOverviewQuery
      *
      * @return array<int, array<string, mixed>>
      */
-    private function campaigns(int $brandId, string $start, string $end, string $priorStart, string $priorEnd, callable $money): array
+    private function campaigns(int $brandId, string $platform, string $start, string $end, string $priorStart, string $priorEnd, callable $money): array
     {
         $agg = fn (string $s, string $e) => AdCampaignDailyMetric::query()
             ->where('brand_id', $brandId)
-            ->where('platform', self::PLATFORM)
+            ->where('platform', $platform)
             ->whereBetween('date', [$s, $e])
             ->groupBy('campaign_id')
             ->selectRaw(
@@ -351,6 +378,169 @@ final class AdsOverviewQuery
                 'deltaImpressions' => $this->pctDelta((float) $priorImpr, (float) $impr),
             ];
         })->sortByDesc('spend')->values()->all();
+    }
+
+    /**
+     * One campaign's detail for the drill-down drawer: KPI summary (+ prior-window
+     * deltas) and a daily trend, from ad_campaign_daily_metrics scoped to the
+     * campaign. reach/frequency are null here — those live at the account level
+     * (daily_metrics), not per campaign — so the shape still matches the summary.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    public function campaignDetail(Brand $brand, string $campaignId, array $params): array
+    {
+        $tz       = $brand->timezone ?: 'UTC';
+        $usd      = strtoupper((string) ($params['currency'] ?? '')) === 'USD';
+        $platform = $this->resolvePlatform($params);
+
+        [$start, $end]           = $this->window($params, $tz);
+        [$priorStart, $priorEnd] = $this->priorWindow($start, $end);
+
+        $money = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+
+        $agg = fn (string $s, string $e) => AdCampaignDailyMetric::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', $platform)
+            ->where('campaign_id', $campaignId)
+            ->whereBetween('date', [$s, $e])
+            ->selectRaw(
+                'MAX(campaign_name) AS campaign_name,
+                 MAX(status)        AS status,
+                 COALESCE(SUM(' . $money('spend') . "), 0)            AS spend,
+                 COALESCE(SUM(" . $money('conversion_value') . "), 0) AS revenue,
+                 COALESCE(SUM(conversions), 0)                        AS purchases,
+                 COALESCE(SUM(impressions), 0)                        AS impressions,
+                 COALESCE(SUM(clicks), 0)                             AS clicks"
+            )
+            ->first();
+
+        $cur     = $agg($start, $end);
+        $metrics = $this->derive($cur);
+        $prior   = $this->derive($agg($priorStart, $priorEnd));
+
+        $delta = [];
+        foreach (['spend', 'revenue', 'purchases', 'roas', 'cpa', 'aov', 'cpm', 'cpc', 'ctr', 'impressions', 'clicks'] as $k) {
+            $delta[$k] = $this->pctDelta((float) ($prior[$k] ?? 0), (float) ($metrics[$k] ?? 0));
+        }
+        $metrics['delta']     = $delta;
+        $metrics['reach']     = null;
+        $metrics['frequency'] = null;
+
+        $trend = AdCampaignDailyMetric::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', $platform)
+            ->where('campaign_id', $campaignId)
+            ->whereBetween('date', [$start, $end])
+            ->groupBy('date')
+            ->orderBy('date')
+            ->selectRaw(
+                'date,
+                 COALESCE(SUM(' . $money('spend') . "), 0)            AS spend,
+                 COALESCE(SUM(" . $money('conversion_value') . "), 0) AS revenue,
+                 COALESCE(SUM(conversions), 0)                        AS purchases,
+                 COALESCE(SUM(impressions), 0)                        AS impressions,
+                 COALESCE(SUM(clicks), 0)                             AS clicks"
+            )
+            ->get()
+            ->map(static fn ($r) => [
+                'date'        => CarbonImmutable::parse((string) $r->date)->toDateString(),
+                'spend'       => round((float) $r->spend, 2),
+                'revenue'     => round((float) $r->revenue, 2),
+                'purchases'   => (int) $r->purchases,
+                'impressions' => (int) $r->impressions,
+                'clicks'      => (int) $r->clicks,
+            ])
+            ->all();
+
+        return [
+            'campaign' => [
+                'id'     => $campaignId,
+                'name'   => (string) ($cur->campaign_name ?: $campaignId),
+                'status' => $cur->status ? (string) $cur->status : null,
+            ],
+            'period'   => strtolower((string) ($params['period'] ?? 'last30')),
+            'from'     => $start,
+            'to'       => $end,
+            'currency' => $usd ? 'usd' : 'native',
+            'brand'    => ['baseCurrency' => $brand->base_currency],
+            'summary'  => $metrics,
+            'trend'    => $trend,
+        ];
+    }
+
+    /**
+     * Top creatives (Phase D) — ad-level rows from ad_creative_daily, summed over
+     * the window per ad, ranked by spend, with a thumbnail. Empty (hasData=false)
+     * until `meta:backfill-creatives` has run — the tab then shows "not synced",
+     * never a fake €0.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    public function creatives(Brand $brand, array $params): array
+    {
+        $tz       = $brand->timezone ?: 'UTC';
+        $usd      = strtoupper((string) ($params['currency'] ?? '')) === 'USD';
+        $platform = $this->resolvePlatform($params);
+
+        [$start, $end] = $this->window($params, $tz);
+        $money = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+
+        $rows = AdCreativeDaily::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', $platform)
+            ->whereBetween('date', [$start, $end])
+            ->groupBy('ad_id')
+            ->selectRaw(
+                'ad_id,
+                 MAX(ad_name)       AS ad_name,
+                 MAX(campaign_id)   AS campaign_id,
+                 MAX(thumbnail_url) AS thumbnail_url,
+                 COALESCE(SUM(' . $money('spend') . "), 0)            AS spend,
+                 COALESCE(SUM(" . $money('conversion_value') . "), 0) AS revenue,
+                 COALESCE(SUM(conversions), 0)                        AS purchases,
+                 COALESCE(SUM(impressions), 0)                        AS impressions,
+                 COALESCE(SUM(clicks), 0)                             AS clicks"
+            )
+            ->get();
+
+        $base = [
+            'from'         => $start,
+            'to'           => $end,
+            'currency'     => $usd ? 'usd' : 'native',
+            'baseCurrency' => $brand->base_currency,
+        ];
+
+        if ($rows->isEmpty()) {
+            return $base + ['hasData' => false, 'rows' => []];
+        }
+
+        $mapped = $rows->map(static function ($r) {
+            $spend = round((float) $r->spend, 2);
+            $rev   = round((float) $r->revenue, 2);
+            $purch = (int) $r->purchases;
+            $impr  = (int) $r->impressions;
+            $clk   = (int) $r->clicks;
+
+            return [
+                'adId'        => (string) $r->ad_id,
+                'name'        => (string) ($r->ad_name ?: $r->ad_id),
+                'campaignId'  => $r->campaign_id ? (string) $r->campaign_id : null,
+                'thumbnail'   => $r->thumbnail_url ? (string) $r->thumbnail_url : null,
+                'spend'       => $spend,
+                'revenue'     => $rev,
+                'purchases'   => $purch,
+                'impressions' => $impr,
+                'clicks'      => $clk,
+                'roas'        => $spend > 0 ? round($rev / $spend, 2) : null,
+                'cpa'         => $purch > 0 ? round($spend / $purch, 2) : null,
+                'ctr'         => $impr > 0 ? round($clk / $impr * 100, 2) : null,
+            ];
+        })->sortByDesc('spend')->values()->take(40)->all();
+
+        return $base + ['hasData' => true, 'rows' => $mapped];
     }
 
     /**
@@ -407,6 +597,20 @@ final class AdsOverviewQuery
         $priorStart = $priorEnd->subDays($len - 1);
 
         return [$priorStart->toDateString(), $priorEnd->toDateString()];
+    }
+
+    /** Validate the platform param; fall back to Meta. */
+    private function resolvePlatform(array $params): string
+    {
+        $p = strtolower(trim((string) ($params['platform'] ?? '')));
+
+        return in_array($p, ['meta', 'google', 'tiktok'], true) ? $p : self::PLATFORM;
+    }
+
+    /** Empty breakdown block for platforms whose breakdowns we don't store (non-Meta). */
+    private function notApplicable(): array
+    {
+        return ['hasData' => false, 'top' => null, 'rows' => []];
     }
 
     private function initials(string $name): string

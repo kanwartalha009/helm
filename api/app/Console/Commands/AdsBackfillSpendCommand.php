@@ -147,7 +147,7 @@ class AdsBackfillSpendCommand extends Command
                     DailyMetric::upsert(
                         $chunk,
                         ['brand_id', 'platform', 'date'],
-                        ['spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'metadata', 'is_complete', 'pulled_at'],
+                        ['spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'reach', 'link_clicks', 'landing_page_views', 'currency', 'fx_rate_to_usd', 'metadata', 'is_complete', 'pulled_at'],
                     );
                 }
 

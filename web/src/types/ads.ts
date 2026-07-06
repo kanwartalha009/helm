@@ -5,6 +5,7 @@
 // spend), not blended — an ads view ranks campaigns / countries / devices.
 
 export type AdsPeriod = 'last7' | 'last30' | 'mtd' | 'custom';
+export type AdsPlatform = 'meta' | 'google' | 'tiktok';
 
 export interface AdsBrand {
   id: number;
@@ -28,6 +29,10 @@ export interface AdsSummary {
   cpm: number | null;
   cpc: number | null;
   ctr: number | null;
+  // reach summed over a window is an upper bound; frequency = impressions ÷ reach
+  // (approximate). Both null until the funnel fields are synced for the window.
+  reach: number | null;
+  frequency: number | null;
   // % change vs the prior equal-length window, per metric key; null = no baseline.
   delta: Record<string, number | null>;
 }
@@ -109,5 +114,48 @@ export interface AdsOverviewResponse {
   funnel: AdsFunnelStep[];
   byCountry: AdsByCountry;
   byDevice: AdsByDevice;
+  // Demographic sub-views (Phase C) — same shape as byCountry. Empty until the
+  // age_gender / placement_platform breakdowns have been backfilled.
+  byAgeGender: AdsByCountry;
+  byPlacement: AdsByCountry;
   campaigns: AdsCampaignRow[];
+}
+
+// Campaign drill-down (Phase B) — one campaign's KPIs + daily trend.
+// summary reuses AdsSummary (reach/frequency are null — those live at the
+// account level, not per campaign).
+export interface AdsCampaignDetail {
+  campaign: { id: string; name: string; status: string | null };
+  period: AdsPeriod;
+  from: string;
+  to: string;
+  currency: string;
+  brand: { baseCurrency: string };
+  summary: AdsSummary;
+  trend: AdsTrendPoint[];
+}
+
+// Creatives (Phase D) — one ad-level card.
+export interface AdsCreative {
+  adId: string;
+  name: string;
+  campaignId: string | null;
+  thumbnail: string | null;
+  spend: number;
+  revenue: number;
+  purchases: number;
+  impressions: number;
+  clicks: number;
+  roas: number | null;
+  cpa: number | null;
+  ctr: number | null;
+}
+
+export interface AdsCreativesResponse {
+  hasData: boolean; // false until meta:backfill-creatives has run
+  from: string;
+  to: string;
+  currency: string;
+  baseCurrency: string;
+  rows: AdsCreative[];
 }

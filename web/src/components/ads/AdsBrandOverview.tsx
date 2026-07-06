@@ -1,16 +1,20 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Banner } from '@/components/ui';
+import { cn } from '@/lib/cn';
 import { AdsOverviewView } from './AdsOverviewView';
+import { AdsAudienceView } from './AdsAudienceView';
+import { AdsCreativesView } from './AdsCreativesView';
 import { useAdsOverview } from '@/hooks/useAdsOverview';
-import type { AdsPeriod } from '@/types/ads';
+import type { AdsPeriod, AdsPlatform } from '@/types/ads';
 
 /**
  * Loads one brand's Ads Overview for the chosen period and renders the states:
  * error, loading, the freshness banner (window not fully synced), then the view.
  * Shared by the /ads hub and the /brands/:slug/ads deep link.
  */
-export function AdsBrandOverview({ slug, period }: { slug: string | undefined; period: AdsPeriod }) {
-  const q = useAdsOverview(slug, period, undefined, undefined, !!slug);
+export function AdsBrandOverview({ slug, period, platform }: { slug: string | undefined; period: AdsPeriod; platform: AdsPlatform }) {
+  const q = useAdsOverview(slug, period, undefined, undefined, !!slug, platform);
+  const [tab, setTab] = useState<'overview' | 'audience' | 'creatives'>('overview');
 
   if (q.isError) {
     return <StateCard>Couldn’t load ad performance for this brand. Try refreshing, or check the brand’s Meta connection.</StateCard>;
@@ -29,7 +33,18 @@ export function AdsBrandOverview({ slug, period }: { slug: string | undefined; p
           </Banner>
         </div>
       )}
-      <AdsOverviewView data={q.data} />
+      <div className="filter-bar mb-12">
+        <button type="button" className={cn('chip', tab === 'overview' && 'active')} onClick={() => setTab('overview')}>Overview</button>
+        <button type="button" className={cn('chip', tab === 'audience' && 'active')} onClick={() => setTab('audience')}>Audience</button>
+        <button type="button" className={cn('chip', tab === 'creatives' && 'active')} onClick={() => setTab('creatives')}>Creatives</button>
+      </div>
+      {tab === 'overview' ? (
+        <AdsOverviewView data={q.data} slug={slug} period={period} platform={platform} />
+      ) : tab === 'audience' ? (
+        <AdsAudienceView data={q.data} />
+      ) : (
+        <AdsCreativesView slug={slug} period={period} platform={platform} />
+      )}
     </>
   );
 }

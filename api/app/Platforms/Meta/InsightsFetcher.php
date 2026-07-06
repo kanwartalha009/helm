@@ -35,6 +35,12 @@ final class InsightsFetcher
         'offsite_conversion.fb_pixel_purchase',
     ];
 
+    /** Landing-page-view action types in priority order — first present wins. */
+    private const LANDING_PAGE_VIEW_TYPES = [
+        'omni_landing_page_view',
+        'landing_page_view',
+    ];
+
     public function __construct(
         private readonly MetaClient $client,
         private readonly FxService $fx,
@@ -60,7 +66,7 @@ final class InsightsFetcher
         foreach ($accountIds as $accountId) {
             $body = $this->client->get(self::normalizeAccountId($accountId) . '/insights', [
                 'level'                           => 'account',
-                'fields'                          => 'spend,impressions,clicks,actions,action_values,account_currency',
+                'fields'                          => 'spend,impressions,clicks,reach,inline_link_clicks,actions,action_values,account_currency',
                 'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
                 'time_range'                      => json_encode(['since' => $day, 'until' => $day]),
                 'time_increment'                  => 1,
@@ -101,7 +107,7 @@ final class InsightsFetcher
         foreach ($accountIds as $accountId) {
             $rows = $this->client->paged(self::normalizeAccountId($accountId) . '/insights', [
                 'level'                           => 'account',
-                'fields'                          => 'spend,impressions,clicks,actions,action_values,account_currency',
+                'fields'                          => 'spend,impressions,clicks,reach,inline_link_clicks,actions,action_values,account_currency',
                 'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
                 'time_range'                      => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
                 'time_increment'                  => 1,
@@ -338,6 +344,9 @@ final class InsightsFetcher
         $impressions = 0;
         $clicks      = 0;
         $conversions = 0;
+        $reach            = 0;
+        $linkClicks       = 0;
+        $landingPageViews = 0;
         $spendByCcy  = [];
         $valueByCcy  = [];
 
@@ -345,6 +354,9 @@ final class InsightsFetcher
             $impressions += (int) ($s->impressions ?? 0);
             $clicks      += (int) ($s->clicks ?? 0);
             $conversions += (int) ($s->conversions ?? 0);
+            $reach            += (int) ($s->reach ?? 0);
+            $linkClicks       += (int) ($s->linkClicks ?? 0);
+            $landingPageViews += (int) ($s->landingPageViews ?? 0);
 
             $ccy = strtoupper($s->currency);
             $spendByCcy[$ccy] = ($spendByCcy[$ccy] ?? 0.0) + (float) ($s->spend ?? 0.0);
@@ -391,6 +403,9 @@ final class InsightsFetcher
                 'ad_account_ids'     => array_values(array_map([self::class, 'normalizeAccountId'], $accountIds)),
             ],
             isComplete: $isComplete,
+            reach: $reach,
+            linkClicks: $linkClicks,
+            landingPageViews: $landingPageViews,
         );
     }
 
@@ -417,6 +432,14 @@ final class InsightsFetcher
         $conversions     = (int) round(self::attributedTotal($row['actions'] ?? [], self::PURCHASE_ACTION_TYPES));
         $conversionValue = self::attributedTotal($row['action_values'] ?? [], self::PURCHASE_ACTION_TYPES);
 
+        // Funnel/efficiency fields — 0 (not null) when the account delivered but
+        // had none, so a re-synced day is distinguishable from a pre-migration
+        // null row. reach + inline_link_clicks are top-level insights fields;
+        // landing page views come from the actions array.
+        $reach            = (int) ($row['reach'] ?? 0);
+        $linkClicks       = (int) ($row['inline_link_clicks'] ?? 0);
+        $landingPageViews = (int) round(self::plainActionTotal($row['actions'] ?? [], self::LANDING_PAGE_VIEW_TYPES));
+
         return new MetricSnapshot(
             brandId: $brandId,
             platform: 'meta',
@@ -429,6 +452,9 @@ final class InsightsFetcher
             conversionValue: $conversionValue,
             metadata: ['attribution_window' => self::ATTRIBUTION_WINDOW],
             isComplete: $isComplete,
+            reach: $reach,
+            linkClicks: $linkClicks,
+            landingPageViews: $landingPageViews,
         );
     }
 
@@ -449,6 +475,28 @@ final class InsightsFetcher
                     continue;
                 }
                 $val = $action[self::ATTRIBUTION_WINDOW] ?? $action['value'] ?? 0;
+                return is_numeric($val) ? (float) $val : 0.0;
+            }
+        }
+
+        return 0.0;
+    }
+
+    /**
+     * Sum the plain (unattributed) value of the first present action type — used
+     * for funnel steps like landing_page_view that aren't attributed conversions.
+     *
+     * @param array<int, array<string, mixed>> $actions
+     * @param array<int, string> $types
+     */
+    private static function plainActionTotal(array $actions, array $types): float
+    {
+        foreach ($types as $type) {
+            foreach ($actions as $action) {
+                if (! is_array($action) || ($action['action_type'] ?? null) !== $type) {
+                    continue;
+                }
+                $val = $action['value'] ?? 0;
                 return is_numeric($val) ? (float) $val : 0.0;
             }
         }

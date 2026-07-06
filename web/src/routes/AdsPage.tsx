@@ -3,7 +3,7 @@ import { AppLayout } from '@/components/shell/AppLayout';
 import { cn } from '@/lib/cn';
 import { AdsBrandOverview } from '@/components/ads/AdsBrandOverview';
 import { useDashboardData } from '@/hooks/useDashboardData';
-import type { AdsPeriod } from '@/types/ads';
+import type { AdsPeriod, AdsPlatform } from '@/types/ads';
 import type { DashboardRow, DashboardRowBrand } from '@/types/domain';
 
 const PERIODS: { key: AdsPeriod; label: string }[] = [
@@ -20,6 +20,7 @@ const PERIODS: { key: AdsPeriod; label: string }[] = [
 export function AdsPage() {
   const [selectedSlug, setSelectedSlug] = useState<string | undefined>(undefined);
   const [period, setPeriod] = useState<AdsPeriod>('last30');
+  const [platform, setPlatform] = useState<AdsPlatform>('meta');
 
   const { data: rows = [], isLoading } = useDashboardData('me');
 
@@ -78,13 +79,13 @@ export function AdsPage() {
         ))}
         <span style={{ flex: 1 }} />
         <div className="segmented">
-          <button type="button" className="active">Meta</button>
-          <button type="button" disabled title="Coming soon">Google</button>
+          <button type="button" className={platform === 'meta' ? 'active' : ''} onClick={() => setPlatform('meta')}>Meta</button>
+          <button type="button" className={platform === 'google' ? 'active' : ''} onClick={() => setPlatform('google')}>Google</button>
           <button type="button" disabled title="Coming soon">TikTok</button>
         </div>
       </div>
 
-      <AdsBrandOverview slug={selectedSlug} period={period} />
+      <AdsBrandOverview slug={selectedSlug} period={period} platform={platform} />
     </AppLayout>
   );
 }

@@ -139,6 +139,37 @@
 
 .ads-empty code { background: var(--a-subtle); border: 1px solid var(--a-border); border-radius: 4px; padding: 1px 5px; font-size: 12px; color: var(--a-sec); }
 
+/* Campaign drill-down drawer */
+.adrawer-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--a-border); border: 1px solid var(--a-border); border-radius: 8px; overflow: hidden; margin: 4px 0 16px; }
+.adrawer-kpi { background: var(--a-surface); padding: 11px 13px; }
+.adrawer-kpi-l { font-size: 11px; color: var(--a-muted); text-transform: uppercase; letter-spacing: .04em; }
+.adrawer-kpi-v { font-size: 19px; font-weight: 600; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+.adrawer-d { font-size: 11.5px; font-weight: 600; color: var(--a-sec); }
+.acamp-status { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--a-sec); background: var(--a-subtle); border: 1px solid var(--a-border); border-radius: 20px; padding: 2px 10px; margin-bottom: 12px; }
+
+/* Audience breakdown bars (Phase C) */
+.abrk { display: flex; flex-direction: column; gap: 9px; margin-top: 4px; }
+.abrk-row { display: grid; grid-template-columns: 128px 1fr 82px 52px; align-items: center; gap: 10px; }
+.abrk-head { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--a-muted); }
+.abrk-head .abrk-val, .abrk-head .abrk-roas { text-align: right; }
+.abrk-label { font-size: 12.5px; color: var(--a-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.abrk-track { height: 10px; background: var(--a-subtle); border-radius: 3px; overflow: hidden; }
+.abrk-bar { display: block; height: 100%; background: var(--a-blue-2); border-radius: 3px; }
+.abrk-val { font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.abrk-roas { font-size: 12.5px; text-align: right; color: var(--a-sec); font-variant-numeric: tabular-nums; }
+
+/* Creatives grid (Phase D) */
+.acrea-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; margin-top: 4px; }
+.acrea-card { border: 1px solid var(--a-border); border-radius: 10px; overflow: hidden; background: var(--a-surface); }
+.acrea-thumb { position: relative; aspect-ratio: 1 / 1; background: var(--a-subtle); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.acrea-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.acrea-noimg { font-size: 11px; color: var(--a-muted); }
+.acrea-roas { position: absolute; top: 8px; left: 8px; font-size: 11px; font-weight: 600; color: #fff; background: rgba(37,99,235,.92); border-radius: 6px; padding: 2px 7px; }
+.acrea-body { padding: 10px 11px; }
+.acrea-name { font-size: 12.5px; font-weight: 500; color: var(--a-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acrea-metrics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--a-muted); }
+.acrea-metrics b { color: var(--a-ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
 @media (max-width: 1024px) {
   .ads-grid-2, .aregion { grid-template-columns: 1fr; }
 }
