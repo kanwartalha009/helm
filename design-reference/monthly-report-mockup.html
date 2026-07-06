@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Monthly report — Ganzitos (mockup)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#FAFAF9; --surface:#FFF; --surface-subtle:#F5F5F4; --border:#E7E5E4; --border-strong:#D6D3D1;
+    --text:#0C0A09; --text-secondary:#57534E; --text-muted:#A8A29E;
+    --accent:#0C0A09; --accent-fg:#FAFAF9;
+    --success:#15803D; --success-bg:#F0FDF4; --warning:#B45309; --warning-bg:#FEF3C7; --danger:#B91C1C; --danger-bg:#FEF2F2;
+    /* Heat scale — soft, restrained (kept inside the Helm palette). */
+    --g1:#EAF6EE; --g2:#CFEBD8; --g3:#A7DCB8; --gfg:#14532D;
+    --r1:#FCECEC; --r2:#F7D3D3; --r3:#EFB4B4; --rfg:#7F1D1D;
+    --radius:6px; --radius-lg:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .doc{max-width:1120px;margin:0 auto;padding:28px 22px 80px}
+  .num{font-variant-numeric:tabular-nums}
+  .muted{color:var(--text-muted)}
+  a{color:inherit}
+
+  /* Report masthead */
+  .mast{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;padding-bottom:18px;border-bottom:1px solid var(--border);margin-bottom:26px}
+  .mast .ttl{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);font-weight:600}
+  .mast h1{font-size:26px;font-weight:600;letter-spacing:-.02em;margin:6px 0 0}
+  .mast .sub{color:var(--text-secondary);font-size:13px;margin-top:4px}
+  .brandtag{display:inline-flex;align-items:center;gap:9px}
+  .brandtag .ini{width:30px;height:30px;border-radius:7px;background:var(--accent);color:var(--accent-fg);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+  .mast .meta{text-align:right;font-size:12px;color:var(--text-muted);line-height:1.7}
+
+  /* Headline stat band */
+  .band{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:30px}
+  .band .c{background:var(--surface);padding:14px 16px}
+  .band .l{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);font-weight:500}
+  .band .v{font-size:23px;font-weight:600;margin-top:5px}
+  .band .d{font-size:12px;margin-top:3px;font-weight:500}
+  .pos{color:var(--success)} .neg{color:var(--danger)}
+
+  /* Section */
+  .sec{margin-bottom:34px}
+  .sec-h{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .sec-h .n{width:22px;height:22px;border-radius:50%;background:var(--surface-subtle);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .sec-h h2{font-size:16px;font-weight:600;letter-spacing:-.01em;margin:0}
+  .insight{display:inline-flex;align-items:center;gap:7px;background:var(--surface-subtle);border:1px solid var(--border);border-radius:20px;padding:3px 11px;font-size:12px;font-weight:500;color:var(--text);margin-bottom:12px;margin-left:34px}
+  .insight .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .insight.good{background:var(--success-bg);border-color:#BBF7D0;color:#166534}
+  .insight.good .dot{background:var(--success)}
+  .insight.warn{background:var(--warning-bg);border-color:var(--warning-border,#FCD34D);color:var(--warning)}
+  .insight.warn .dot{background:var(--warning)}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin-left:34px}
+  .scroll{overflow-x:auto}
+  table.rt{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.rt thead th{position:sticky;top:0;background:#12100F;color:#E7E5E4;text-align:right;font-weight:500;font-size:11px;padding:9px 11px;white-space:nowrap}
+  table.rt thead th.l{text-align:left}
+  table.rt tbody td{padding:8px 11px;border-top:1px solid var(--border);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  table.rt tbody td.l{text-align:left;font-weight:500}
+  table.rt tbody tr:hover td{background:var(--surface-subtle)}
+  table.rt tfoot td{padding:9px 11px;border-top:2px solid var(--border-strong);text-align:right;font-weight:600;background:var(--surface-subtle);font-variant-numeric:tabular-nums}
+  table.rt tfoot td.l{text-align:left}
+  .sub2{font-size:11px;color:var(--text-muted)}
+
+  /* Heat cells */
+  .g1{background:var(--g1)} .g2{background:var(--g2);color:var(--gfg)} .g3{background:var(--g3);color:var(--gfg);font-weight:600}
+  .r1{background:var(--r1)} .r2{background:var(--r2);color:var(--rfg)} .r3{background:var(--r3);color:var(--rfg);font-weight:600}
+
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500}
+  .pill.top{background:var(--success-bg);color:#166534} .pill.check{background:var(--warning-bg);color:var(--warning)} .pill.alarm{background:var(--danger-bg);color:var(--danger)}
+
+  .foot-note{margin-left:34px;margin-top:10px;font-size:11.5px;color:var(--text-muted)}
+
+  .todo{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;margin-left:34px}
+  .todo b{font-size:12px}
+  .todo ul{margin:8px 0 0;padding-left:18px;color:var(--text-secondary)}
+  .todo li{margin:3px 0}
+
+  .needs{display:flex;gap:10px;align-items:flex-start;background:var(--warning-bg);border:1px solid var(--warning-border,#FCD34D);border-radius:var(--radius-lg);padding:11px 14px;font-size:12.5px;color:var(--warning);margin-left:34px}
+  .needs b{color:#78350F}
+  .feas{margin-left:34px;margin-top:8px;font-size:11.5px;color:var(--text-muted)}
+  .tag{display:inline-block;font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:20px;vertical-align:middle;margin-left:8px}
+  .tag.have{background:var(--success-bg);color:#166534} .tag.build{background:var(--warning-bg);color:var(--warning)} .tag.ext{background:var(--danger-bg);color:var(--danger)}
+
+  /* Overall picture (lead summary) */
+  .overview{margin-bottom:34px}
+  .ov-h{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:600;margin-bottom:10px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:14px}
+  .kpi{background:var(--surface);padding:14px 16px}
+  .kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);font-weight:500}
+  .kpi .v{font-size:24px;font-weight:600;margin-top:5px}
+  .kpi .obj{font-size:11.5px;margin-top:4px;font-weight:500;color:var(--text-secondary)}
+  .kpi .obj.met{color:var(--success)} .kpi .obj.near{color:var(--warning)}
+  .commentary{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px}
+  .commentary .ch{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);font-weight:600;margin-bottom:8px}
+  .commentary p{margin:0 0 8px} .commentary ul{margin:8px 0 0;padding-left:18px;color:var(--text-secondary)}
+  .commentary li{margin:4px 0} .commentary b{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <!-- Masthead -->
+  <div class="mast">
+    <div>
+      <div class="ttl">Monthly report · June 2026</div>
+      <h1 class="brandtag"><span class="ini">GA</span> Ganzitos</h1>
+      <div class="sub">Online Store · EUR · before returns unless noted · prepared by Roasdriven</div>
+    </div>
+    <div class="meta">
+      Period 1–30 Jun 2026<br/>vs May 2026 (MoM) · vs Jun 2025 (YoY)<br/>Generated 3 Jul 2026
+    </div>
+  </div>
+
+  <!-- Overall picture — the summary the store owner reads first, then the breakdowns -->
+  <div class="overview">
+    <div class="ov-h">Overall picture — June 2026 close</div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Blended ROAS</div><div class="v">20.0×</div><div class="obj met">Target 20 · met ✓</div></div>
+      <div class="kpi"><div class="l">ROAS · new customer</div><div class="v">6.7×</div><div class="obj near">Target 7 · 96% there</div></div>
+      <div class="kpi"><div class="l">New-customer acquisition</div><div class="v pos">−8% YoY</div><div class="obj met">Best month year-over-year</div></div>
+      <div class="kpi"><div class="l">Revenue</div><div class="v">€44.3K</div><div class="obj muted">before returns · Online Store</div></div>
+    </div>
+    <div class="commentary">
+      <div class="ch">Commentary · written by the agency each month</div>
+      <p>June closed with <b>blended ROAS 20</b> and <b>new-customer ROAS 6.7</b> — against targets of 20 and 7, so right on the mark; the end-of-month sale launch helped. It was the <b>best year-over-year month for new-customer acquisition (−8% YoY)</b>.</p>
+      <ul>
+        <li><b>Brand-to-media</b> still hasn't taken off (now €30/day). Lower to €15/day and hold two weeks; if it still doesn't work, switch it off.</li>
+        <li><b>Always-on:</b> ride the sale and strong ROAS to invest more (up to €2–3k, scaling as results allow), and set a higher ROAS target for the sale period than June — around 25–30.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 1 · Market Revenue MoM -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">1</span><h2>Market revenue — month over month</h2></div>
+    <div class="insight good"><span class="dot"></span>Total +263% MoM · +52% YoY · +32% YTD</div>
+    <div class="feas">Data <span class="tag build">needs a market/tier grouping config</span> — revenue by country exists; tiers (T1/US/Asia…) map from country.</div>
+    <div class="card scroll">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Market</th><th>2024</th><th>2025</th><th>Nov 25</th><th>Dec 25</th><th>Jan 26</th>
+          <th>Δ MoM</th><th>Δ YoY</th><th>Δ YTD</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">Tier 1 (EU core)</td><td>€8.93M</td><td>€10.89M</td><td>€1.49M</td><td class="num">€731K</td><td>€2.47M</td><td class="g3">+237%</td><td class="g2">+66%</td><td class="g2">+40%</td></tr>
+          <tr><td class="l">Tier 4 (long tail)</td><td>€1.27M</td><td>€1.74M</td><td class="num">€235K</td><td class="num">€102K</td><td class="num">€380K</td><td class="g3">+273%</td><td class="g2">+61%</td><td class="g2">+56%</td></tr>
+          <tr><td class="l">US</td><td>€2.12M</td><td>€1.77M</td><td class="num">€296K</td><td class="num">€141K</td><td class="num">€382K</td><td class="g2">+172%</td><td class="g1">+29%</td><td class="r1">−4%</td></tr>
+          <tr><td class="l">Asia</td><td>€3.08M</td><td>€3.44M</td><td class="num">€607K</td><td class="num">€123K</td><td class="num">€767K</td><td class="g3">+523%</td><td class="g1">+26%</td><td class="g1">+25%</td></tr>
+        </tbody>
+        <tfoot><tr><td class="l">Total</td><td>€15.44M</td><td>€17.88M</td><td>€2.63M</td><td>€1.10M</td><td>€4.00M</td><td>+263%</td><td>+52%</td><td>+32%</td></tr></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- 2 · Country Revenue MoM -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">2</span><h2>Country revenue — month over month</h2></div>
+    <div class="insight"><span class="dot"></span>Top 5 countries hold 71% of revenue · watch US YTD (−4%)</div>
+    <div class="feas">Data <span class="tag have">have it</span> — commerce by country per day, rolled to months.</div>
+    <div class="card scroll">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Country</th><th>Oct</th><th>Nov</th><th>Dec</th><th>Jan 26</th><th>Rev 26</th><th>Rev 25</th><th>Δ YoY</th><th class="l">Tier</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">🇺🇸 United States</td><td class="num">€148K</td><td class="num">€296K</td><td class="num">€141K</td><td class="num g2">€212K</td><td>€212K</td><td>€273K</td><td class="r2">−22%</td><td class="l">Tier 1</td></tr>
+          <tr><td class="l">🇪🇸 Spain</td><td class="num">€61K</td><td class="num">€72K</td><td class="num">€59K</td><td class="num g2">€45K</td><td>€45K</td><td>€186K</td><td class="r3">−76%</td><td class="l">ES</td></tr>
+          <tr><td class="l">🇬🇧 United Kingdom</td><td class="num">€19K</td><td class="num">€28K</td><td class="num">€22K</td><td class="num g1">€19K</td><td>€19K</td><td>€61K</td><td class="r2">−69%</td><td class="l">Tier 2</td></tr>
+          <tr><td class="l">🇩🇪 Germany</td><td class="num">€14K</td><td class="num">€18K</td><td class="num">€12K</td><td class="num g1">€12K</td><td>€12K</td><td>€24K</td><td class="r2">−52%</td><td class="l">Tier 1</td></tr>
+          <tr><td class="l">🇫🇷 France</td><td class="num">€16K</td><td class="num">€21K</td><td class="num">€11K</td><td class="num g1">€11K</td><td>€11K</td><td>€29K</td><td class="r2">−61%</td><td class="l">Tier 1</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 3 · ROAS by Country MoM -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">3</span><h2>ROAS by country — month over month</h2></div>
+    <div class="insight good"><span class="dot"></span>Push FR, DE, GB, NL — strong ROAS, under-invested vs Tier 1 peers</div>
+    <div class="feas">Data <span class="tag have">have it</span> — Meta country spend (breakdown) ÷ commerce country revenue.</div>
+    <div class="card scroll">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Country</th><th>Sep</th><th>Oct</th><th>Nov</th><th>Dec</th><th>Jan 26</th><th>2026</th><th>2025</th><th>Meta 26</th><th class="l">Status</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">🇺🇸 US</td><td class="num r1">3.4</td><td class="num r1">4.6</td><td class="num g1">3.7</td><td class="num r1">3.5</td><td class="num r1">3.9</td><td class="g1">3.9</td><td>4.8</td><td class="num">€55.1K</td><td class="l"><span class="pill check">Check</span></td></tr>
+          <tr><td class="l">🇬🇧 GB</td><td class="num g1">4.0</td><td class="num g2">5.6</td><td class="num g1">3.5</td><td class="num g2">5.5</td><td class="num g3">8.0</td><td class="g2">5.5</td><td>4.1</td><td class="num">€3.4K</td><td class="l"><span class="pill top">Top</span></td></tr>
+          <tr><td class="l">🇩🇪 DE</td><td class="num g1">6.7</td><td class="num g1">6.1</td><td class="num g1">3.7</td><td class="num r1">3.2</td><td class="num g1">3.4</td><td class="g1">3.4</td><td>4.6</td><td class="num">€3.4K</td><td class="l"><span class="pill check">Check</span></td></tr>
+          <tr><td class="l">🇫🇷 FR</td><td class="num r1">4.4</td><td class="num g2">8.1</td><td class="num g1">4.9</td><td class="num r1">1.3</td><td class="num g3">9.2</td><td class="g1">3.4</td><td>4.5</td><td class="num">€3.3K</td><td class="l"><span class="pill check">Check</span></td></tr>
+          <tr><td class="l">🇳🇱 NL</td><td class="num g1">6.5</td><td class="num g3">9.5</td><td class="num g1">4.5</td><td class="num r2">0.7</td><td class="num g3">11.4</td><td class="g1">2.7</td><td>4.1</td><td class="num">€982</td><td class="l"><span class="pill check">Check</span></td></tr>
+          <tr><td class="l">🇨🇭 CH</td><td class="num g3">12.3</td><td class="num r2">1.0</td><td class="num g3">15.3</td><td class="num g2">4.2</td><td class="num r1">5.1</td><td class="g2">5.2</td><td>6.6</td><td class="num">€1.9K</td><td class="l"><span class="pill top">Top</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="foot-note">Green = above blended ROAS target · red = below. "Meta 26" is spend behind the ROAS, so low-spend high-ROAS countries (FR, DE, GB, NL) are the scaling opportunity.</div>
+  </div>
+
+  <!-- 4 · New vs Existing -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">4</span><h2>New vs existing customers</h2></div>
+    <div class="insight warn"><span class="dot"></span>Benchmark: existing revenue should stay &lt;15% — currently running higher, retention-heavy</div>
+    <div class="feas">Data <span class="tag build">needs the customer-type probe</span> — ShopifyQL new/returning split (probe built, not yet verified live).</div>
+    <div class="card scroll">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Month</th><th>AOV</th><th>%Ret.</th><th>Revenue</th><th>Spend</th><th>ROAS</th>
+          <th>New</th><th>Return</th><th>%Ret cust.</th><th>Total</th><th>CAC</th><th>ROAS new</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">Jan 26</td><td>€139</td><td class="num r1">10.2%</td><td>€81.7K</td><td class="num">€1.1K</td><td class="num g3">74.0</td><td>146</td><td>382</td><td class="num r2">72%</td><td>528</td><td>€8</td><td class="num g3">20.5</td></tr>
+          <tr><td class="l">Feb 26</td><td>€118</td><td class="num r2">13.7%</td><td>€77.9K</td><td class="num">€987</td><td class="num g2">78.9</td><td>130</td><td>416</td><td class="num r2">76%</td><td>546</td><td>€8</td><td class="num g3">18.8</td></tr>
+          <tr><td class="l">Mar 26</td><td>€167</td><td class="num r2">16.9%</td><td>€42.2K</td><td class="num">€1.1K</td><td class="num g1">38.5</td><td>60</td><td>166</td><td class="num r1">73%</td><td>226</td><td>€18</td><td class="num g2">10.2</td></tr>
+          <tr><td class="l">Apr 26</td><td>€143</td><td class="num r2">15.2%</td><td>€33.0K</td><td class="num">€1.2K</td><td class="num g1">27.3</td><td>57</td><td>157</td><td class="num r1">73%</td><td>214</td><td>€21</td><td class="num g1">7.3</td></tr>
+          <tr><td class="l">May 26</td><td>€160</td><td class="num r1">11.8%</td><td>€28.4K</td><td class="num">€1.5K</td><td class="num g1">18.5</td><td>52</td><td>110</td><td class="num r1">68%</td><td>162</td><td>€29</td><td class="num g1">6.0</td></tr>
+        </tbody>
+        <tfoot><tr><td class="l">Total</td><td>€143</td><td>12.3%</td><td>€854K</td><td>€44.5K</td><td>19.2</td><td>1,459</td><td>3,735</td><td>72%</td><td>5,194</td><td>€31</td><td>5.4</td></tr></tfoot>
+      </table>
+    </div>
+    <div class="foot-note">CAC = spend ÷ new customers · ROAS new = revenue ÷ spend on new-customer acquisition. "%Ret cust." above 72% flags an over-reliance on returning buyers.</div>
+  </div>
+
+  <!-- 5 · Ad Spend by Placement -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">5</span><h2>Ad spend by placement</h2></div>
+    <div class="insight warn"><span class="dot"></span>Goal &gt;80% vertical (Stories + Reels) — currently 55%. Shift budget off IG Feed.</div>
+    <div class="feas">Data <span class="tag build">mostly have it</span> — placement breakdown exists; Reach + Frequency need adding to the Meta pull.</div>
+    <div class="card scroll">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Placement</th><th>Cost</th><th>Reach</th><th>Freq</th><th>Clicks</th><th>CPC</th><th>CTR</th><th>CPM</th><th>%</th><th>Acc%</th><th class="l">Device</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">IG · Feed</td><td>€1,912</td><td class="num">134,678</td><td class="num r1">2.09</td><td>3,721</td><td class="num g1">0.51</td><td class="num">1.32</td><td class="num">6.79</td><td class="num g2">29%</td><td class="num">29%</td><td class="l">mobile</td></tr>
+          <tr><td class="l">IG · Reels</td><td>€1,700</td><td class="num">170,069</td><td class="num r1">2.23</td><td>3,549</td><td class="num g1">0.48</td><td class="num r1">0.94</td><td class="num g1">4.49</td><td class="num g2">26%</td><td class="num g1">54%</td><td class="l">mobile</td></tr>
+          <tr><td class="l">IG · Stories</td><td>€1,301</td><td class="num">87,062</td><td class="num r1">2.80</td><td>2,603</td><td class="num g1">0.50</td><td class="num">1.07</td><td class="num">5.34</td><td class="num g1">20%</td><td class="num g2">74%</td><td class="l">mobile</td></tr>
+          <tr><td class="l">FB · Feed</td><td>€938</td><td class="num">76,242</td><td class="num g1">3.10</td><td>3,425</td><td class="num g2">0.27</td><td class="num g1">1.45</td><td class="num g2">3.97</td><td class="num">14%</td><td class="num g2">88%</td><td class="l">mobile</td></tr>
+          <tr><td class="l">FB · Reels</td><td>€545</td><td class="num">71,070</td><td class="num r1">2.09</td><td>1,784</td><td class="num g2">0.31</td><td class="num">1.20</td><td class="num g2">3.68</td><td class="num">8%</td><td class="num g3">96%</td><td class="l">mobile</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="foot-note">IG Feed CPC runs 53% higher than Stories and 76% higher than Reels — vertical placements are the efficient spend.</div>
+  </div>
+
+  <!-- 6 · Ad Spend by Gender -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">6</span><h2>Ad spend by gender</h2></div>
+    <div class="insight good"><span class="dot"></span>97% women — audience is highly concentrated (by design)</div>
+    <div class="feas">Data <span class="tag have">have it</span> — age &amp; gender breakdown already synced (drives the dashboard Audience view).</div>
+    <div class="card scroll">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Gender</th><th>Cost</th><th>Reach</th><th>Freq</th><th>Clicks</th><th>CPC</th><th>CTR</th><th>CPM</th><th>%</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">Female</td><td class="g3">€8,635</td><td class="num">194,962</td><td class="num r2">4.66</td><td>13,677</td><td class="num">0.63</td><td class="num">1.51</td><td class="num">9.51</td><td class="num g3">97%</td></tr>
+          <tr><td class="l">Male</td><td>€241</td><td class="num">23,062</td><td class="num g1">2.01</td><td>1,438</td><td class="num g2">0.17</td><td class="num g2">3.10</td><td class="num g1">5.21</td><td class="num">3%</td></tr>
+          <tr><td class="l muted">Unknown</td><td class="muted">€40</td><td class="num muted">1,902</td><td class="num muted">2.59</td><td class="muted">96</td><td class="num muted">0.42</td><td class="num muted">1.95</td><td class="num muted">8.09</td><td class="num muted">0%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 7 · Best Categories MoM -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">7</span><h2>Best categories — month over month</h2></div>
+    <div class="insight"><span class="dot"></span>Capsule Collection leads at 30% of revenue · Iconic Sargadelos +1,879% YoY</div>
+    <div class="feas">Data <span class="tag have">have it</span> — commerce by category (product type) per month.</div>
+    <div class="card scroll">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Category</th><th>Oct</th><th>Nov</th><th>Dec</th><th>Jan 26</th><th>2025 %</th><th>2026 %</th><th>Δ YoY</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">Capsule Collection Camariñas</td><td class="num">€17.9K</td><td class="num">€29.5K</td><td class="num">€22.7K</td><td class="num g3">€26.2K</td><td class="num">10%</td><td class="num g3">30%</td><td class="g3">+429%</td></tr>
+          <tr><td class="l">Iconic Sargadelos</td><td class="num">€4.1K</td><td class="num">€5.6K</td><td class="num">€18.0K</td><td class="num g2">€18.5K</td><td class="num">14%</td><td class="num g2">21%</td><td class="g3">+1,879%</td></tr>
+          <tr><td class="l">Travel Camariñas</td><td class="num">€6.5K</td><td class="num">€18.6K</td><td class="num">€6.3K</td><td class="num g1">€1.4K</td><td class="num">5%</td><td class="num">2%</td><td class="g2">+340%</td></tr>
+          <tr><td class="l">Jewelry</td><td class="num">€1.6K</td><td class="num">€12.2K</td><td class="num">€11.6K</td><td class="num g1">€7.2K</td><td class="num">7%</td><td class="num g1">8%</td><td class="g3">+2,265%</td></tr>
+          <tr><td class="l">Grand Tour Cupid</td><td class="num">€1.4K</td><td class="num">€1.8K</td><td class="num">€1.6K</td><td class="num g1">€2.3K</td><td class="num">6%</td><td class="num">3%</td><td class="g1">+80%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 8 · Best Sellers MoM -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">8</span><h2>Best sellers — month over month (revenue)</h2></div>
+    <div class="insight"><span class="dot"></span>Chacha Mini Red Biser holds #1 — still selling strongly without the NICKI25 discount</div>
+    <div class="feas">Data <span class="tag have">have it</span> — commerce by product + live stock from the catalog (this is the Inventory report's data).</div>
+    <div class="card scroll">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Product</th><th>Nov</th><th>Dec</th><th>Jan 26</th><th>Last 6</th><th>Last6 %</th><th>Acc %</th><th>Stock</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">Chacha Mini Red Biser</td><td class="num">€509</td><td class="num">€7,154</td><td class="num g3">€6,784</td><td>€14,684</td><td class="num g2">4%</td><td class="num">4%</td><td class="num r1">4</td></tr>
+          <tr><td class="l">Tote Denim "Camariñas"</td><td class="num">€540</td><td class="num">€2,137</td><td class="num g3">€6,321</td><td>€9,197</td><td class="num g1">2%</td><td class="num">6%</td><td class="num r2">2</td></tr>
+          <tr><td class="l">Shella Mini Valentine's</td><td class="num r1">−€258</td><td class="num">€970</td><td class="num g3">€6,077</td><td>€10,102</td><td class="num g1">3%</td><td class="num">9%</td><td class="num r1">4</td></tr>
+          <tr><td class="l">Tote Denim "Camariñas" Fish</td><td class="num">€511</td><td class="num">€2,518</td><td class="num g2">€4,578</td><td>€8,904</td><td class="num g1">2%</td><td class="num">12%</td><td class="num r1">4</td></tr>
+          <tr><td class="l">True Love</td><td class="num">€864</td><td class="num">€2,071</td><td class="num g2">€4,320</td><td>€10,780</td><td class="num g1">3%</td><td class="num">15%</td><td class="num r2">3</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="foot-note">Amber stock = low (≤4). Pairs the sales momentum with reorder urgency, straight from the Inventory report.</div>
+  </div>
+
+  <!-- 9 · Ad Spend by Landing Page x Best Sellers -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">9</span><h2>Ad spend by landing page × best sellers</h2></div>
+    <div class="insight"><span class="dot"></span>Are the winners actually getting the ad budget? Spend vs sales per product.</div>
+    <div class="feas">Data <span class="tag build">have the pieces</span> — ad→product landing spend (ad_product_daily) joined to product revenue. Same join as the Inventory report.</div>
+    <div class="card scroll">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Product (landing)</th><th>Meta spend</th><th>Revenue</th><th>ROAS</th><th>Units</th><th>Stock</th><th class="l">Read</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">Chacha Mini Red Biser</td><td class="num">€1,150</td><td class="num">€6,784</td><td class="num g3">5.9×</td><td>50</td><td class="num r1">4</td><td class="l">Winner, low stock — reorder</td></tr>
+          <tr><td class="l">Tote Denim "Camariñas"</td><td class="num">€980</td><td class="num">€6,321</td><td class="num g3">6.4×</td><td>47</td><td class="num r2">2</td><td class="l">Winner, low stock — reorder</td></tr>
+          <tr><td class="l">True Love</td><td class="num">€1,420</td><td class="num">€4,320</td><td class="num g1">3.0×</td><td>33</td><td class="num r2">3</td><td class="l">Spend-heavy vs return</td></tr>
+          <tr><td class="l muted">Shella Mini Valentine's</td><td class="num muted">€0</td><td class="num">€6,077</td><td class="num muted">—</td><td>45</td><td class="num r1">4</td><td class="l">Selling organically — no spend behind it</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 10 · Funnel Web by Country -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">10</span><h2>Web funnel by country</h2></div>
+    <div class="insight"><span class="dot"></span>Where the drop-off is — sessions → add to cart → checkout → purchase</div>
+    <div class="needs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;flex:0 0 auto;margin-top:1px"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      <div><b>Needs a web-analytics source.</b> Session / add-to-cart / checkout funnel data isn't in Helm today — it lives in GA4 or Shopify's own analytics. This section is mocked below; building it needs a GA4 (or Shopify analytics) connection first.</div>
+    </div>
+    <div class="card scroll" style="margin-top:10px;opacity:.75">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Country</th><th>Sessions</th><th>Add to cart</th><th>Checkout</th><th>Purchase</th><th>CVR</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">🇺🇸 US</td><td class="num">42,180</td><td class="num">5,120</td><td class="num">2,340</td><td class="num">1,180</td><td class="num g1">2.8%</td></tr>
+          <tr><td class="l">🇪🇸 Spain</td><td class="num">31,540</td><td class="num">4,610</td><td class="num">2,010</td><td class="num">1,290</td><td class="num g2">4.1%</td></tr>
+          <tr><td class="l">🇬🇧 GB</td><td class="num">12,900</td><td class="num">1,410</td><td class="num">560</td><td class="num">238</td><td class="num r1">1.8%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 11 · Funnel Web by Landing Path -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">11</span><h2>Web funnel by landing path</h2></div>
+    <div class="insight"><span class="dot"></span>Which entry pages convert — landing URL → purchase</div>
+    <div class="needs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;flex:0 0 auto;margin-top:1px"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      <div><b>Needs a web-analytics source</b> (same as §10) — landing-path funnels require page-level session data from GA4 / Shopify analytics.</div>
+    </div>
+    <div class="card scroll" style="margin-top:10px;opacity:.75">
+      <table class="rt">
+        <thead><tr>
+          <th class="l">Landing path</th><th>Sessions</th><th>Add to cart</th><th>Checkout</th><th>Purchase</th><th>CVR</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="l">/products/chacha-mini-red</td><td class="num">8,420</td><td class="num">1,510</td><td class="num">720</td><td class="num">430</td><td class="num g2">5.1%</td></tr>
+          <tr><td class="l">/collections/capsule</td><td class="num">14,900</td><td class="num">1,120</td><td class="num">480</td><td class="num">210</td><td class="num r1">1.4%</td></tr>
+          <tr><td class="l">/ (home)</td><td class="num">22,300</td><td class="num">1,640</td><td class="num">690</td><td class="num">300</td><td class="num r1">1.3%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- To-do / discussion -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">12</span><h2>To discuss with the store</h2></div>
+    <div class="todo">
+      <b>A comentar (carried on every report)</b>
+      <ul>
+        <li>Campaigns — launches, discounts, Mother's Day (next 2 months)</li>
+        <li>Sold outs &amp; back-in-stock</li>
+        <li>New in (winners)</li>
+        <li>Collabs with influencers / brands</li>
+        <li>New countries · Wholesale (new retailers, agents)</li>
+        <li>Duties, taxes &amp; returns</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
