@@ -7,7 +7,7 @@ import { useInventory } from '@/hooks/useInventory';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { useUsers } from '@/hooks/useApiData';
 import { useCurrentUser } from '@/hooks/useSettings';
-import { formatMoney, formatNumber, formatPercent, formatRoas, pctDelta } from '@/lib/formatters';
+import { formatMoney, formatNumber, formatPercent, formatRoas, pctDelta, timeAgo } from '@/lib/formatters';
 import type { DashboardRow, DashboardRowBrand } from '@/types/domain';
 import type { CollectionGroup, InventoryPeriod, InventoryStatus } from '@/types/inventory';
 
@@ -246,7 +246,7 @@ export function InventoryPage() {
                 groupMode === 'collection'
                   ? `${collections.length} collection${collections.length === 1 ? '' : 's'}`
                   : `${data.products.length} products`
-              }`
+              } · Stock synced ${timeAgo(data.syncedAt)}`
             : selectedBrand?.name}
         </span>
       </div>

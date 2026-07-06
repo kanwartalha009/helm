@@ -130,12 +130,18 @@ final class InventoryQuery
         // the gap is the unattributed banner, which is exactly why it exists.
         $totalSpend = $sumSpend + $coll + $other;
 
+        // When the catalog was last snapshotted (shopify:sync-catalog) — surfaced
+        // on the page so the operator knows how fresh the stock figures are.
+        $syncedRaw = $products->max('captured_at');
+        $syncedAt  = $syncedRaw ? CarbonImmutable::parse((string) $syncedRaw)->toIso8601String() : null;
+
         return [
             'brand'    => ['id' => $brand->id, 'name' => $brand->name, 'slug' => $brand->slug, 'currency' => $ccy],
             'period'   => $period,
             'from'     => $from,
             'to'       => $to,
             'currency' => $ccy,
+            'syncedAt' => $syncedAt,
             'summary'  => [
                 'products'        => $products->count(),
                 'pause'           => $cPause,

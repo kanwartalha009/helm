@@ -68,6 +68,7 @@ export interface InventoryResponse {
   from: string; // Y-m-d, brand timezone
   to: string;   // Y-m-d, brand timezone (window ends yesterday)
   currency: string;
+  syncedAt: string | null; // ISO — when the catalog (stock) was last snapshotted
   summary: InventorySummary;
   unattributed: InventoryUnattributed;
   products: InventoryProduct[];
