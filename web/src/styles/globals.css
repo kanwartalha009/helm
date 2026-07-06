@@ -424,9 +424,13 @@ p {
 .page-scroll > * {
   position: sticky;
   left: 0;
+  /* Chrome (filter bars + their open dropdowns) must stack above the table's
+     sticky header (z-index 3), or the menus render behind the grid. */
+  z-index: 20;
 }
 .page-scroll > .table-region {
   position: static;
+  z-index: auto;
 }
 
 /* Filter chips */

@@ -38,7 +38,8 @@ class ShopifyBackfillCommerceCommand extends Command
     protected $signature = 'shopify:backfill-commerce '
         . '{brand? : slug or id; omit for all active brands} '
         . '{--since=2025-01-01 : first day to pull (Y-m-d)} '
-        . '{--dimension= : limit to one of country|product|category}';
+        . '{--dimension= : limit to one of country|product|category} '
+        . '{--missing : only brands/dimensions with NO existing rows (freshly added brands) — skips already-synced ones}';
 
     protected $description = 'Backfill Shopify sales by country / product / category into commerce_daily_metrics for the reporting engine.';
 
@@ -82,6 +83,7 @@ class ShopifyBackfillCommerceCommand extends Command
             return self::SUCCESS;
         }
 
+        $missing   = (bool) $this->option('missing');
         $totalRows = 0;
 
         foreach ($brands as $brand) {
@@ -97,6 +99,15 @@ class ShopifyBackfillCommerceCommand extends Command
             $months   = $this->monthWindows($since, $until);
 
             foreach ($dimensions as $type => $dim) {
+                if ($missing && CommerceDailyMetric::query()
+                    ->where('brand_id', $brand->id)
+                    ->where('dimension_type', $type)
+                    ->exists()
+                ) {
+                    $this->line("· {$brand->name} [{$type}]: already has data — skipped (--missing).");
+                    continue;
+                }
+
                 $dimRows = 0;
                 $failed  = 0;
 

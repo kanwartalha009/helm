@@ -30,7 +30,8 @@ class MetaBackfillBreakdownCommand extends Command
     protected $signature = 'meta:backfill-breakdown '
         . '{brand? : slug or id; omit for all active brands} '
         . '{--since=2025-01-01 : first day to pull (Y-m-d)} '
-        . '{--type=audience : audience|age_gender|placement_platform|placement|country|device|all}';
+        . '{--type=audience : audience|age_gender|placement_platform|placement|country|device|all} '
+        . '{--missing : only brands/types with NO existing rows (freshly added brands) — skips anything already synced, so a portfolio re-run stays light on Meta}';
 
     protected $description = 'Backfill Meta spend by audience/placement/etc. breakdown into meta_breakdown_daily.';
 
@@ -60,7 +61,12 @@ class MetaBackfillBreakdownCommand extends Command
             return self::SUCCESS;
         }
 
+        // --missing: only fill brands/types that have no rows yet (freshly added
+        // brands). Skips everything already synced, so re-running across the whole
+        // portfolio doesn't re-pull Meta for 70+ brands (rate-limit friendly).
+        $missing   = (bool) $this->option('missing');
         $totalRows = 0;
+        $skipped   = 0;
 
         foreach ($brands as $brand) {
             $conn = $brand->connections->firstWhere('platform', 'meta');
@@ -80,6 +86,15 @@ class MetaBackfillBreakdownCommand extends Command
             $fxCache  = [];
 
             foreach ($types as $type) {
+                if ($missing && MetaBreakdownDaily::query()
+                    ->where('brand_id', $brand->id)
+                    ->where('breakdown_type', $type)
+                    ->exists()
+                ) {
+                    $skipped++;
+                    continue; // already has this breakdown — leave it, --missing only fills gaps
+                }
+
                 $breakdowns = $map[$type];
                 $rows       = 0;
                 $failed     = false;
@@ -122,7 +137,8 @@ class MetaBackfillBreakdownCommand extends Command
             }
         }
 
-        $this->info("Done. {$totalRows} breakdown rows upserted across {$brands->count()} brand(s).");
+        $note = $missing && $skipped > 0 ? " ({$skipped} brand-type(s) already had data — skipped)" : '';
+        $this->info("Done. {$totalRows} breakdown rows upserted across {$brands->count()} brand(s){$note}.");
 
         return self::SUCCESS;
     }

@@ -27,7 +27,8 @@ class MetaBackfillAdProductsCommand extends Command
     protected $signature = 'meta:backfill-ad-products '
         . '{brand? : slug or id; omit for all active brands} '
         . '{--since=2025-01-01 : first day to pull (Y-m-d)} '
-        . '{--pause=2 : seconds to wait between brands — every brand shares the one org Meta token, so a cooldown keeps the portfolio run clear of error 17}';
+        . '{--pause=2 : seconds to wait between brands — every brand shares the one org Meta token, so a cooldown keeps the portfolio run clear of error 17} '
+        . '{--missing : only brands with NO ad_product_daily rows yet (freshly added brands) — skips already-synced ones so a re-run stays light on Meta}';
 
     protected $description = 'Backfill Meta spend attributed to Shopify products (by ad landing URL) into ad_product_daily.';
 
@@ -48,6 +49,7 @@ class MetaBackfillAdProductsCommand extends Command
         }
 
         $totalRows = 0;
+        $missing   = (bool) $this->option('missing');
         $pause     = max(0, (int) $this->option('pause'));
         $metaDone  = 0;
 
@@ -57,6 +59,10 @@ class MetaBackfillAdProductsCommand extends Command
                 continue; // brand doesn't run Meta
             }
             $conn->setRelation('brand', $brand);
+
+            if ($missing && AdProductDaily::query()->where('brand_id', $brand->id)->exists()) {
+                continue; // already has ad-product rows — --missing only fills new brands
+            }
 
             // Cool down between brands — the org token is shared, so back-to-back
             // brands stack onto one rate-limit bucket. Skipped before the first.
