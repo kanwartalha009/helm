@@ -34,8 +34,9 @@ final class AdsOverviewQuery
     /** Only Meta is wired today; the response shape is platform-agnostic. */
     private const PLATFORM = 'meta';
 
-    /** Country/device tables are long-tailed — cap the rows we ship. */
-    private const MAX_COUNTRY_ROWS = 12;
+    /** Country/device tables are long-tailed — cap the rows we ship (the UI shows
+     *  a top-N with a "View all" that reveals the rest up to this cap). */
+    private const MAX_COUNTRY_ROWS = 30;
 
     /**
      * @param array<string, mixed> $params  period|from|to|currency

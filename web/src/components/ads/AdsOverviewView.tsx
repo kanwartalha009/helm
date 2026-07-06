@@ -1,6 +1,7 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import { AdsRegionMap } from './AdsRegionMap';
 import { AdsCampaignDrawer } from './AdsCampaignDrawer';
+import { countryName } from './countryNames';
 import { formatMoney, formatNumber, formatRoas } from '@/lib/formatters';
 import type {
   AdsByDevice,
@@ -24,6 +25,8 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
   const unit = (v: number | null) => formatMoney(v, currency);
   const s = data.summary;
   const [drill, setDrill] = useState<{ id: string; name: string } | null>(null);
+  const [showAllRegions, setShowAllRegions] = useState(false);
+  const [showAllCampaigns, setShowAllCampaigns] = useState(false);
 
   const kpis: Array<{ key: MetricKey; label: string; color: string; goodUp: boolean; fmt: (v: number | null) => string; series: (t: AdsTrendPoint) => number; icon: ReactNode }> = [
     { key: 'roas', label: 'ROAS', color: '#2563EB', goodUp: true, fmt: (v) => formatRoas(v), series: (t) => (t.spend > 0 ? t.revenue / t.spend : 0), icon: <IconTrend /> },
@@ -96,7 +99,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--text-secondary)" strokeWidth="1.6"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0Z" /><circle cx="12" cy="10" r="3" /></svg>
                       </span>
                       <div style={{ flex: 1 }}>
-                        <div className="atr-name">{data.byCountry.top.label}</div>
+                        <div className="atr-name">{countryName(data.byCountry.top.label)}</div>
                         <div className="atr-meta">Spend {money(data.byCountry.top.spend)} · CPA {unit(data.byCountry.top.cpa)}</div>
                       </div>
                     </div>
@@ -105,9 +108,9 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
                 <table className="ads-tbl" style={{ marginTop: 14 }}>
                   <thead><tr><th className="l">Country</th><th>Spend</th><th>Purch.</th><th>ROAS</th></tr></thead>
                   <tbody>
-                    {data.byCountry.rows.map((r) => (
+                    {(showAllRegions ? data.byCountry.rows : data.byCountry.rows.slice(0, 6)).map((r) => (
                       <tr key={r.key}>
-                        <td className="l">{r.label}</td>
+                        <td className="l">{countryName(r.label)}</td>
                         <td className="num">{money(r.spend)}</td>
                         <td className="num">{formatNumber(r.purchases)}</td>
                         <td className="num">{formatRoas(r.roas)}</td>
@@ -115,6 +118,13 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
                     ))}
                   </tbody>
                 </table>
+                {data.byCountry.rows.length > 6 && (
+                  <div className="ads-viewall" style={{ marginTop: 8 }}>
+                    <button type="button" onClick={() => setShowAllRegions((v) => !v)}>
+                      {showAllRegions ? 'Show less' : `All regions (${data.byCountry.rows.length})`}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -142,7 +152,16 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
           </div>
         </div>
         {data.campaigns.length > 0 ? (
-          <CampaignTable rows={data.campaigns} money={money} unit={unit} onView={(id, name) => setDrill({ id, name })} />
+          <>
+            <CampaignTable rows={showAllCampaigns ? data.campaigns : data.campaigns.slice(0, 10)} money={money} unit={unit} onView={(id, name) => setDrill({ id, name })} />
+            {data.campaigns.length > 10 && (
+              <div className="ads-viewall">
+                <button type="button" onClick={() => setShowAllCampaigns((v) => !v)}>
+                  {showAllCampaigns ? 'Show fewer' : `View all ${data.campaigns.length} campaigns →`}
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <div className="ads-empty">No campaign data in this window yet. Run <code>ads:backfill-campaigns</code> for this brand.</div>
         )}
@@ -243,25 +262,35 @@ function TrendChart({ trend }: { trend: AdsTrendPoint[] }) {
 
 /* ---- Funnel ---------------------------------------------------------- */
 
+const FUNNEL_PATH =
+  'M45,10 L215,10 C210,50 192,70 190,95 C188,130 168,165 162,190 C156,215 140,232 137,250 L137,372 L123,372 L123,250 C120,232 104,215 98,190 C92,165 72,130 70,95 C68,70 50,50 45,10 Z';
+
 function Funnel({ steps }: { steps: AdsFunnelStep[] }) {
   return (
-    <div className="afunnel">
-      <div className="afunnel-col left">
-        {steps.map((st) => (
-          <div key={st.key}>
-            <div className="lb">{st.label}{st.pending && <span className="pend">soon</span>}</div>
-            <div className="vv">{st.value != null ? formatNumber(st.value) : '—'}</div>
-          </div>
-        ))}
-      </div>
-      <svg className="afunnel-svg" viewBox="0 0 150 210" width={128} height={200} preserveAspectRatio="none">
-        <path d="M10,5 L140,5 C122,58 88,100 82,145 L82,205 L68,205 L68,145 C62,100 28,58 10,5 Z" fill="#2F5AE8" />
+    <div className="lf-body">
+      {/* Smooth funnel silhouette with a soft glow (the approved mockup design). */}
+      <svg className="lf-svg" viewBox="0 0 260 376" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <filter id="adsFunnelGlow" x="-40%" y="-15%" width="180%" height="130%">
+            <feGaussianBlur stdDeviation="5" />
+          </filter>
+        </defs>
+        <path d={FUNNEL_PATH} fill="#AFC7F7" filter="url(#adsFunnelGlow)" />
+        <path d={FUNNEL_PATH} fill="#2F5AE8" />
       </svg>
-      <div className="afunnel-col right">
+      <div className="lf-stages">
         {steps.map((st, i) => {
           const prev = steps[i - 1];
-          const rate = prev && prev.value && st.value != null ? Math.round((st.value / prev.value) * 100) : null;
-          return <div className="fd" key={st.key} style={{ color: 'var(--a-muted)' }}>{rate != null ? `${rate}%` : ''}</div>;
+          const drop = prev && prev.value && st.value != null ? Math.max(0, Math.round(100 - (st.value / prev.value) * 100)) : null;
+          return (
+            <div className="lf-stage" key={st.key}>
+              <div className="lf-label">
+                <div className="lb">{st.label}{st.pending && <span className="pend">soon</span>}</div>
+                <div className="vv">{st.value != null ? formatNumber(st.value) : '—'}</div>
+              </div>
+              {drop != null && <span className="lf-pill">↓ {drop}%</span>}
+            </div>
+          );
         })}
       </div>
     </div>

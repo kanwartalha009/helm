@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { ADS_MAP } from './worldMapData';
+import { countryName } from './countryNames';
 import type { AdsCountryRow } from '@/types/ads';
 
 /**
@@ -118,8 +119,26 @@ export function AdsRegionMap({ rows }: { rows: AdsCountryRow[] }) {
         <rect x={-2000} y={-2000} width={6000} height={6000} fill="#EEF3FB" />
         <g ref={gRef}>
           <path d={ADS_MAP.land} fill="#C6DBF4" stroke="#A9C6EC" strokeWidth={0.5} strokeLinejoin="round" />
-          {dots.map((d) => (
-            <circle key={d.key} cx={d.x} cy={d.y} r={d.r} fill="#2F6BE8" fillOpacity={0.8} stroke="#fff" strokeWidth={0.9} />
+          {dots.map((d, i) => (
+            <g key={d.key}>
+              <circle cx={d.x} cy={d.y} r={d.r} fill="#2F6BE8" fillOpacity={0.82} stroke="#fff" strokeWidth={0.9} />
+              {i < 12 && (
+                <text
+                  x={d.x}
+                  y={d.y - d.r - 2.5}
+                  fontSize={11}
+                  fontWeight={600}
+                  textAnchor="middle"
+                  fill="#33507A"
+                  stroke="#EEF3FB"
+                  strokeWidth={2.6}
+                  paintOrder="stroke"
+                  style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
+                >
+                  {countryName(d.key)}
+                </text>
+              )}
+            </g>
           ))}
         </g>
       </svg>
