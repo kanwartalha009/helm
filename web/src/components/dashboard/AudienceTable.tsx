@@ -71,7 +71,7 @@ export function AudienceTable({ data }: Props) {
   const hasRemainder = columns.some((c) => c.kind === 'remainder');
 
   return (
-    <Card style={{ overflowX: 'auto' }}>
+    <Card style={{ overflow: 'visible' }}>
       <table className="data-table wide-table audience-table">
         <thead>
           <tr>

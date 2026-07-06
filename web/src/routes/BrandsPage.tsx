@@ -7,8 +7,13 @@ import {
   Card,
   PageEmptyState,
   PageHeader,
+  Popover,
+  PopoverDivider,
+  PopoverItem,
+  PopoverLabel,
 } from '@/components/ui';
-import { useBrandsLive } from '@/hooks/useApiData';
+import { useBrandsLive, useUsers } from '@/hooks/useApiData';
+import { useCurrentUser } from '@/hooks/useSettings';
 import { useUiStore } from '@/stores/uiStore';
 import { timeAgo } from '@/lib/formatters';
 
@@ -23,6 +28,12 @@ export function BrandsPage() {
   const { data: brands = [], isLoading, isError, error } = useBrandsLive();
   const openAddBrand = useUiStore((s) => s.setAddBrandDrawerOpen);
   const [q, setQ] = useState('');
+  // Filter brands by their assigned team member (client-side over the loaded set,
+  // which already carries assignedUsers). Admin/manager only, mirroring the dashboard.
+  const { data: user } = useCurrentUser();
+  const canFilterByManager = user?.role === 'master_admin' || user?.role === 'manager';
+  const { data: users = [] } = useUsers(canFilterByManager);
+  const [assignedFilter, setAssignedFilter] = useState<string>('all');
 
   if (isLoading) {
     return (
@@ -123,13 +134,29 @@ export function BrandsPage() {
   }
 
   const query = q.trim().toLowerCase();
-  const filtered = query
-    ? brands.filter(
-        (b) =>
-          b.name.toLowerCase().includes(query) ||
-          (b.shopDomain ?? '').toLowerCase().includes(query),
-      )
-    : brands;
+  const filtered = brands.filter((b) => {
+    if (
+      query &&
+      !b.name.toLowerCase().includes(query) &&
+      !(b.shopDomain ?? '').toLowerCase().includes(query)
+    ) {
+      return false;
+    }
+    if (assignedFilter === 'all') return true;
+    const assigned = b.assignedUsers ?? [];
+    if (assignedFilter === 'unassigned') return assigned.length === 0;
+    if (assignedFilter === 'me') return user != null && assigned.some((u) => u.id === user.id);
+    return assigned.some((u) => String(u.id) === assignedFilter);
+  });
+
+  const assignedLabel =
+    assignedFilter === 'all'
+      ? 'All'
+      : assignedFilter === 'me'
+        ? 'My brands'
+        : assignedFilter === 'unassigned'
+          ? 'No user assigned'
+          : users.find((u) => String(u.id) === assignedFilter)?.name ?? 'Assigned';
 
   return (
     <AppLayout title="Brands" tag={`${brands.length} total`}>
@@ -144,6 +171,46 @@ export function BrandsPage() {
           onChange={(e) => setQ(e.target.value)}
           style={{ maxWidth: 280 }}
         />
+        {canFilterByManager && (
+          <Popover
+            trigger={
+              <button className="filter-btn">
+                Assigned: <strong style={{ fontWeight: 500 }}>{assignedLabel}</strong>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+            }
+          >
+            <PopoverLabel>Assigned to</PopoverLabel>
+            <PopoverItem active={assignedFilter === 'all'} onClick={() => setAssignedFilter('all')}>
+              All brands
+            </PopoverItem>
+            <PopoverItem active={assignedFilter === 'me'} onClick={() => setAssignedFilter('me')}>
+              My brands
+            </PopoverItem>
+            <PopoverItem active={assignedFilter === 'unassigned'} onClick={() => setAssignedFilter('unassigned')}>
+              No user assigned
+            </PopoverItem>
+            {users.filter((u) => u.status === 'active').length > 0 && (
+              <>
+                <PopoverDivider />
+                <PopoverLabel>By user</PopoverLabel>
+                {users
+                  .filter((u) => u.status === 'active')
+                  .map((u) => (
+                    <PopoverItem
+                      key={u.id}
+                      active={assignedFilter === String(u.id)}
+                      onClick={() => setAssignedFilter(String(u.id))}
+                    >
+                      {u.name}
+                    </PopoverItem>
+                  ))}
+              </>
+            )}
+          </Popover>
+        )}
       </div>
 
       <Card style={{ overflow: 'hidden' }}>
@@ -192,30 +259,32 @@ export function BrandsPage() {
                 </td>
                 <td>
                   {brand.assignedUsers && brand.assignedUsers.length > 0 ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {brand.assignedUsers.slice(0, 3).map((u) => (
-                        <span
-                          key={u.id}
-                          title={u.name}
-                          style={{
-                            width: 24,
-                            height: 24,
-                            borderRadius: '50%',
-                            background: 'var(--surface-subtle)',
-                            border: '1px solid var(--border)',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: 10,
-                            fontWeight: 500,
-                            color: 'var(--text-secondary)',
-                          }}
-                        >
-                          {u.initials}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      {brand.assignedUsers.slice(0, 2).map((u) => (
+                        <span key={u.id} title={u.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: '50%',
+                              background: 'var(--surface-subtle)',
+                              border: '1px solid var(--border)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: 10,
+                              fontWeight: 500,
+                              color: 'var(--text-secondary)',
+                              flex: '0 0 auto',
+                            }}
+                          >
+                            {u.initials}
+                          </span>
+                          <span style={{ fontSize: 13 }}>{u.name.split(/\s+/)[0]}</span>
                         </span>
                       ))}
-                      {brand.assignedUsers.length > 3 && (
-                        <span className="muted text-sm">+{brand.assignedUsers.length - 3}</span>
+                      {brand.assignedUsers.length > 2 && (
+                        <span className="muted text-sm">+{brand.assignedUsers.length - 2}</span>
                       )}
                     </div>
                   ) : (
