@@ -424,9 +424,13 @@ p {
 .page-scroll > * {
   position: sticky;
   left: 0;
-  /* Chrome (filter bars + their open dropdowns) must stack above the table's
-     sticky header (z-index 3), or the menus render behind the grid. */
-  z-index: 20;
+  /* Chrome pins left on horizontal scroll and sits above the table header (z 3). */
+  z-index: 10;
+}
+/* Filter bars sit above the rest of the chrome (banner, context, cards) so an
+   OPEN dropdown isn't painted over by a later sibling like the info banner. */
+.page-scroll > .filter-bar {
+  z-index: 30;
 }
 .page-scroll > .table-region {
   position: static;
@@ -570,6 +574,10 @@ td.col-group-start {
   left: 0;
   z-index: 40;
   min-width: 240px;
+  /* Long lists (e.g. a manager filter with many users) scroll inside the panel
+     instead of spilling past the scroll region and getting clipped. */
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);

@@ -198,7 +198,7 @@ export function InventoryPage() {
     <AppLayout title="Inventory intelligence" tag={data ? `${data.products.length}` : undefined}>
       <div className="page-scroll">
       {/* Filter bar — brand, manager, period, product search. */}
-      <div className="filter-bar mb-12" style={{ position: 'sticky', left: 0, zIndex: 20 }}>
+      <div className="filter-bar mb-12">
         <BrandPicker brands={brands} selected={selectedBrand} onSelect={setSelectedSlug} />
 
         {canFilterByManager && (
