@@ -64,7 +64,7 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
   const revenueLabel = metric === 'net' ? 'Net sales' : 'Total Revenue Before Returns';
 
   return (
-    <Card style={{ overflow: 'visible' }}>
+    <Card style={{ overflow: 'auto', maxHeight: 'calc(100vh - 250px)' }}>
       <table className="data-table wide-table">
         <thead>
           {comparePeriods.length === 0 ? (

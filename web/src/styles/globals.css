@@ -411,15 +411,6 @@ p {
   flex: 1;
 }
 
-/* Page scroll region — wraps a page's chrome (filters, cards, banners) together
-   with a long table, so the chrome scrolls away and the table's sticky header
-   pins to the top. The region is the scroll container the header sticks to.
-   Offset = topbar (~64px) + app-content padding (32px × 2). Bosco, 2026-07-03. */
-.page-scroll {
-  max-height: calc(100vh - 128px);
-  overflow: auto;
-}
-
 /* Filter chips */
 .filter-bar {
   display: flex;

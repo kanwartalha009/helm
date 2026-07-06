@@ -269,7 +269,6 @@ export function DashboardPage() {
 
   return (
     <AppLayout title="All brands" tag={tag}>
-      <div className="page-scroll">
       {/*
         Filter bar — only the filters that actually drive the data live here.
         Period chips, comparison baseline, and the columns picker were removed
@@ -609,7 +608,6 @@ export function DashboardPage() {
           </div>
         </>
       )}
-      </div>
     </AppLayout>
   );
 }
