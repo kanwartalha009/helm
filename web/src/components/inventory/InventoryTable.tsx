@@ -40,6 +40,7 @@ function stockColor(status: InventoryStatus): string {
 const thBase: CSSProperties = {
   position: 'sticky',
   top: 0,
+  zIndex: 2,
   background: '#12100F',
   color: '#E7E5E4',
   textAlign: 'right',
@@ -101,7 +102,7 @@ export function InventoryTable(props: Props) {
         overflow: 'hidden',
       }}
     >
-      <div style={{ overflowX: 'auto' }}>
+      <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>

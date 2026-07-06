@@ -1720,6 +1720,19 @@ td.col-group-start {
   background: var(--surface);
 }
 
+/* Sticky header on vertical scroll — keep the column labels in view while
+   scrolling a long brand list (Bosco, 2026-07-03). The table's own overflow
+   wrapper is the scroll region (BrandsTableWide sets a max-height), so the
+   header sticks to the top of that region. */
+.wide-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+.wide-table thead th.brand-col {
+  z-index: 4; /* top-left corner above both the sticky header and sticky column */
+}
+
 .wide-table .group-head {
   text-align: center;
   font-weight: 500;
