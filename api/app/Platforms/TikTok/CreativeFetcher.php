@@ -106,9 +106,12 @@ final class CreativeFetcher
     private function adRows(string $advertiserId, string $from, string $to, string $purchaseMetric, string $valueMetric, string $cartMetric): array
     {
         $base = ['ad_name', 'spend', 'impressions', 'clicks', 'conversion', 'video_watched_2s', 'video_watched_6s'];
-        $rich = array_values(array_unique([...$base, $purchaseMetric, $valueMetric, $cartMetric]));
+        // cart_metric is the UNVALIDATED one — keep it in its own tier so a bad
+        // name only drops CtATC, never the revenue (value + purchase) metrics.
+        $mid  = array_values(array_unique([...$base, $purchaseMetric, $valueMetric]));
+        $rich = array_values(array_unique([...$mid, $cartMetric]));
 
-        foreach ([$rich, $base] as $metrics) {
+        foreach ([$rich, $mid, $base] as $metrics) {
             try {
                 return $this->client->paged('report/integrated/get/', [
                     'advertiser_id' => $advertiserId,

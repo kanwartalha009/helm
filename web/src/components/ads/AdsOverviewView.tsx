@@ -27,6 +27,10 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
   const isMeta = data.platform === 'meta';
   const breakdownable = data.platform === 'meta' || data.platform === 'tiktok';
   const platformLabel = data.platform === 'google' ? 'Google' : data.platform === 'tiktok' ? 'TikTok' : 'Meta';
+  // Each platform stays on its NATIVE attribution so Helm's numbers match that
+  // platform's own Ads Manager (what the agency's client sees) — we label the
+  // basis rather than force one window. Blended ROAS is the cross-platform truth.
+  const attributionNote = data.platform === 'meta' ? '7-day click' : data.platform === 'tiktok' ? 'account attribution' : null;
   const [drill, setDrill] = useState<{ id: string; name: string } | null>(null);
   const [showAllRegions, setShowAllRegions] = useState(false);
   const [showAllCampaigns, setShowAllCampaigns] = useState(false);
@@ -44,7 +48,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
       {/* KPI summary */}
       <div className="ads-panel">
         <div className="ads-ph"><h3>Performance summary</h3></div>
-        <div className="ads-psub">Attributed {platformLabel} performance · {rangeLabel(data.from, data.to)}</div>
+        <div className="ads-psub">Attributed {platformLabel} performance{attributionNote ? ` · ${attributionNote}` : ''} · {rangeLabel(data.from, data.to)}</div>
         <div className="ads-kpis">
           {kpis.map((k) => (
             <div className="ads-kpi" key={k.key}>
@@ -262,16 +266,21 @@ function TrendChart({ trend, summary, currency }: { trend: AdsTrendPoint[]; summ
   const top = 10;
   const bot = 200;
 
-  // Right axis = Impressions (millions); left axis = Link clicks + Ad spend
-  // (thousands). Nice round tick steps so the axes read cleanly.
+  // Right axis = Impressions (millions); left axis = Link clicks (thousands).
+  // Ad spend (€, usually 20-40x smaller than clicks) gets its OWN scale — on the
+  // shared clicks axis it flatlines, which reads as "spend is broken". Its
+  // absolute total lives in the stat row below; here we show its trend SHAPE.
   const rightStep = niceStep(Math.max(1, ...trend.map((t) => t.impressions)) / 3);
-  const leftStep = niceStep(Math.max(1, ...trend.map((t) => Math.max(t.clicks, t.spend))) / 3);
+  const leftStep = niceStep(Math.max(1, ...trend.map((t) => t.clicks)) / 3);
+  const spendStep = niceStep(Math.max(1, ...trend.map((t) => t.spend)) / 3);
   const rightMax = rightStep * 3;
   const leftMax = leftStep * 3;
+  const spendMax = spendStep * 3;
 
   const x = (i: number) => (i / (trend.length - 1)) * W;
   const yL = (v: number) => bot - (v / leftMax) * (bot - top);
   const yR = (v: number) => bot - (v / rightMax) * (bot - top);
+  const ySpend = (v: number) => bot - (v / spendMax) * (bot - top);
   const line = (acc: (t: AdsTrendPoint) => number, y: (v: number) => number) =>
     trend.map((t, i) => `${x(i).toFixed(1)},${y(acc(t)).toFixed(1)}`).join(' ');
 
@@ -289,7 +298,7 @@ function TrendChart({ trend, summary, currency }: { trend: AdsTrendPoint[]; summ
             <line key={i} x1={0} y1={gy} x2={W} y2={gy} stroke="#E7E5E4" strokeWidth={1} strokeDasharray={i === 0 || i === 3 ? undefined : '2 6'} />
           ))}
           <polyline points={line((t) => t.impressions, yR)} fill="none" stroke="#0EA5B7" strokeWidth={1.8} strokeLinejoin="round" />
-          <polyline points={line((t) => t.spend, yL)} fill="none" stroke="#22C55E" strokeWidth={1.8} strokeLinejoin="round" />
+          <polyline points={line((t) => t.spend, ySpend)} fill="none" stroke="#22C55E" strokeWidth={1.8} strokeLinejoin="round" />
           <polyline points={line((t) => t.clicks, yL)} fill="none" stroke="#2563EB" strokeWidth={2} strokeLinejoin="round" />
         </svg>
         <div className="atrend-axis r">{rightTicks.map((v, i) => <span key={i}>{axisFmt(v)}</span>)}</div>

@@ -66,9 +66,112 @@ class TikTokDiagnoseCommand extends Command
         if ($firstAdv !== null) {
             $this->probeMetrics($client, $firstAdv);
             $this->probeDimensions($client, $firstAdv);
+            $this->probeCreatives($client, $firstAdv);
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Dump the RAW shape of TikTok's creative-asset endpoints for one real ad, so
+     * the thumbnail parser (CreativeFetcher::resolveCreatives) can be pointed at
+     * the exact field names this account returns. The blank previews in the grid
+     * mean /ad/get or /file/video/ad/info isn't giving us the field we expect —
+     * this prints the actual JSON keys instead of us guessing.
+     */
+    private function probeCreatives(TikTokClient $client, string $advertiserId): void
+    {
+        $end   = CarbonImmutable::now()->subDay();
+        $start = $end->subDays(6);
+        $this->newLine();
+        $this->line('Probing creative assets (thumbnail/video resolution):');
+
+        // 1. Grab a real ad_id from the last 7 days of ad-level reporting.
+        $adId = '';
+        try {
+            $rep = $client->get('report/integrated/get/', [
+                'advertiser_id' => $advertiserId,
+                'report_type'   => 'BASIC',
+                'data_level'    => 'AUCTION_AD',
+                'dimensions'    => json_encode(['ad_id']),
+                'metrics'       => json_encode(['spend']),
+                'start_date'    => $start->toDateString(),
+                'end_date'      => $end->toDateString(),
+                'page'          => 1,
+                'page_size'     => 5,
+            ]);
+            foreach (($rep['list'] ?? []) as $r) {
+                $adId = (string) ($r['dimensions']['ad_id'] ?? '');
+                if ($adId !== '') {
+                    break;
+                }
+            }
+        } catch (Throwable $e) {
+            $this->line('  ad-level report failed: ' . $e->getMessage());
+            return;
+        }
+        if ($adId === '') {
+            $this->line('  no ads with spend in the last 7 days — nothing to probe.');
+            return;
+        }
+        $this->info("  sample ad_id: {$adId}");
+
+        // 2. /ad/get — print the raw object so we can see the real asset field names
+        //    (video_id / image_ids vs something else) and their nesting.
+        $videoId = '';
+        try {
+            $ad = $client->get('ad/get/', [
+                'advertiser_id' => $advertiserId,
+                'ad_ids'        => json_encode([$adId]),
+            ]);
+            $first = $ad['list'][0] ?? null;
+            if (is_array($first)) {
+                $this->line('  /ad/get keys: ' . implode(', ', array_keys($first)));
+                foreach (['video_id', 'image_ids', 'image_id', 'creative_id', 'material_id', 'identity_id'] as $k) {
+                    if (array_key_exists($k, $first)) {
+                        $v = is_array($first[$k]) ? json_encode($first[$k]) : (string) $first[$k];
+                        $this->line(sprintf('    %-12s = %s', $k, $v));
+                        if ($k === 'video_id' && $videoId === '') {
+                            $videoId = (string) $first[$k];
+                        }
+                    }
+                }
+            } else {
+                $this->line('  /ad/get returned no list rows. Raw: ' . substr((string) json_encode($ad), 0, 400));
+            }
+        } catch (Throwable $e) {
+            $this->line('  /ad/get failed: ' . $e->getMessage());
+        }
+
+        // 3. /file/video/ad/info — print the raw object so we can see which field is
+        //    the poster/cover image URL and which is the playable preview URL.
+        if ($videoId !== '') {
+            try {
+                $v     = $client->get('file/video/ad/info/', [
+                    'advertiser_id' => $advertiserId,
+                    'video_ids'     => json_encode([$videoId]),
+                ]);
+                $first = $v['list'][0] ?? null;
+                if (is_array($first)) {
+                    $this->line('  /file/video/ad/info keys: ' . implode(', ', array_keys($first)));
+                    foreach (['poster_url', 'video_cover_url', 'cover_url', 'preview_url', 'url'] as $k) {
+                        if (array_key_exists($k, $first)) {
+                            $this->line(sprintf('    %-16s = %s', $k, substr((string) $first[$k], 0, 90)));
+                        }
+                    }
+                } else {
+                    $this->line('  /file/video/ad/info returned no list rows. Raw: ' . substr((string) json_encode($v), 0, 400));
+                }
+            } catch (Throwable $e) {
+                $this->line('  /file/video/ad/info failed: ' . $e->getMessage());
+            }
+        } else {
+            $this->line('  (no video_id resolved from /ad/get — paste the /ad/get keys above so I can fix the field name)');
+        }
+
+        $this->newLine();
+        $this->line('  -> Paste this whole block back; I map CreativeFetcher::resolveCreatives to the real field names,');
+        $this->line('     then: php artisan tiktok:backfill-creatives "Nude Project" --since=<date>');
     }
 
     /**
