@@ -135,6 +135,8 @@ class TikTokDiagnoseCommand extends Command
             'video_play_actions', 'video_watched_2s', 'video_watched_6s',
             'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100',
             'likes', 'comments', 'shares', 'follows', 'profile_visits',
+            // creatives add-to-cart (CtATC) — pick the one that returns data
+            'total_add_to_cart', 'add_to_cart', 'on_web_add_to_cart',
         ];
 
         foreach ($candidates as $metric) {

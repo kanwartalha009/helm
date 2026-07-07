@@ -20,10 +20,9 @@ export function AdsBrandOverview({ slug, period, platform }: { slug: string | un
 
   // Meta-only tabs disappear off Meta; snap back to Overview so we never render
   // a hidden tab's content.
-  // Audience works for Meta + TikTok (both have breakdowns); Creatives is Meta-only
-  // (ad_creative_daily is Meta today).
+  // Audience + Creatives both work for Meta + TikTok now (Google has neither).
   const showAudience = platform === 'meta' || platform === 'tiktok';
-  const showCreatives = platform === 'meta';
+  const showCreatives = platform === 'meta' || platform === 'tiktok';
   useEffect(() => {
     if ((tab === 'audience' && !showAudience) || (tab === 'creatives' && !showCreatives)) setTab('overview');
   }, [tab, showAudience, showCreatives]);

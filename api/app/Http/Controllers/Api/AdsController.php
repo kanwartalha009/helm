@@ -9,6 +9,7 @@ use App\Models\AdCampaignDailyMetric;
 use App\Models\AdCreativeDaily;
 use App\Models\Brand;
 use App\Platforms\Meta\MetaCreativeFetcher;
+use App\Platforms\TikTok\CreativeFetcher as TikTokCreativeFetcher;
 use App\Services\Aggregation\AdsOverviewQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -97,23 +98,30 @@ class AdsController extends Controller
      *
      *   GET /api/brands/{brand}/ads/creatives/{ad}/video
      */
-    public function creativeVideo(Brand $brand, string $ad, MetaCreativeFetcher $fetcher): JsonResponse
+    public function creativeVideo(Brand $brand, string $ad, MetaCreativeFetcher $meta, TikTokCreativeFetcher $tiktok): JsonResponse
     {
         $this->authorize('view', $brand);
 
-        $belongs = AdCreativeDaily::query()
+        // Which platform owns this ad? ad_creative_daily is keyed by platform, so
+        // resolve it and dispatch to the right fetcher (video source URLs are
+        // short-lived on both, so always resolved on demand).
+        $platform = AdCreativeDaily::query()
             ->where('brand_id', $brand->id)
-            ->where('platform', 'meta')
             ->where('ad_id', $ad)
-            ->exists();
-        abort_unless($belongs, 404);
+            ->value('platform');
+        abort_unless(in_array($platform, ['meta', 'tiktok'], true), 404);
 
         $conn = $brand->connections()
-            ->where('platform', 'meta')
+            ->where('platform', $platform)
             ->where('status', 'active')
             ->first();
+        if (! $conn) {
+            return response()->json(['url' => null]);
+        }
 
-        $url = $conn ? $fetcher->fetchVideoSource($conn, $ad) : null;
+        $url = $platform === 'meta'
+            ? $meta->fetchVideoSource($conn, $ad)
+            : $tiktok->fetchVideoSource($conn, $ad);
 
         return response()->json(['url' => $url]);
     }

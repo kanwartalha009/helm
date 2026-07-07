@@ -100,7 +100,7 @@ export function AdsCreativesView({ slug, period, platform }: { slug?: string; pe
       <div className="ads-root">
         <div className="ads-panel">
           <div className="ads-ph"><h3>Creatives</h3></div>
-          <div className="ads-empty">Not synced yet. Run <code>meta:backfill-creatives</code> for this brand.</div>
+          <div className="ads-empty">Not synced yet. Run <code>{platform === 'tiktok' ? 'tiktok:backfill-creatives' : 'meta:backfill-creatives'}</code> for this brand.</div>
         </div>
       </div>
     );

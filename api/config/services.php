@@ -34,5 +34,6 @@ return [
         'purchase_metric'   => env('TIKTOK_PURCHASE_METRIC', 'complete_payment'),
         'value_metric'      => env('TIKTOK_VALUE_METRIC', 'value_per_complete_payment'),
         'value_metric_kind' => env('TIKTOK_VALUE_METRIC_KIND', 'per_purchase'),
+        'cart_metric'       => env('TIKTOK_CART_METRIC', 'total_add_to_cart'), // creatives CtATC
     ],
 ];
