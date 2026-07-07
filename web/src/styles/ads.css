@@ -54,10 +54,12 @@
 .atrend-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .atrend-legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--a-sec); white-space: nowrap; }
 .atrend-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
-.atrend-chart { display: grid; grid-template-columns: 44px 1fr; height: 220px; margin-top: 12px; }
-.atrend-axis { display: flex; flex-direction: column; justify-content: space-between; font-size: 10.5px; color: var(--a-muted); text-align: right; padding: 2px 8px 2px 0; }
+.atrend-chart { display: grid; grid-template-columns: 48px 1fr 42px; height: 220px; margin-top: 12px; }
+.atrend-axis { display: flex; flex-direction: column; justify-content: space-between; font-size: 10.5px; color: var(--a-muted); padding: 2px 0; }
+.atrend-axis.l { text-align: right; padding-right: 8px; }
+.atrend-axis.r { text-align: left; padding-left: 8px; }
 .atrend-svg { width: 100%; height: 100%; }
-.atrend-x { display: flex; justify-content: space-between; font-size: 10px; color: var(--a-muted); margin: 6px 0 0 44px; }
+.atrend-x { display: flex; justify-content: space-between; font-size: 10px; color: var(--a-muted); margin: 6px 42px 0 48px; }
 .atrend-stats { display: flex; margin-top: 14px; border-top: 1px solid var(--a-border); padding-top: 12px; }
 .atrend-stat { flex: 1; padding: 0 16px; border-right: 1px solid var(--a-border); }
 .atrend-stat:first-child { padding-left: 0; }

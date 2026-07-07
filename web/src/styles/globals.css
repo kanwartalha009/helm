@@ -432,6 +432,13 @@ p {
 .page-scroll > .filter-bar {
   z-index: 30;
 }
+/* The menu row (the FIRST filter bar) must also sit above the LATER filter rows
+   — the sort/status chips beneath it. They're equal z-index (30), so DOM order
+   was letting the later row paint over an open dropdown that opens downward into
+   its space. Lifting the first row fixes it on every page-scroll page. */
+.page-scroll > .filter-bar:first-of-type {
+  z-index: 40;
+}
 .page-scroll > .table-region {
   position: static;
   z-index: auto;

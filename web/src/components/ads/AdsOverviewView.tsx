@@ -70,9 +70,18 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
       {/* Trends + funnel */}
       <div className="ads-grid-2">
         <div className="ads-panel">
-          <div className="ads-ph"><h3>Performance trends</h3></div>
-          <div className="ads-psub">Revenue, spend and impressions over time</div>
-          <TrendChart trend={data.trend} />
+          <div className="atrend-head">
+            <div>
+              <div className="ads-ph"><h3>Performance Trends</h3><span className="ads-chip">View Trends</span></div>
+              <div className="ads-psub">Link Clicks, Impressions and Ad Spend</div>
+            </div>
+            <div className="atrend-legend">
+              <span><i style={{ background: '#2563EB' }} />Link Clicks</span>
+              <span><i style={{ background: '#0EA5B7' }} />Impressions</span>
+              <span><i style={{ background: '#22C55E' }} />Ads Spend</span>
+            </div>
+          </div>
+          <TrendChart trend={data.trend} summary={s} currency={currency} />
         </div>
 
         <div className="ads-panel">
@@ -216,18 +225,23 @@ function EffStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-/* ---- Trends (dual axis) ---------------------------------------------- */
+/* ---- Trends (dual axis, labeled — matches the mockup) ---------------- */
 
-function TrendChart({ trend }: { trend: AdsTrendPoint[] }) {
+function TrendChart({ trend, summary, currency }: { trend: AdsTrendPoint[]; summary: AdsSummary; currency: string }) {
   if (trend.length < 2) {
     return <div className="ads-empty" style={{ height: 220 }}>Not enough days to chart yet.</div>;
   }
   const W = 900;
-  const H = 210;
-  const top = 8;
-  const bot = 196;
-  const leftMax = Math.max(1, ...trend.map((t) => Math.max(t.revenue, t.spend)));
-  const rightMax = Math.max(1, ...trend.map((t) => t.impressions));
+  const top = 10;
+  const bot = 200;
+
+  // Right axis = Impressions (millions); left axis = Link clicks + Ad spend
+  // (thousands). Nice round tick steps so the axes read cleanly.
+  const rightStep = niceStep(Math.max(1, ...trend.map((t) => t.impressions)) / 3);
+  const leftStep = niceStep(Math.max(1, ...trend.map((t) => Math.max(t.clicks, t.spend))) / 3);
+  const rightMax = rightStep * 3;
+  const leftMax = leftStep * 3;
+
   const x = (i: number) => (i / (trend.length - 1)) * W;
   const yL = (v: number) => bot - (v / leftMax) * (bot - top);
   const yR = (v: number) => bot - (v / rightMax) * (bot - top);
@@ -235,29 +249,79 @@ function TrendChart({ trend }: { trend: AdsTrendPoint[] }) {
     trend.map((t, i) => `${x(i).toFixed(1)},${y(acc(t)).toFixed(1)}`).join(' ');
 
   const gridY = [top, top + (bot - top) / 3, top + (2 * (bot - top)) / 3, bot];
+  const leftTicks = [leftStep * 3, leftStep * 2, leftStep, 0];
+  const rightTicks = [rightStep * 3, rightStep * 2, rightStep, 0];
+  const xTicks = pickDates(trend, 9);
 
   return (
     <>
-      <div className="atrend-legend" style={{ marginBottom: 6 }}>
-        <span><i style={{ background: '#2563EB' }} />Revenue</span>
-        <span><i style={{ background: '#22C55E' }} />Spend</span>
-        <span><i style={{ background: '#0EA5B7' }} />Impressions</span>
+      <div className="atrend-chart">
+        <div className="atrend-axis l">{leftTicks.map((v, i) => <span key={i}>{axisFmt(v)}</span>)}</div>
+        <svg className="atrend-svg" viewBox={`0 0 ${W} ${bot + 10}`} preserveAspectRatio="none">
+          {gridY.map((gy, i) => (
+            <line key={i} x1={0} y1={gy} x2={W} y2={gy} stroke="#E7E5E4" strokeWidth={1} strokeDasharray={i === 0 || i === 3 ? undefined : '2 6'} />
+          ))}
+          <polyline points={line((t) => t.impressions, yR)} fill="none" stroke="#0EA5B7" strokeWidth={1.8} strokeLinejoin="round" />
+          <polyline points={line((t) => t.spend, yL)} fill="none" stroke="#22C55E" strokeWidth={1.8} strokeLinejoin="round" />
+          <polyline points={line((t) => t.clicks, yL)} fill="none" stroke="#2563EB" strokeWidth={2} strokeLinejoin="round" />
+        </svg>
+        <div className="atrend-axis r">{rightTicks.map((v, i) => <span key={i}>{axisFmt(v)}</span>)}</div>
       </div>
-      <svg className="atrend-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ height: 200 }}>
-        {gridY.map((gy, i) => (
-          <line key={i} x1={0} y1={gy} x2={W} y2={gy} stroke="#E7E5E4" strokeWidth={1} strokeDasharray={i === 0 || i === 3 ? undefined : '2 6'} />
-        ))}
-        <polyline points={line((t) => t.impressions, yR)} fill="none" stroke="#0EA5B7" strokeWidth={1.8} strokeLinejoin="round" />
-        <polyline points={line((t) => t.spend, yL)} fill="none" stroke="#22C55E" strokeWidth={1.8} strokeLinejoin="round" />
-        <polyline points={line((t) => t.revenue, yL)} fill="none" stroke="#2563EB" strokeWidth={2} strokeLinejoin="round" />
-      </svg>
-      <div className="atrend-x">
-        <span>{shortDate(trend[0].date)}</span>
-        <span>{shortDate(trend[Math.floor(trend.length / 2)].date)}</span>
-        <span>{shortDate(trend[trend.length - 1].date)}</span>
+      <div className="atrend-x">{xTicks.map((d, i) => <span key={i}>{d}</span>)}</div>
+      <div className="atrend-stats">
+        <TStat color="#2563EB" label="Page Impressions" delta={summary.delta?.impressions ?? null} value={compact(summary.impressions)} goodUp />
+        <TStat color="#22C55E" label="Ads Spend" delta={summary.delta?.spend ?? null} value={formatMoney(summary.spend, currency, { compact: true })} goodUp />
+        <TStat color="#0EA5B7" label="CTR (Links)" delta={summary.delta?.ctr ?? null} value={summary.ctr != null ? `${summary.ctr}%` : '—'} goodUp />
       </div>
     </>
   );
+}
+
+function TStat({ color, label, delta, value, goodUp }: { color: string; label: string; delta: number | null; value: string; goodUp: boolean }) {
+  return (
+    <div className="atrend-stat">
+      <div className="l">
+        <span className="tk" style={{ background: color }} />
+        {label}
+        {delta != null && (
+          <b style={{ color: (goodUp ? delta >= 0 : delta < 0) ? '#16A34A' : '#B91C1C', fontWeight: 600, marginLeft: 2 }}>
+            {delta >= 0 ? '▲' : '▼'} {Math.abs(delta)}%
+          </b>
+        )}
+      </div>
+      <div className="v num">{value}</div>
+    </div>
+  );
+}
+
+/** Nice round step (1/2/5 × 10ⁿ) so axis ticks read cleanly. */
+function niceStep(v: number): number {
+  if (v <= 0) return 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / pow;
+  const nice = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+  return nice * pow;
+}
+
+function axisFmt(v: number): string {
+  if (v === 0) return '0';
+  if (v >= 1e6) return `${Number.isInteger(v / 1e6) ? v / 1e6 : (v / 1e6).toFixed(1)}M`;
+  if (v >= 1e3) return `${Number.isInteger(v / 1e3) ? v / 1e3 : (v / 1e3).toFixed(1)}K`;
+  return `${Math.round(v)}`;
+}
+
+function compact(v: number): string {
+  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(v);
+}
+
+function pickDates(trend: AdsTrendPoint[], n: number): string[] {
+  const len = trend.length;
+  if (len <= n) return trend.map((t) => shortDate(t.date));
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(shortDate(trend[Math.round((i / (n - 1)) * (len - 1))].date));
+  }
+  return out;
 }
 
 /* ---- Funnel ---------------------------------------------------------- */
