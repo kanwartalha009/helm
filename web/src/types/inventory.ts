@@ -62,6 +62,14 @@ export interface InventoryUnattributed {
   total: number;
 }
 
+// One day of brand totals for the trend chart.
+export interface InventoryTrendPoint {
+  date: string; // Y-m-d
+  spend: number; // total Meta spend (incl. unattributed)
+  revenue: number; // Total sales + refunds
+  units: number;
+}
+
 export interface InventoryResponse {
   brand: { id: number; name: string; slug: string; currency: string };
   period: InventoryPeriod;
@@ -69,6 +77,7 @@ export interface InventoryResponse {
   to: string;   // Y-m-d, brand timezone (window ends yesterday)
   currency: string;
   syncedAt: string | null; // ISO — when the catalog (stock) was last snapshotted
+  trend: InventoryTrendPoint[]; // daily brand totals — powers the trend chart
   summary: InventorySummary;
   unattributed: InventoryUnattributed;
   products: InventoryProduct[];

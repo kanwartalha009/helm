@@ -41,15 +41,15 @@ export function AdsCampaignDrawer({
           <>
             {d.campaign.status && <span className="acamp-status">{d.campaign.status}</span>}
             <div className="adrawer-kpis">
-              <Cell label="Spend" value={money(d.summary.spend)} v={d.summary.delta?.spend ?? null} goodUp={false} />
-              <Cell label="Revenue" value={money(d.summary.revenue)} v={d.summary.delta?.revenue ?? null} goodUp />
-              <Cell label="ROAS" value={formatRoas(d.summary.roas)} v={d.summary.delta?.roas ?? null} goodUp />
-              <Cell label="Purchases" value={formatNumber(d.summary.purchases)} v={d.summary.delta?.purchases ?? null} goodUp />
-              <Cell label="CPA" value={unit(d.summary.cpa)} v={d.summary.delta?.cpa ?? null} goodUp={false} />
-              <Cell label="AOV" value={unit(d.summary.aov)} v={d.summary.delta?.aov ?? null} goodUp />
-              <Cell label="CPM" value={unit(d.summary.cpm)} v={d.summary.delta?.cpm ?? null} goodUp={false} />
-              <Cell label="CPC" value={unit(d.summary.cpc)} v={d.summary.delta?.cpc ?? null} goodUp={false} />
-              <Cell label="CTR" value={d.summary.ctr != null ? `${d.summary.ctr}%` : '—'} v={d.summary.delta?.ctr ?? null} goodUp />
+              <Cell label="Spend" value={money(d.summary.spend)} v={d.summary.delta?.spend ?? null} goodUp={false} series={d.trend.map((t) => t.spend)} color="#22C55E" />
+              <Cell label="Revenue" value={money(d.summary.revenue)} v={d.summary.delta?.revenue ?? null} goodUp series={d.trend.map((t) => t.revenue)} color="#2563EB" />
+              <Cell label="ROAS" value={formatRoas(d.summary.roas)} v={d.summary.delta?.roas ?? null} goodUp series={d.trend.map((t) => (t.spend > 0 ? t.revenue / t.spend : 0))} color="#2563EB" />
+              <Cell label="Purchases" value={formatNumber(d.summary.purchases)} v={d.summary.delta?.purchases ?? null} goodUp series={d.trend.map((t) => t.purchases)} color="#0EA5B7" />
+              <Cell label="CPA" value={unit(d.summary.cpa)} v={d.summary.delta?.cpa ?? null} goodUp={false} series={d.trend.map((t) => (t.purchases > 0 ? t.spend / t.purchases : 0))} color="#64748B" />
+              <Cell label="AOV" value={unit(d.summary.aov)} v={d.summary.delta?.aov ?? null} goodUp series={d.trend.map((t) => (t.purchases > 0 ? t.revenue / t.purchases : 0))} color="#EC4899" />
+              <Cell label="CPM" value={unit(d.summary.cpm)} v={d.summary.delta?.cpm ?? null} goodUp={false} series={d.trend.map((t) => (t.impressions > 0 ? (t.spend / t.impressions) * 1000 : 0))} color="#64748B" />
+              <Cell label="CPC" value={unit(d.summary.cpc)} v={d.summary.delta?.cpc ?? null} goodUp={false} series={d.trend.map((t) => (t.clicks > 0 ? t.spend / t.clicks : 0))} color="#64748B" />
+              <Cell label="CTR" value={d.summary.ctr != null ? `${d.summary.ctr}%` : '—'} v={d.summary.delta?.ctr ?? null} goodUp series={d.trend.map((t) => (t.impressions > 0 ? (t.clicks / t.impressions) * 100 : 0))} color="#0EA5B7" />
             </div>
             <div className="ads-panel">
               <div className="ads-ph"><h3>Daily trend</h3></div>
@@ -63,7 +63,7 @@ export function AdsCampaignDrawer({
   );
 }
 
-function Cell({ label, value, v, goodUp }: { label: string; value: string; v: number | null; goodUp: boolean }) {
+function Cell({ label, value, v, goodUp, series, color }: { label: string; value: string; v: number | null; goodUp: boolean; series?: number[]; color?: string }) {
   let delta = <span className="adrawer-d">—</span>;
   if (v != null) {
     const up = v >= 0;
@@ -79,7 +79,21 @@ function Cell({ label, value, v, goodUp }: { label: string; value: string; v: nu
       <div className="adrawer-kpi-l">{label}</div>
       <div className="adrawer-kpi-v">{value}</div>
       {delta}
+      {series && series.length > 1 && <CellSpark series={series} color={color ?? '#2563EB'} />}
     </div>
+  );
+}
+
+function CellSpark({ series, color }: { series: number[]; color: string }) {
+  const max = Math.max(...series);
+  const min = Math.min(...series);
+  const rng = max - min || 1;
+  const W = 120, H = 26;
+  const pts = series.map((v, i) => `${((i / (series.length - 1)) * W).toFixed(1)},${(H - ((v - min) / rng) * H).toFixed(1)}`).join(' ');
+  return (
+    <svg className="adrawer-spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
   );
 }
 

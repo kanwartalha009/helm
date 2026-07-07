@@ -142,6 +142,7 @@ final class InventoryQuery
             'to'       => $to,
             'currency' => $ccy,
             'syncedAt' => $syncedAt,
+            'trend'    => $this->trend($bid, $from, $to),
             'summary'  => [
                 'products'        => $products->count(),
                 'pause'           => $cPause,
@@ -158,6 +159,53 @@ final class InventoryQuery
             'unattributed' => ['collection' => round($coll, 2), 'other' => round($other, 2), 'total' => round($coll + $other, 2)],
             'products'     => $rows,
         ];
+    }
+
+    /**
+     * Daily brand totals over the window — Meta spend (all product keys, incl. the
+     * unattributed __collection/__other), revenue (Total sales + refunds) and
+     * units — for the trend chart. Dense: every day in the window gets a point
+     * (gaps filled with 0) so the line has no holes.
+     *
+     * @return array<int, array{date: string, spend: float, revenue: float, units: int}>
+     */
+    private function trend(int $brandId, string $from, string $to): array
+    {
+        $spend = [];
+        $spendRows = AdProductDaily::query()
+            ->where('brand_id', $brandId)
+            ->whereBetween('date', [$from, $to])
+            ->groupBy('d')
+            ->selectRaw('DATE(date) AS d, COALESCE(SUM(spend), 0) AS spend')
+            ->get();
+        foreach ($spendRows as $r) {
+            $spend[(string) $r->d] = (float) $r->spend;
+        }
+
+        $comm = CommerceDailyMetric::query()
+            ->where('brand_id', $brandId)
+            ->whereBetween('date', [$from, $to])
+            ->groupBy('d')
+            ->selectRaw('DATE(date) AS d, COALESCE(SUM(units), 0) AS units, COALESCE(SUM(total_sales), 0) AS total_sales, COALESCE(SUM(refunds), 0) AS refunds')
+            ->get()
+            ->keyBy('d');
+
+        $out    = [];
+        $cursor = CarbonImmutable::parse($from);
+        $end    = CarbonImmutable::parse($to);
+        while ($cursor->lessThanOrEqualTo($end)) {
+            $d = $cursor->toDateString();
+            $c = $comm->get($d);
+            $out[] = [
+                'date'    => $d,
+                'spend'   => round((float) ($spend[$d] ?? 0), 2),
+                'revenue' => round((float) (((float) ($c->total_sales ?? 0)) + ((float) ($c->refunds ?? 0))), 2),
+                'units'   => (int) ($c->units ?? 0),
+            ];
+            $cursor = $cursor->addDay();
+        }
+
+        return $out;
     }
 
     /** Per-product-title commerce sums (units gross, total_sales, refunds) over a window. */
