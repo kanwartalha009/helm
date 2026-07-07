@@ -106,7 +106,7 @@ export function AdsAudienceView({ data }: { data: AdsOverviewResponse }) {
             <SplitBar title="Audience" subtitle="New vs returning vs engaged" bd={data.byAudience} color={audienceColor} prettify={prettyAudience} money={money} />
           </div>
 
-          <div className="ads-grid-2">
+          <div className="ads-grid-cards">
             {visible.map((p) => (
               <BreakdownPanel key={p.title} title={p.title} subtitle={p.subtitle} bd={p.bd} currency={currency} prettify={p.prettify} />
             ))}

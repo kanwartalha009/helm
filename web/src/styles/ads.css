@@ -173,6 +173,11 @@
 /* Audience — even 2-col grid (split bars) */
 .ads-grid-even { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; margin-top: 14px; }
 
+/* Audience — breakdown panels packed masonry-style so cards of different row
+   counts flow tightly (no ragged gaps under the shorter card). */
+.ads-grid-cards { column-count: 2; column-gap: 14px; margin-top: 14px; }
+.ads-grid-cards > .ads-panel { break-inside: avoid; width: 100%; margin: 0 0 14px; }
+
 /* Top-segment highlight cards */
 .ahi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 6px; }
 .ahi-card { border: 1px solid var(--a-border); border-radius: 10px; padding: 11px 13px; background: var(--a-surface); border-left: 3px solid var(--a-blue); }
@@ -273,4 +278,5 @@
 
 @media (max-width: 1024px) {
   .ads-grid-2, .ads-grid-even, .aregion { grid-template-columns: 1fr; }
+  .ads-grid-cards { column-count: 1; }
 }
