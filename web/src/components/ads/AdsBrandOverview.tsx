@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Banner } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { AdsOverviewView } from './AdsOverviewView';
@@ -7,14 +7,24 @@ import { AdsCreativesView } from './AdsCreativesView';
 import { useAdsOverview } from '@/hooks/useAdsOverview';
 import type { AdsPeriod, AdsPlatform } from '@/types/ads';
 
+type AdsTab = 'overview' | 'audience' | 'creatives';
+
 /**
  * Loads one brand's Ads Overview for the chosen period and renders the states:
  * error, loading, the freshness banner (window not fully synced), then the view.
- * Shared by the /ads hub and the /brands/:slug/ads deep link.
+ * Shared by the /ads hub and the /brands/:slug/ads deep link. Audience and
+ * Creatives are Meta-only, so their tabs only appear on Meta — no dead tabs.
  */
 export function AdsBrandOverview({ slug, period, platform }: { slug: string | undefined; period: AdsPeriod; platform: AdsPlatform }) {
   const q = useAdsOverview(slug, period, undefined, undefined, !!slug, platform);
-  const [tab, setTab] = useState<'overview' | 'audience' | 'creatives'>('overview');
+  const [tab, setTab] = useState<AdsTab>('overview');
+
+  // Meta-only tabs disappear off Meta; snap back to Overview so we never render
+  // a hidden tab's content.
+  const metaTabs = platform === 'meta';
+  useEffect(() => {
+    if (!metaTabs && tab !== 'overview') setTab('overview');
+  }, [metaTabs, tab]);
 
   if (q.isError) {
     return <StateCard>Couldn’t load ad performance for this brand. Try refreshing, or check the brand’s Meta connection.</StateCard>;
@@ -23,6 +33,12 @@ export function AdsBrandOverview({ slug, period, platform }: { slug: string | un
     return <StateCard>Loading ad performance…</StateCard>;
   }
   if (!q.data) return null;
+
+  const tabs: { key: AdsTab; label: string }[] = [
+    { key: 'overview', label: 'Overview' },
+    ...(metaTabs ? ([{ key: 'audience', label: 'Audience' }, { key: 'creatives', label: 'Creatives' }] as { key: AdsTab; label: string }[]) : []),
+  ];
+  const active: AdsTab = tabs.some((t) => t.key === tab) ? tab : 'overview';
 
   return (
     <>
@@ -33,14 +49,16 @@ export function AdsBrandOverview({ slug, period, platform }: { slug: string | un
           </Banner>
         </div>
       )}
-      <div className="filter-bar mb-12">
-        <button type="button" className={cn('chip', tab === 'overview' && 'active')} onClick={() => setTab('overview')}>Overview</button>
-        <button type="button" className={cn('chip', tab === 'audience' && 'active')} onClick={() => setTab('audience')}>Audience</button>
-        <button type="button" className={cn('chip', tab === 'creatives' && 'active')} onClick={() => setTab('creatives')}>Creatives</button>
-      </div>
-      {tab === 'overview' ? (
+      {tabs.length > 1 && (
+        <div className="filter-bar mb-12">
+          {tabs.map((t) => (
+            <button key={t.key} type="button" className={cn('chip', active === t.key && 'active')} onClick={() => setTab(t.key)}>{t.label}</button>
+          ))}
+        </div>
+      )}
+      {active === 'overview' ? (
         <AdsOverviewView data={q.data} slug={slug} period={period} platform={platform} />
-      ) : tab === 'audience' ? (
+      ) : active === 'audience' ? (
         <AdsAudienceView data={q.data} />
       ) : (
         <AdsCreativesView slug={slug} period={period} platform={platform} />

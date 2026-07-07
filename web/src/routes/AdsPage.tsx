@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { cn } from '@/lib/cn';
 import { AdsBrandOverview } from '@/components/ads/AdsBrandOverview';
+import { AdPlatformToggle, adPlatformsOf } from '@/components/ads/AdPlatformToggle';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import type { AdsPeriod, AdsPlatform } from '@/types/ads';
 import type { DashboardRow, DashboardRowBrand } from '@/types/domain';
@@ -55,6 +56,12 @@ export function AdsPage() {
 
   const selected = brands.find((b) => b.slug === selectedSlug);
 
+  // Offer only the ad platforms connected to the chosen brand.
+  const available = adPlatformsOf(selected?.platforms);
+  useEffect(() => {
+    if (available.length > 0 && !available.includes(platform)) setPlatform(available[0]);
+  }, [available, platform]);
+
   if (!selectedSlug) {
     return (
       <AppLayout title="Ads">
@@ -66,11 +73,7 @@ export function AdsPage() {
   return (
     <AppLayout title="Ads">
       <div className="filter-bar mb-16">
-        <button type="button" className="filter-btn" onClick={() => setSelectedSlug(undefined)}>
-          <span className="brand-avatar" style={{ width: 20, height: 20, fontSize: 9 }}>{selected?.initials}</span>
-          <strong style={{ fontWeight: 500 }}>{selected?.name ?? 'Brand'}</strong>
-          <span className="muted" style={{ marginLeft: 6 }}>Change</span>
-        </button>
+        <BrandSwitcher brands={brands} selected={selected} onSelect={setSelectedSlug} />
         <span style={{ width: 10 }} />
         {PERIODS.map((p) => (
           <button key={p.key} type="button" className={cn('chip', period === p.key && 'active')} onClick={() => setPeriod(p.key)}>
@@ -78,15 +81,82 @@ export function AdsPage() {
           </button>
         ))}
         <span style={{ flex: 1 }} />
-        <div className="segmented">
-          <button type="button" className={platform === 'meta' ? 'active' : ''} onClick={() => setPlatform('meta')}>Meta</button>
-          <button type="button" className={platform === 'google' ? 'active' : ''} onClick={() => setPlatform('google')}>Google</button>
-          <button type="button" disabled title="Coming soon">TikTok</button>
-        </div>
+        <AdPlatformToggle available={available} value={platform} onChange={setPlatform} />
       </div>
 
       <AdsBrandOverview slug={selectedSlug} period={period} platform={platform} />
     </AppLayout>
+  );
+}
+
+/**
+ * Inline searchable brand switcher for the filter bar — swaps the brand in place
+ * instead of dropping back to the chooser page (mirrors Inventory's picker).
+ */
+function BrandSwitcher({
+  brands,
+  selected,
+  onSelect,
+}: {
+  brands: DashboardRowBrand[];
+  selected: DashboardRowBrand | undefined;
+  onSelect: (slug: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener('mousedown', h);
+    return () => window.removeEventListener('mousedown', h);
+  }, [open]);
+
+  const filtered = brands.filter((b) => b.name.toLowerCase().includes(q.trim().toLowerCase()));
+
+  return (
+    <div className={cn('dropdown', open && 'open')} ref={ref} style={{ display: 'inline-block' }}>
+      <button type="button" className="filter-btn" onClick={() => setOpen((v) => !v)}>
+        <span className="brand-avatar" style={{ width: 20, height: 20, fontSize: 9 }}>{selected?.initials ?? '—'}</span>
+        <strong style={{ fontWeight: 500 }}>{selected?.name ?? 'Brand'}</strong>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13" style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      <div className="dropdown-menu down" style={{ minWidth: 264, padding: 6 }}>
+        <input
+          autoFocus
+          className="input"
+          style={{ height: 32, width: '100%', marginBottom: 4 }}
+          placeholder="Search brand…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <div style={{ maxHeight: 300, overflow: 'auto' }}>
+          {filtered.length === 0 ? (
+            <div className="dropdown-item" style={{ color: 'var(--text-muted)', cursor: 'default' }}>No brands</div>
+          ) : (
+            filtered.map((b) => (
+              <button
+                key={b.slug}
+                type="button"
+                className={cn('dropdown-item', b.slug === selected?.slug && 'is-selected')}
+                onClick={() => { onSelect(b.slug); setOpen(false); setQ(''); }}
+              >
+                <span className="brand-avatar" style={{ width: 20, height: 20, fontSize: 9 }}>{b.initials}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</span>
+                {b.slug === selected?.slug && (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" width="14" height="14" style={{ color: 'var(--text)' }}>
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

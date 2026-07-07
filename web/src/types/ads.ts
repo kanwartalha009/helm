@@ -14,6 +14,7 @@ export interface AdsBrand {
   initials: string;
   baseCurrency: string;
   timezone: string;
+  platforms: AdsPlatform[]; // ad platforms with an active connection on this brand
 }
 
 // Ratios are null (not 0) when their denominator is zero — the UI renders "—".
@@ -65,11 +66,14 @@ export interface AdsCountryRow {
   clicks: number;
   roas: number | null;
   cpa: number | null;
+  ctr: number | null;
+  pct: number; // this segment's share of window spend
 }
 
 export interface AdsByCountry {
-  hasData: boolean; // false until `meta:backfill-breakdown country` has run
+  hasData: boolean; // false until `meta:backfill-breakdown` has run for the axis
   top: AdsCountryRow | null;
+  total?: number; // total spend across all segments (denominator for pct)
   rows: AdsCountryRow[];
 }
 
@@ -115,9 +119,13 @@ export interface AdsOverviewResponse {
   byCountry: AdsByCountry;
   byDevice: AdsByDevice;
   // Demographic sub-views (Phase C) — same shape as byCountry. Empty until the
-  // age_gender / placement_platform breakdowns have been backfilled.
+  // matching breakdown has been backfilled; the Audience tab hides empty panels.
   byAgeGender: AdsByCountry;
-  byPlacement: AdsByCountry;
+  byGender: AdsByCountry; // male / female / unknown, folded from age_gender
+  byAge: AdsByCountry; // age buckets, folded from age_gender
+  byPlacement: AdsByCountry; // publisher platform (Facebook / Instagram / …)
+  byPlacementDetail: AdsByCountry; // platform × position (e.g. Instagram · Stories)
+  byDeviceDetail: AdsByCountry; // impression device, by spend (Overview donut is by purchases)
   campaigns: AdsCampaignRow[];
 }
 

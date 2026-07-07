@@ -151,14 +151,24 @@
 
 /* Audience breakdown bars (Phase C) */
 .abrk { display: flex; flex-direction: column; gap: 9px; margin-top: 4px; }
-.abrk-row { display: grid; grid-template-columns: 128px 1fr 82px 52px; align-items: center; gap: 10px; }
+.abrk-row { display: grid; grid-template-columns: 118px 1fr 76px 44px 50px; align-items: center; gap: 10px; }
 .abrk-head { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--a-muted); }
-.abrk-head .abrk-val, .abrk-head .abrk-roas { text-align: right; }
+.abrk-head .abrk-val, .abrk-head .abrk-pct, .abrk-head .abrk-roas { text-align: right; }
 .abrk-label { font-size: 12.5px; color: var(--a-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .abrk-track { height: 10px; background: var(--a-subtle); border-radius: 3px; overflow: hidden; }
 .abrk-bar { display: block; height: 100%; background: var(--a-blue-2); border-radius: 3px; }
 .abrk-val { font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.abrk-pct { font-size: 12px; text-align: right; color: var(--a-sec); font-variant-numeric: tabular-nums; }
 .abrk-roas { font-size: 12.5px; text-align: right; color: var(--a-sec); font-variant-numeric: tabular-nums; }
+
+/* Gender split — 100% stacked spend bar + legend */
+.agender-bar { display: flex; height: 16px; border-radius: 5px; overflow: hidden; margin-top: 8px; background: var(--a-subtle); }
+.agender-bar span { display: block; height: 100%; }
+.agender-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 11px; }
+.agender-item { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.agender-item .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.agender-item b { font-weight: 600; color: var(--a-ink); }
+.agender-item .agender-meta { color: var(--a-muted); font-variant-numeric: tabular-nums; }
 
 /* Creatives — controls bar */
 .acrea-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 2px 0 14px; }

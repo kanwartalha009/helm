@@ -58,6 +58,9 @@ final class AdsOverviewQuery
 
         $summary = $this->summary((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money);
 
+        // age_gender fetched once, folded into age×gender + gender + age (Meta only).
+        $ag = $isMeta ? $this->ageGenderBreakdowns((int) $brand->id, $start, $end, $money) : null;
+
         return [
             'brand' => [
                 'id'           => (int) $brand->id,
@@ -66,6 +69,16 @@ final class AdsOverviewQuery
                 'initials'     => $this->initials((string) $brand->name),
                 'baseCurrency' => $brand->base_currency,
                 'timezone'     => $tz,
+                // Ad platforms with an ACTIVE connection on this brand — the UI
+                // only offers a platform toggle for what's actually connected, and
+                // hides Meta-only tabs on non-Meta platforms.
+                'platforms'    => $brand->connections()
+                    ->where('status', 'active')
+                    ->whereIn('platform', ['meta', 'google', 'tiktok'])
+                    ->pluck('platform')
+                    ->unique()
+                    ->values()
+                    ->all(),
             ],
             'platform'   => $platform,
             'period'     => strtolower((string) ($params['period'] ?? 'last30')),
@@ -80,11 +93,15 @@ final class AdsOverviewQuery
             // Meta only. For Google/TikTok they're not applicable, so the panels
             // degrade to a "Meta only" state rather than show Meta's numbers under
             // a Google view.
-            'byCountry'   => $isMeta ? $this->breakdown((int) $brand->id, 'country', $start, $end, $money) : $this->notApplicable(),
-            'byDevice'    => $isMeta ? $this->deviceSplit((int) $brand->id, $start, $end, $money) : ['hasData' => false, 'metric' => 'purchases', 'total' => 0, 'rows' => []],
-            'byAgeGender' => $isMeta ? $this->breakdown((int) $brand->id, 'age_gender', $start, $end, $money) : $this->notApplicable(),
-            'byPlacement' => $isMeta ? $this->breakdown((int) $brand->id, 'placement_platform', $start, $end, $money) : $this->notApplicable(),
-            'campaigns'   => $this->campaigns((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money),
+            'byCountry'         => $isMeta ? $this->breakdown((int) $brand->id, 'country', $start, $end, $money) : $this->notApplicable(),
+            'byDevice'          => $isMeta ? $this->deviceSplit((int) $brand->id, $start, $end, $money) : ['hasData' => false, 'metric' => 'purchases', 'total' => 0, 'rows' => []],
+            'byAgeGender'       => $ag['ageGender'] ?? $this->notApplicable(),
+            'byGender'          => $ag['gender'] ?? $this->notApplicable(),
+            'byAge'             => $ag['age'] ?? $this->notApplicable(),
+            'byPlacement'       => $isMeta ? $this->breakdown((int) $brand->id, 'placement_platform', $start, $end, $money) : $this->notApplicable(),
+            'byPlacementDetail' => $isMeta ? $this->breakdown((int) $brand->id, 'placement', $start, $end, $money) : $this->notApplicable(),
+            'byDeviceDetail'    => $isMeta ? $this->breakdown((int) $brand->id, 'device', $start, $end, $money) : $this->notApplicable(),
+            'campaigns'         => $this->campaigns((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money),
         ];
     }
 
@@ -262,32 +279,144 @@ final class AdsOverviewQuery
             )
             ->get();
 
-        if ($rows->isEmpty()) {
-            return ['hasData' => false, 'top' => null, 'rows' => []];
+        return $this->packRows($rows->map(static fn ($r) => [
+            'key'         => (string) $r->segment_key,
+            'label'       => (string) ($r->segment_label ?: $r->segment_key),
+            'spend'       => (float) $r->spend,
+            'revenue'     => (float) $r->revenue,
+            'purchases'   => (int) $r->purchases,
+            'impressions' => (int) $r->impressions,
+            'clicks'      => (int) $r->clicks,
+        ])->all());
+    }
+
+    /**
+     * Shape a set of pre-summed segment rows into the breakdown payload: derived
+     * ratios + each segment's SHARE of window spend (pct), sorted by spend, capped.
+     * Shared by every breakdown (country / age×gender / gender / age / placement /
+     * device) so they all carry the same fields and a percentage.
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @return array{hasData: bool, top: ?array<string, mixed>, total: float, rows: array<int, array<string, mixed>>}
+     */
+    private function packRows(array $rows): array
+    {
+        if ($rows === []) {
+            return ['hasData' => false, 'top' => null, 'total' => 0.0, 'rows' => []];
         }
 
-        $mapped = $rows->map(static function ($r) {
-            $spend = round((float) $r->spend, 2);
-            $rev   = round((float) $r->revenue, 2);
-            $purch = (int) $r->purchases;
+        $total = 0.0;
+        foreach ($rows as $r) {
+            $total += (float) $r['spend'];
+        }
+
+        $mapped = collect($rows)->map(static function ($r) use ($total) {
+            $spend = round((float) $r['spend'], 2);
+            $rev   = round((float) $r['revenue'], 2);
+            $purch = (int) $r['purchases'];
+            $impr  = (int) $r['impressions'];
+            $clk   = (int) $r['clicks'];
 
             return [
-                'key'         => (string) $r->segment_key,
-                'label'       => (string) ($r->segment_label ?: $r->segment_key),
+                'key'         => (string) $r['key'],
+                'label'       => (string) ($r['label'] !== '' ? $r['label'] : $r['key']),
                 'spend'       => $spend,
                 'revenue'     => $rev,
                 'purchases'   => $purch,
-                'impressions' => (int) $r->impressions,
-                'clicks'      => (int) $r->clicks,
+                'impressions' => $impr,
+                'clicks'      => $clk,
                 'roas'        => $spend > 0 ? round($rev / $spend, 2) : null,
                 'cpa'         => $purch > 0 ? round($spend / $purch, 2) : null,
+                'ctr'         => $impr > 0 ? round($clk / $impr * 100, 2) : null,
+                'pct'         => $total > 0 ? round($spend / $total * 100, 1) : 0.0,
             ];
         })->sortByDesc('spend')->values();
 
         return [
             'hasData' => true,
             'top'     => $mapped->first(),
+            'total'   => round($total, 2),
             'rows'    => $mapped->take(self::MAX_COUNTRY_ROWS)->all(),
+        ];
+    }
+
+    /**
+     * age_gender is stored as "AGE · GENDER" (config meta_breakdowns → ['age',
+     * 'gender']). Fetch it ONCE and fold it three ways for the Audience tab: the
+     * raw age×gender combos, a male/female/unknown split, and an age split — so we
+     * don't hit the table three times.
+     *
+     * @return array{ageGender: array<string,mixed>, gender: array<string,mixed>, age: array<string,mixed>}
+     */
+    private function ageGenderBreakdowns(int $brandId, string $start, string $end, callable $money): array
+    {
+        $rows = MetaBreakdownDaily::query()
+            ->where('brand_id', $brandId)
+            ->where('breakdown_type', 'age_gender')
+            ->whereBetween('date', [$start, $end])
+            ->groupBy('segment_key', 'segment_label')
+            ->selectRaw(
+                'segment_key, segment_label,
+                 COALESCE(SUM(' . $money('spend') . "), 0)            AS spend,
+                 COALESCE(SUM(" . $money('conversion_value') . "), 0) AS revenue,
+                 COALESCE(SUM(conversions), 0)                        AS purchases,
+                 COALESCE(SUM(impressions), 0)                        AS impressions,
+                 COALESCE(SUM(clicks), 0)                             AS clicks"
+            )
+            ->get();
+
+        if ($rows->isEmpty()) {
+            $na = ['hasData' => false, 'top' => null, 'total' => 0.0, 'rows' => []];
+
+            return ['ageGender' => $na, 'gender' => $na, 'age' => $na];
+        }
+
+        $ageGender = $this->packRows($rows->map(static fn ($r) => [
+            'key'         => (string) $r->segment_key,
+            'label'       => (string) ($r->segment_label ?: $r->segment_key),
+            'spend'       => (float) $r->spend,
+            'revenue'     => (float) $r->revenue,
+            'purchases'   => (int) $r->purchases,
+            'impressions' => (int) $r->impressions,
+            'clicks'      => (int) $r->clicks,
+        ])->all());
+
+        // Fold the combos into a single axis (gender or age) by parsing the key.
+        $fold = function (callable $keyer, callable $labeler) use ($rows): array {
+            $acc = [];
+            foreach ($rows as $r) {
+                $k = $keyer((string) $r->segment_key);
+                $acc[$k] ??= ['key' => $k, 'label' => $labeler($k), 'spend' => 0.0, 'revenue' => 0.0, 'purchases' => 0, 'impressions' => 0, 'clicks' => 0];
+                $acc[$k]['spend']       += (float) $r->spend;
+                $acc[$k]['revenue']     += (float) $r->revenue;
+                $acc[$k]['purchases']   += (int) $r->purchases;
+                $acc[$k]['impressions'] += (int) $r->impressions;
+                $acc[$k]['clicks']      += (int) $r->clicks;
+            }
+
+            return $this->packRows(array_values($acc));
+        };
+
+        $genderOf = static function (string $seg): string {
+            $parts = array_map('trim', explode('·', $seg));
+            $g     = strtolower((string) end($parts));
+            if (str_contains($g, 'female')) return 'female';
+            if (str_contains($g, 'male'))   return 'male';
+
+            return 'unknown';
+        };
+        $ageOf = static function (string $seg): string {
+            $a = strtolower(trim((string) (array_map('trim', explode('·', $seg))[0] ?? '')));
+            // Guard the rare gender-only row so a gender word never lands as an age.
+            if ($a === '' || in_array($a, ['female', 'male', 'unknown'], true)) return 'Unknown';
+
+            return $a;
+        };
+
+        return [
+            'ageGender' => $ageGender,
+            'gender'    => $fold($genderOf, static fn ($k) => ucfirst($k)),
+            'age'       => $fold($ageOf, static fn ($k) => $k === 'unknown' ? 'Unknown' : $k),
         ];
     }
 

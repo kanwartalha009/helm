@@ -1213,12 +1213,19 @@ td.col-group-start {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
   border-radius: var(--radius-sm);
+  font: inherit;
   font-size: 13.5px;
   color: var(--text);
+  text-align: left;
   cursor: pointer;
   text-decoration: none;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .dropdown-item:hover {

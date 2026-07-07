@@ -155,9 +155,11 @@ export function AdsCreativesView({ slug, period, platform }: { slug?: string; pe
               ))}
             </div>
             {sorted.length > RENDER_CAP && (
-              <button className="ads-viewall" onClick={() => setExpanded((x) => !x)}>
-                {expanded ? 'Show top 48' : `Show all ${sorted.length}`}
-              </button>
+              <div className="ads-viewall">
+                <button onClick={() => setExpanded((x) => !x)}>
+                  {expanded ? 'Show top 48' : `Show all ${sorted.length}`}
+                </button>
+              </div>
             )}
           </>
         )}

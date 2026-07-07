@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { Breadcrumb } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { AdsBrandOverview } from '@/components/ads/AdsBrandOverview';
+import { AdPlatformToggle, adPlatformsOf } from '@/components/ads/AdPlatformToggle';
 import { useBrand } from '@/hooks/useDashboardData';
 import type { AdsPeriod, AdsPlatform } from '@/types/ads';
 
@@ -23,6 +24,13 @@ export function BrandAdsPage() {
   const [period, setPeriod] = useState<AdsPeriod>('last30');
   const [platform, setPlatform] = useState<AdsPlatform>('meta');
 
+  // Only offer platforms actually connected to this brand; if the current pick
+  // isn't connected, fall back to the first one that is.
+  const available = adPlatformsOf(brand?.platforms);
+  useEffect(() => {
+    if (available.length > 0 && !available.includes(platform)) setPlatform(available[0]);
+  }, [available, platform]);
+
   return (
     <AppLayout title="Ad performance">
       <Breadcrumb
@@ -40,11 +48,7 @@ export function BrandAdsPage() {
           </button>
         ))}
         <span style={{ flex: 1 }} />
-        <div className="segmented">
-          <button type="button" className={platform === 'meta' ? 'active' : ''} onClick={() => setPlatform('meta')}>Meta</button>
-          <button type="button" className={platform === 'google' ? 'active' : ''} onClick={() => setPlatform('google')}>Google</button>
-          <button type="button" disabled title="Coming soon">TikTok</button>
-        </div>
+        <AdPlatformToggle available={available} value={platform} onChange={setPlatform} />
       </div>
 
       <AdsBrandOverview slug={slug} period={period} platform={platform} />
