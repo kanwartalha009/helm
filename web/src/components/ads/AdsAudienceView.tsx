@@ -25,8 +25,8 @@ export function AdsAudienceView({ data }: { data: AdsOverviewResponse }) {
   ];
 
   const panels: { title: string; subtitle: string; bd: AdsByCountry; prettify: (s: string) => string }[] = [
-    { title: 'Gender', subtitle: 'Attributed spend by gender', bd: data.byGender, prettify: (x) => x },
-    { title: 'Age', subtitle: 'Attributed spend by age', bd: data.byAge, prettify: (x) => x },
+    { title: 'Gender', subtitle: 'Attributed spend by gender', bd: data.byGender, prettify: prettyGender },
+    { title: 'Age', subtitle: 'Attributed spend by age', bd: data.byAge, prettify: prettyAge },
     { title: 'Age & gender', subtitle: 'Attributed spend by age × gender', bd: data.byAgeGender, prettify: prettyAgeGender },
     { title: 'Audience', subtitle: 'New vs returning vs engaged', bd: data.byAudience, prettify: prettyAudience },
     { title: 'Placement', subtitle: 'By publisher platform', bd: data.byPlacement, prettify: prettyPlacement },
@@ -40,8 +40,8 @@ export function AdsAudienceView({ data }: { data: AdsOverviewResponse }) {
   // Quick-read: the single best-spending segment on each axis.
   const highlights = [
     { axis: 'Audience', bd: data.byAudience, prettify: prettyAudience },
-    { axis: 'Top age', bd: data.byAge, prettify: (x: string) => x },
-    { axis: 'Top gender', bd: data.byGender, prettify: (x: string) => x },
+    { axis: 'Top age', bd: data.byAge, prettify: prettyAge },
+    { axis: 'Top gender', bd: data.byGender, prettify: prettyGender },
     { axis: 'Top placement', bd: data.byPlacement, prettify: prettyPlacement },
     { axis: 'Top device', bd: data.byDeviceDetail, prettify: prettyDevice },
     { axis: 'Top region', bd: data.byRegion, prettify: (x: string) => x },
@@ -224,11 +224,32 @@ function prettyDevice(s: string): string {
     ipad: 'iPad',
     android_smartphone: 'Android phone',
     android_tablet: 'Android tablet',
+    android: 'Android', // TikTok `platform` dimension
+    ios: 'iOS',
+    pc: 'Desktop',
     unknown: 'Unknown',
+    none: 'Unknown',
   };
   return map[s.toLowerCase()] ?? titleize(s);
 }
 
+// Age + gender normalize BOTH Meta ("25-34", "female") and TikTok's enums
+// ("AGE_25_34", "GENDER_FEMALE"). Check FEMALE before MALE — "FEMALE" contains it.
+function prettyAge(s: string): string {
+  const u = s.toUpperCase().replace(/^AGE[_ ]?/, '').replace(/_/g, '-').trim();
+  if (u === '' || u === 'NONE' || u === 'UNKNOWN') return 'Unknown';
+  if (u === '55-100' || u === '65+') return '55+';
+  return u;
+}
+
+function prettyGender(s: string): string {
+  const u = s.toUpperCase();
+  if (u.includes('FEMALE')) return 'Female';
+  if (u.includes('MALE')) return 'Male';
+  return 'Unknown';
+}
+
 function prettyAgeGender(s: string): string {
-  return s.split('·').map((p, i) => (i === 0 ? p.trim() : titleize(p.trim()))).join(' · ');
+  const parts = s.split('·').map((p) => p.trim());
+  return parts.map((p, i) => (i === 0 ? prettyAge(p) : prettyGender(p))).join(' · ');
 }
