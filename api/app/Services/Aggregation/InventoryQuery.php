@@ -171,36 +171,47 @@ final class InventoryQuery
      */
     private function trend(int $brandId, string $from, string $to): array
     {
+        // Group by the real `date` column (not a SELECT alias) and key by a parsed
+        // date string, so this is safe across MySQL/MariaDB strict modes and
+        // whatever the model casts `date` to.
         $spend = [];
-        $spendRows = AdProductDaily::query()
+        foreach (AdProductDaily::query()
             ->where('brand_id', $brandId)
             ->whereBetween('date', [$from, $to])
-            ->groupBy('d')
-            ->selectRaw('DATE(date) AS d, COALESCE(SUM(spend), 0) AS spend')
-            ->get();
-        foreach ($spendRows as $r) {
-            $spend[(string) $r->d] = (float) $r->spend;
+            ->groupBy('date')
+            ->selectRaw('date, COALESCE(SUM(spend), 0) AS spend')
+            ->get() as $r) {
+            $spend[CarbonImmutable::parse((string) $r->date)->toDateString()] = (float) $r->spend;
         }
 
-        $comm = CommerceDailyMetric::query()
+        // dimension_type='product' + refunds_amount mirror the per-product revenue
+        // in run() exactly (revenue = Total sales + refunds), so the trend
+        // reconciles with the summary; without the dimension filter this would sum
+        // across every dimension_type.
+        $comm = [];
+        foreach (CommerceDailyMetric::query()
             ->where('brand_id', $brandId)
+            ->where('dimension_type', 'product')
             ->whereBetween('date', [$from, $to])
-            ->groupBy('d')
-            ->selectRaw('DATE(date) AS d, COALESCE(SUM(units), 0) AS units, COALESCE(SUM(total_sales), 0) AS total_sales, COALESCE(SUM(refunds), 0) AS refunds')
-            ->get()
-            ->keyBy('d');
+            ->groupBy('date')
+            ->selectRaw('date, COALESCE(SUM(units), 0) AS units, COALESCE(SUM(total_sales), 0) AS total_sales, COALESCE(SUM(refunds_amount), 0) AS refunds')
+            ->get() as $r) {
+            $comm[CarbonImmutable::parse((string) $r->date)->toDateString()] = [
+                'units'   => (int) $r->units,
+                'revenue' => (float) $r->total_sales + (float) $r->refunds,
+            ];
+        }
 
         $out    = [];
         $cursor = CarbonImmutable::parse($from);
         $end    = CarbonImmutable::parse($to);
         while ($cursor->lessThanOrEqualTo($end)) {
             $d = $cursor->toDateString();
-            $c = $comm->get($d);
             $out[] = [
                 'date'    => $d,
-                'spend'   => round((float) ($spend[$d] ?? 0), 2),
-                'revenue' => round((float) (((float) ($c->total_sales ?? 0)) + ((float) ($c->refunds ?? 0))), 2),
-                'units'   => (int) ($c->units ?? 0),
+                'spend'   => round($spend[$d] ?? 0.0, 2),
+                'revenue' => round($comm[$d]['revenue'] ?? 0.0, 2),
+                'units'   => $comm[$d]['units'] ?? 0,
             ];
             $cursor = $cursor->addDay();
         }
