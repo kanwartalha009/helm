@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { cn } from '@/lib/cn';
 import { AdsBrandOverview } from '@/components/ads/AdsBrandOverview';
 import { AdPlatformToggle, adPlatformsOf } from '@/components/ads/AdPlatformToggle';
 import { useDashboardData } from '@/hooks/useDashboardData';
+import { useCurrentUser } from '@/hooks/useSettings';
+import { useUsers } from '@/hooks/useApiData';
 import type { AdsPeriod, AdsPlatform } from '@/types/ads';
 import type { DashboardRow, DashboardRowBrand } from '@/types/domain';
 
 const PERIODS: { key: AdsPeriod; label: string }[] = [
   { key: 'last7', label: 'Last 7 days' },
   { key: 'last30', label: 'Last 30 days' },
+  { key: 'lastmonth', label: 'Last month' },
   { key: 'mtd', label: 'Month to date' },
 ];
 
@@ -19,11 +22,16 @@ const PERIODS: { key: AdsPeriod; label: string }[] = [
  * White-label friendly: reads as "pick a client".
  */
 export function AdsPage() {
+  const { data: user } = useCurrentUser();
+  const canFilterByManager = user?.role === 'master_admin' || user?.role === 'manager';
+
+  const [manager, setManager] = useState<string>('me');
   const [selectedSlug, setSelectedSlug] = useState<string | undefined>(undefined);
   const [period, setPeriod] = useState<AdsPeriod>('last30');
   const [platform, setPlatform] = useState<AdsPlatform>('meta');
 
-  const { data: rows = [], isLoading } = useDashboardData('me');
+  const { data: rows = [], isLoading } = useDashboardData(manager);
+  const { data: managerUsers = [] } = useUsers(canFilterByManager);
 
   const brands = useMemo<DashboardRowBrand[]>(() => {
     const seen = new Set<string>();
@@ -65,7 +73,12 @@ export function AdsPage() {
   if (!selectedSlug) {
     return (
       <AppLayout title="Ads">
-        <Chooser brands={brands} loading={isLoading} onSelect={setSelectedSlug} />
+        <Chooser
+          brands={brands}
+          loading={isLoading}
+          onSelect={setSelectedSlug}
+          managerFilter={canFilterByManager ? <ManagerMenu manager={manager} setManager={setManager} managerUsers={managerUsers} /> : null}
+        />
       </AppLayout>
     );
   }
@@ -74,18 +87,87 @@ export function AdsPage() {
     <AppLayout title="Ads">
       <div className="filter-bar mb-16">
         <BrandSwitcher brands={brands} selected={selected} onSelect={setSelectedSlug} />
-        <span style={{ width: 10 }} />
-        {PERIODS.map((p) => (
-          <button key={p.key} type="button" className={cn('chip', period === p.key && 'active')} onClick={() => setPeriod(p.key)}>
-            {p.label}
-          </button>
-        ))}
+        {canFilterByManager && <ManagerMenu manager={manager} setManager={setManager} managerUsers={managerUsers} />}
+        <span style={{ width: 4 }} />
+        <div className="segmented">
+          {PERIODS.map((p) => (
+            <button key={p.key} type="button" className={period === p.key ? 'active' : ''} onClick={() => setPeriod(p.key)}>{p.label}</button>
+          ))}
+        </div>
         <span style={{ flex: 1 }} />
         <AdPlatformToggle available={available} value={platform} onChange={setPlatform} />
       </div>
 
       <AdsBrandOverview slug={selectedSlug} period={period} platform={platform} />
     </AppLayout>
+  );
+}
+
+/** Brand-manager filter (master admin / manager only) — scopes the brand list. */
+function ManagerMenu({
+  manager,
+  setManager,
+  managerUsers,
+}: {
+  manager: string;
+  setManager: (m: string) => void;
+  managerUsers: Array<{ id: number; name: string; status: string }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener('mousedown', h);
+    return () => window.removeEventListener('mousedown', h);
+  }, [open]);
+
+  const active = managerUsers.filter((u) => u.status === 'active');
+  const label =
+    manager === 'me' ? 'My brands'
+    : manager === 'all' ? 'All brands'
+    : manager === 'unassigned' ? 'No user assigned'
+    : active.find((u) => String(u.id) === manager)?.name ?? 'Manager';
+  const pick = (m: string) => { setManager(m); setOpen(false); };
+
+  return (
+    <div className={cn('dropdown', open && 'open')} ref={ref} style={{ display: 'inline-block' }}>
+      <button type="button" className="filter-btn" onClick={() => setOpen((v) => !v)}>
+        Manager: <strong style={{ fontWeight: 500 }}>{label}</strong>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13" style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      <div className="dropdown-menu down" style={{ minWidth: 216, padding: 6 }}>
+        <div className="dropdown-label">Brand manager</div>
+        <MItem on={manager === 'me'} onClick={() => pick('me')}>My brands</MItem>
+        <MItem on={manager === 'all'} onClick={() => pick('all')}>All brands</MItem>
+        <MItem on={manager === 'unassigned'} onClick={() => pick('unassigned')}>No user assigned</MItem>
+        {active.length > 0 && (
+          <>
+            <div className="dropdown-divider" />
+            <div className="dropdown-label">By user</div>
+            {active.map((u) => (
+              <MItem key={u.id} on={manager === String(u.id)} onClick={() => pick(String(u.id))}>{u.name}</MItem>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MItem({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" className="dropdown-item" onClick={onClick}>
+      <span style={{ flex: 1 }}>{children}</span>
+      {on && (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" width="14" height="14" style={{ color: 'var(--text)' }}>
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      )}
+    </button>
   );
 }
 
@@ -164,10 +246,12 @@ function Chooser({
   brands,
   loading,
   onSelect,
+  managerFilter,
 }: {
   brands: DashboardRowBrand[];
   loading: boolean;
   onSelect: (slug: string) => void;
+  managerFilter?: ReactNode;
 }) {
   const [q, setQ] = useState('');
   const filtered = brands.filter((b) => b.name.toLowerCase().includes(q.trim().toLowerCase()));
@@ -175,9 +259,11 @@ function Chooser({
   return (
     <div style={{ maxWidth: 560, margin: '7vh auto 0' }}>
       <h2 style={{ textAlign: 'center', marginBottom: 6 }}>Choose a brand</h2>
-      <p className="lede" style={{ textAlign: 'center', margin: '0 auto 22px', maxWidth: 440 }}>
+      <p className="lede" style={{ textAlign: 'center', margin: '0 auto 18px', maxWidth: 440 }}>
         Open a store to see its Meta ad performance — ROAS, spend, funnel, regions and campaigns.
       </p>
+
+      {managerFilter && <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>{managerFilter}</div>}
 
       <div style={{ position: 'relative' }}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16" style={{ position: 'absolute', left: 12, top: 12, color: 'var(--text-muted)', pointerEvents: 'none' }}>

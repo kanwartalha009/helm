@@ -4,7 +4,7 @@
 // ?currency=USD. Metrics are Meta-ATTRIBUTED (7d_click purchases + value ÷
 // spend), not blended — an ads view ranks campaigns / countries / devices.
 
-export type AdsPeriod = 'last7' | 'last14' | 'last30' | 'mtd' | 'custom';
+export type AdsPeriod = 'last7' | 'last14' | 'last30' | 'mtd' | 'lastmonth' | 'custom';
 export type AdsPlatform = 'meta' | 'google' | 'tiktok';
 
 export interface AdsBrand {

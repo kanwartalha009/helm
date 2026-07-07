@@ -1,6 +1,6 @@
 import { countryName } from './countryNames';
 import { formatMoney, formatNumber, formatRoas } from '@/lib/formatters';
-import type { AdsByCountry, AdsOverviewResponse } from '@/types/ads';
+import type { AdsByCountry, AdsOverviewResponse, AdsTrendPoint } from '@/types/ads';
 import '@/styles/ads.css';
 
 /**
@@ -13,7 +13,16 @@ import '@/styles/ads.css';
 export function AdsAudienceView({ data }: { data: AdsOverviewResponse }) {
   const currency = data.currency === 'usd' ? 'USD' : data.brand.baseCurrency || 'EUR';
   const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+  const unit = (v: number | null) => formatMoney(v, currency);
   const s = data.summary;
+
+  const kpis: { key: 'roas' | 'revenue' | 'purchases' | 'cpa' | 'aov'; label: string; color: string; goodUp: boolean; fmt: (v: number | null) => string; series: (t: AdsTrendPoint) => number }[] = [
+    { key: 'roas', label: 'ROAS', color: '#2563EB', goodUp: true, fmt: (v) => formatRoas(v), series: (t) => (t.spend > 0 ? t.revenue / t.spend : 0) },
+    { key: 'revenue', label: 'Revenue', color: '#16A34A', goodUp: true, fmt: money, series: (t) => t.revenue },
+    { key: 'purchases', label: 'Purchases', color: '#0EA5B7', goodUp: true, fmt: (v) => formatNumber(v), series: (t) => t.purchases },
+    { key: 'cpa', label: 'CPA', color: '#64748B', goodUp: false, fmt: unit, series: (t) => (t.purchases > 0 ? t.spend / t.purchases : 0) },
+    { key: 'aov', label: 'AOV', color: '#EC4899', goodUp: true, fmt: unit, series: (t) => (t.purchases > 0 ? t.revenue / t.purchases : 0) },
+  ];
 
   const panels: { title: string; subtitle: string; bd: AdsByCountry; prettify: (s: string) => string }[] = [
     { title: 'Age', subtitle: 'Attributed spend by age', bd: data.byAge, prettify: (x) => x },
@@ -31,13 +40,28 @@ export function AdsAudienceView({ data }: { data: AdsOverviewResponse }) {
       <div className="ads-panel">
         <div className="ads-ph"><h3>Audience overview</h3></div>
         <div className="ads-psub">All attributed performance · {data.from} – {data.to}</div>
-        <div className="acrea-kpis" style={{ marginTop: 10 }}>
-          <Kpi label="Spend" value={money(s.spend)} />
-          <Kpi label="Revenue" value={money(s.revenue)} />
-          <Kpi label="ROAS" value={formatRoas(s.roas)} />
-          <Kpi label="Purchases" value={formatNumber(s.purchases)} />
-          <Kpi label="CTR" value={s.ctr != null ? `${s.ctr}%` : '—'} />
-          <Kpi label="CPA" value={s.cpa != null ? money(s.cpa) : '—'} />
+        <div className="ads-kpis">
+          {kpis.map((k) => (
+            <div className="ads-kpi" key={k.key}>
+              <div className="akpi-top">
+                <span className="akpi-tick" style={{ background: k.color }} />
+                <span className="akpi-label">{k.label}</span>
+                <Delta v={s.delta?.[k.key] ?? null} goodUp={k.goodUp} />
+              </div>
+              <div className="akpi-bot">
+                <span className="akpi-val">{k.fmt(s[k.key])}</span>
+                <Spark series={data.trend.map(k.series)} color={k.color} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="ads-eff">
+          <EffStat label="Spend" value={money(s.spend)} />
+          <EffStat label="CTR" value={s.ctr != null ? `${s.ctr}%` : '—'} />
+          <EffStat label="CPM" value={unit(s.cpm)} />
+          <EffStat label="CPC" value={unit(s.cpc)} />
+          <EffStat label="Reach" value={s.reach != null ? formatNumber(s.reach) : '—'} />
+          <EffStat label="Frequency" value={s.frequency != null ? s.frequency.toFixed(2) : '—'} />
         </div>
       </div>
 
@@ -61,11 +85,36 @@ export function AdsAudienceView({ data }: { data: AdsOverviewResponse }) {
   );
 }
 
-function Kpi({ label, value }: { label: string; value: string }) {
+function Delta({ v, goodUp }: { v: number | null; goodUp: boolean }) {
+  if (v == null) return <span className="akpi-delta">—</span>;
+  const up = v >= 0;
+  const good = goodUp ? up : !up;
   return (
-    <div className="acrea-kpi">
-      <div className="k-label">{label}</div>
-      <div className="k-val">{value}</div>
+    <span className="akpi-delta" style={{ color: good ? '#16A34A' : '#B91C1C' }}>
+      {up ? '▲' : '▼'} {Math.abs(v)}%
+    </span>
+  );
+}
+
+function Spark({ series, color }: { series: number[]; color: string }) {
+  if (series.length < 2) return <span className="akpi-spark" />;
+  const max = Math.max(...series);
+  const min = Math.min(...series);
+  const rng = max - min || 1;
+  const W = 74, H = 30;
+  const pts = series.map((v, i) => `${((i / (series.length - 1)) * W).toFixed(1)},${(H - ((v - min) / rng) * H).toFixed(1)}`).join(' ');
+  return (
+    <svg className="akpi-spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function EffStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="ads-eff-stat">
+      <span className="l">{label}</span>
+      <span className="v num">{value}</span>
     </div>
   );
 }

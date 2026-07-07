@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { Breadcrumb } from '@/components/ui';
-import { cn } from '@/lib/cn';
 import { AdsBrandOverview } from '@/components/ads/AdsBrandOverview';
 import { AdPlatformToggle, adPlatformsOf } from '@/components/ads/AdPlatformToggle';
 import { useBrand } from '@/hooks/useDashboardData';
@@ -11,6 +10,7 @@ import type { AdsPeriod, AdsPlatform } from '@/types/ads';
 const PERIODS: { key: AdsPeriod; label: string }[] = [
   { key: 'last7', label: 'Last 7 days' },
   { key: 'last30', label: 'Last 30 days' },
+  { key: 'lastmonth', label: 'Last month' },
   { key: 'mtd', label: 'Month to date' },
 ];
 
@@ -42,11 +42,11 @@ export function BrandAdsPage() {
       />
 
       <div className="filter-bar mb-16" style={{ marginTop: 12 }}>
-        {PERIODS.map((p) => (
-          <button key={p.key} type="button" className={cn('chip', period === p.key && 'active')} onClick={() => setPeriod(p.key)}>
-            {p.label}
-          </button>
-        ))}
+        <div className="segmented">
+          {PERIODS.map((p) => (
+            <button key={p.key} type="button" className={period === p.key ? 'active' : ''} onClick={() => setPeriod(p.key)}>{p.label}</button>
+          ))}
+        </div>
         <span style={{ flex: 1 }} />
         <AdPlatformToggle available={available} value={platform} onChange={setPlatform} />
       </div>

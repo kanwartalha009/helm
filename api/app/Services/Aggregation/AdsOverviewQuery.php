@@ -774,6 +774,14 @@ final class AdsOverviewQuery
             return [$from->toDateString(), $to->toDateString()];
         }
 
+        // Last month = the previous full calendar month (always complete, so its
+        // end is the month's last day, not yesterday).
+        if ($period === 'lastmonth') {
+            $lm = $now->startOfMonth()->subMonth();
+
+            return [$lm->toDateString(), $lm->endOfMonth()->toDateString()];
+        }
+
         $start = match ($period) {
             'last7'  => $now->subDays(7)->startOfDay(),
             'last14' => $now->subDays(14)->startOfDay(),
