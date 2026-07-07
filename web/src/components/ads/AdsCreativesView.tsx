@@ -119,9 +119,11 @@ export function AdsCreativesView({ slug, period, platform }: { slug?: string; pe
           <Seg value={media} onChange={(v) => { setMedia(v); setExpanded(false); }} options={[['all', 'All'], ['video', 'Video'], ['image', 'Image']]} />
           <div className="acrea-sort">
             <span className="acrea-sort-lbl">Sort</span>
-            {SORTS.map((s) => (
-              <button key={s.key} className={`acrea-chip${sortKey === s.key ? ' is-on' : ''}`} onClick={() => setSortKey(s.key)}>{s.label}</button>
-            ))}
+            <div className="acrea-seg">
+              {SORTS.map((s) => (
+                <button key={s.key} className={sortKey === s.key ? 'is-on' : ''} onClick={() => setSortKey(s.key)}>{s.label}</button>
+              ))}
+            </div>
             <button
               className="acrea-dir"
               onClick={() => setDir((x) => (x === 'desc' ? 'asc' : 'desc'))}
@@ -133,13 +135,13 @@ export function AdsCreativesView({ slug, period, platform }: { slug?: string; pe
           <Seg value={chip} onChange={setChip} options={PERIODS.map((p) => [p.key, p.label] as [PeriodChip, string])} className="acrea-seg-right" />
         </div>
 
-        {/* KPI strip — recomputed for the active media filter */}
-        <div className="acrea-kpis">
-          <Kpi label="Unique creatives" value={String(kpi.count)} />
-          <Kpi label="Weighted ROAS" value={formatRoas(kpi.roas)} />
-          <Kpi label="Weighted CTR" value={kpi.ctr != null ? `${kpi.ctr.toFixed(2)}%` : '—'} />
-          <Kpi label="Total spend" value={money(kpi.spend)} />
-          <Kpi label="Spend shown" value={kpi.visiblePct != null ? `${Math.round(kpi.visiblePct)}%` : '—'} />
+        {/* KPI strip — full width, recomputed for the active media filter */}
+        <div className="ads-kpis">
+          <KpiCard label="Unique creatives" color="#64748B" value={String(kpi.count)} />
+          <KpiCard label="Weighted ROAS" color="#2563EB" value={formatRoas(kpi.roas)} series={d.trend.map((t) => (t.spend > 0 ? t.revenue / t.spend : 0))} />
+          <KpiCard label="Weighted CTR" color="#0EA5B7" value={kpi.ctr != null ? `${kpi.ctr.toFixed(2)}%` : '—'} series={d.trend.map((t) => (t.impressions > 0 ? (t.clicks / t.impressions) * 100 : 0))} />
+          <KpiCard label="Total spend" color="#16A34A" value={money(kpi.spend)} series={d.trend.map((t) => t.spend)} />
+          <KpiCard label="Spend shown" color="#EC4899" value={kpi.visiblePct != null ? `${Math.round(kpi.visiblePct)}%` : '—'} pct={kpi.visiblePct} />
         </div>
         <div className="acrea-head">
           {mediaIcon} {mediaLabel} · {kpi.count} {kpi.count === 1 ? 'creative' : 'creatives'} · {d.from} – {d.to}
@@ -179,12 +181,36 @@ function Seg<T extends string>({ value, onChange, options, className }: { value:
   );
 }
 
-function Kpi({ label, value }: { label: string; value: string }) {
+function KpiCard({ label, color, value, series, pct }: { label: string; color: string; value: string; series?: number[]; pct?: number | null }) {
   return (
-    <div className="acrea-kpi">
-      <div className="k-label">{label}</div>
-      <div className="k-val">{value}</div>
+    <div className="ads-kpi">
+      <div className="akpi-top">
+        <span className="akpi-tick" style={{ background: color }} />
+        <span className="akpi-label">{label}</span>
+      </div>
+      <div className="akpi-bot">
+        <span className="akpi-val">{value}</span>
+        {series && series.length > 1 ? (
+          <Spark series={series} color={color} />
+        ) : pct != null ? (
+          <span className="akpi-progress"><span style={{ width: `${Math.min(100, Math.max(0, Math.round(pct)))}%`, background: color }} /></span>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+function Spark({ series, color }: { series: number[]; color: string }) {
+  if (series.length < 2) return <span className="akpi-spark" />;
+  const max = Math.max(...series);
+  const min = Math.min(...series);
+  const rng = max - min || 1;
+  const W = 74, H = 30;
+  const pts = series.map((v, i) => `${((i / (series.length - 1)) * W).toFixed(1)},${(H - ((v - min) / rng) * H).toFixed(1)}`).join(' ');
+  return (
+    <svg className="akpi-spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
   );
 }
 

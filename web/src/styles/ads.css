@@ -170,6 +170,20 @@
 .agender-item b { font-weight: 600; color: var(--a-ink); }
 .agender-item .agender-meta { color: var(--a-muted); font-variant-numeric: tabular-nums; }
 
+/* Audience — even 2-col grid (split bars) */
+.ads-grid-even { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; margin-top: 14px; }
+
+/* Top-segment highlight cards */
+.ahi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 6px; }
+.ahi-card { border: 1px solid var(--a-border); border-radius: 10px; padding: 11px 13px; background: var(--a-surface); border-left: 3px solid var(--a-blue); }
+.ahi-axis { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--a-muted); }
+.ahi-seg { font-size: 14px; font-weight: 600; color: var(--a-ink); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ahi-meta { font-size: 11.5px; color: var(--a-sec); margin-top: 3px; font-variant-numeric: tabular-nums; }
+
+/* Creatives KPI — 'spend shown' progress bar (no daily series to sparkline) */
+.akpi-progress { flex: 0 0 auto; width: 74px; height: 8px; border-radius: 4px; background: var(--a-subtle); overflow: hidden; align-self: center; }
+.akpi-progress span { display: block; height: 100%; border-radius: 4px; }
+
 /* Creatives — controls bar */
 .acrea-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 2px 0 14px; }
 .acrea-seg { display: inline-flex; border: 1px solid var(--a-border); border-radius: 8px; overflow: hidden; }
@@ -258,5 +272,5 @@
 .ads-viewall button:hover { background: var(--a-subtle); border-color: var(--a-muted); }
 
 @media (max-width: 1024px) {
-  .ads-grid-2, .aregion { grid-template-columns: 1fr; }
+  .ads-grid-2, .ads-grid-even, .aregion { grid-template-columns: 1fr; }
 }

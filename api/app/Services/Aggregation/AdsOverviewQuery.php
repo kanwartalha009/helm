@@ -101,6 +101,8 @@ final class AdsOverviewQuery
             'byPlacement'       => $isMeta ? $this->breakdown((int) $brand->id, 'placement_platform', $start, $end, $money) : $this->notApplicable(),
             'byPlacementDetail' => $isMeta ? $this->breakdown((int) $brand->id, 'placement', $start, $end, $money) : $this->notApplicable(),
             'byDeviceDetail'    => $isMeta ? $this->breakdown((int) $brand->id, 'device', $start, $end, $money) : $this->notApplicable(),
+            'byAudience'        => $isMeta ? $this->breakdown((int) $brand->id, 'audience', $start, $end, $money) : $this->notApplicable(),
+            'byRegion'          => $isMeta ? $this->regionRollup((int) $brand->id, $start, $end, $money) : $this->notApplicable(),
             'campaigns'         => $this->campaigns((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money),
         ];
     }
@@ -421,6 +423,59 @@ final class AdsOverviewQuery
     }
 
     /**
+     * Region rollup — the stored country breakdown grouped into regions (Europe,
+     * North America, …) via the country_regions config. Derived from data we
+     * already have (no separate `region` backfill needed); unmapped codes fold
+     * into "Other" so regions reconcile to 100%.
+     *
+     * @return array{hasData: bool, top: ?array<string, mixed>, total: float, rows: array<int, array<string, mixed>>}
+     */
+    private function regionRollup(int $brandId, string $start, string $end, callable $money): array
+    {
+        $rows = MetaBreakdownDaily::query()
+            ->where('brand_id', $brandId)
+            ->where('breakdown_type', 'country')
+            ->whereBetween('date', [$start, $end])
+            ->groupBy('segment_key', 'segment_label')
+            ->selectRaw(
+                'segment_key,
+                 COALESCE(SUM(' . $money('spend') . "), 0)            AS spend,
+                 COALESCE(SUM(" . $money('conversion_value') . "), 0) AS revenue,
+                 COALESCE(SUM(conversions), 0)                        AS purchases,
+                 COALESCE(SUM(impressions), 0)                        AS impressions,
+                 COALESCE(SUM(clicks), 0)                             AS clicks"
+            )
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return ['hasData' => false, 'top' => null, 'total' => 0.0, 'rows' => []];
+        }
+
+        $acc = [];
+        foreach ($rows as $r) {
+            $region = $this->countryRegion((string) $r->segment_key);
+            $acc[$region] ??= ['key' => $region, 'label' => $region, 'spend' => 0.0, 'revenue' => 0.0, 'purchases' => 0, 'impressions' => 0, 'clicks' => 0];
+            $acc[$region]['spend']       += (float) $r->spend;
+            $acc[$region]['revenue']     += (float) $r->revenue;
+            $acc[$region]['purchases']   += (int) $r->purchases;
+            $acc[$region]['impressions'] += (int) $r->impressions;
+            $acc[$region]['clicks']      += (int) $r->clicks;
+        }
+
+        return $this->packRows(array_values($acc));
+    }
+
+    /** Map an ISO-2 country code to its region label (country_regions config). */
+    private function countryRegion(string $code): string
+    {
+        $labels = (array) config('country_regions.labels', []);
+        $map    = (array) config('country_regions.map', []);
+        $key    = $map[strtoupper(trim($code))] ?? 'other';
+
+        return (string) ($labels[$key] ?? 'Other');
+    }
+
+    /**
      * Device split by attributed purchases (the donut). Empty until the `device`
      * breakdown has been backfilled.
      *
@@ -649,7 +704,7 @@ final class AdsOverviewQuery
             ->get();
 
         if ($rows->isEmpty()) {
-            return $base + ['hasData' => false, 'count' => 0, 'totalSpend' => 0.0, 'rows' => []];
+            return $base + ['hasData' => false, 'count' => 0, 'totalSpend' => 0.0, 'trend' => [], 'rows' => []];
         }
 
         // Prior equal-length window, spend per ad — the baseline for WoW% and the
@@ -716,10 +771,36 @@ final class AdsOverviewQuery
             ];
         })->sortByDesc('spend')->values()->take(200)->all();
 
+        // Daily trend (all creatives summed) — powers the KPI-strip sparklines.
+        $trend = AdCreativeDaily::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', $platform)
+            ->whereBetween('date', [$start, $end])
+            ->groupBy('date')
+            ->orderBy('date')
+            ->selectRaw(
+                'date,
+                 COALESCE(SUM(' . $money('spend') . "), 0)            AS spend,
+                 COALESCE(SUM(" . $money('conversion_value') . "), 0) AS revenue,
+                 COALESCE(SUM(conversions), 0)                        AS purchases,
+                 COALESCE(SUM(impressions), 0)                        AS impressions,
+                 COALESCE(SUM(clicks), 0)                             AS clicks"
+            )
+            ->get()
+            ->map(static fn ($r) => [
+                'date'        => $r->date->toDateString(),
+                'spend'       => round((float) $r->spend, 2),
+                'revenue'     => round((float) $r->revenue, 2),
+                'purchases'   => (int) $r->purchases,
+                'impressions' => (int) $r->impressions,
+                'clicks'      => (int) $r->clicks,
+            ])->all();
+
         return $base + [
             'hasData'    => true,
             'count'      => $rows->count(),
             'totalSpend' => $totalSpend,
+            'trend'      => $trend,
             'rows'       => $mapped,
         ];
     }

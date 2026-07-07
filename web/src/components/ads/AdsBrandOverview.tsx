@@ -1,6 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { Banner } from '@/components/ui';
-import { cn } from '@/lib/cn';
 import { AdsOverviewView } from './AdsOverviewView';
 import { AdsAudienceView } from './AdsAudienceView';
 import { AdsCreativesView } from './AdsCreativesView';
@@ -51,9 +50,11 @@ export function AdsBrandOverview({ slug, period, platform }: { slug: string | un
       )}
       {tabs.length > 1 && (
         <div className="filter-bar mb-12">
-          {tabs.map((t) => (
-            <button key={t.key} type="button" className={cn('chip', active === t.key && 'active')} onClick={() => setTab(t.key)}>{t.label}</button>
-          ))}
+          <div className="segmented">
+            {tabs.map((t) => (
+              <button key={t.key} type="button" className={active === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>{t.label}</button>
+            ))}
+          </div>
         </div>
       )}
       {active === 'overview' ? (

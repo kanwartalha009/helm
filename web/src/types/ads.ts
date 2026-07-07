@@ -126,6 +126,8 @@ export interface AdsOverviewResponse {
   byPlacement: AdsByCountry; // publisher platform (Facebook / Instagram / …)
   byPlacementDetail: AdsByCountry; // platform × position (e.g. Instagram · Stories)
   byDeviceDetail: AdsByCountry; // impression device, by spend (Overview donut is by purchases)
+  byAudience: AdsByCountry; // ASC segment: new / engaged / existing / unknown
+  byRegion: AdsByCountry; // country rolled up into regions (Europe, North America, …)
   campaigns: AdsCampaignRow[];
 }
 
@@ -176,5 +178,6 @@ export interface AdsCreativesResponse {
   baseCurrency: string;
   count: number; // total ads analyzed in the window (uncapped)
   totalSpend: number; // total spend across all ads (denominator for % visible)
+  trend: AdsTrendPoint[]; // daily totals across all creatives — powers KPI sparklines
   rows: AdsCreative[];
 }
