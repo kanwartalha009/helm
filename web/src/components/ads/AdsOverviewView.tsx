@@ -64,8 +64,8 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
           <EffStat label="CPM" value={unit(s.cpm)} />
           <EffStat label="CPC" value={unit(s.cpc)} />
           <EffStat label="CTR" value={s.ctr != null ? `${s.ctr}%` : '—'} />
-          <EffStat label="Reach" value={s.reach != null ? formatNumber(s.reach) : '—'} />
-          <EffStat label="Frequency" value={s.frequency != null ? s.frequency.toFixed(2) : '—'} />
+          {s.reach != null && <EffStat label="Reach" value={formatNumber(s.reach)} />}
+          {s.frequency != null && <EffStat label="Frequency" value={s.frequency.toFixed(2)} />}
         </div>
       </div>
 

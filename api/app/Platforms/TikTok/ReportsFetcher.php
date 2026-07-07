@@ -55,6 +55,8 @@ final class ReportsFetcher
         $clicks      = 0;
         $conversions = 0;
         $value       = 0.0;
+        $reach       = 0;
+        $sawReach    = false;
 
         foreach ($advertiserIds as $advertiserId) {
             foreach ($this->reportRows($advertiserId, $day, $purchaseMetric, $valueMetric) as $row) {
@@ -66,6 +68,10 @@ final class ReportsFetcher
                 // generic conversion count (base-set fallback).
                 $conversions += (int) round((float) ($m[$purchaseMetric] ?? $m['conversion'] ?? 0));
                 $value       += (float) ($m[$valueMetric] ?? 0);
+                if (array_key_exists('reach', $m)) {
+                    $sawReach = true;
+                    $reach   += (int) $m['reach'];
+                }
             }
         }
 
@@ -79,6 +85,9 @@ final class ReportsFetcher
             clicks: $clicks,
             conversions: $conversions,
             conversionValue: round($value, 2),
+            // reach stays null (→ UI hides Reach/Frequency) when TikTok didn't
+            // return it, e.g. the metric fell back out; a real 0 is kept as null too.
+            reach: ($sawReach && $reach > 0) ? $reach : null,
             metadata: ['advertiser_ids' => array_values($advertiserIds)],
             isComplete: $isComplete,
         );
@@ -95,9 +104,10 @@ final class ReportsFetcher
     private function reportRows(string $advertiserId, string $day, string $purchaseMetric, string $valueMetric): array
     {
         $base = ['spend', 'impressions', 'clicks', 'conversion'];
-        $rich = array_values(array_unique([...$base, $purchaseMetric, $valueMetric]));
+        $mid  = [...$base, 'reach']; // reach is standard — keep it even if the value metric is unknown
+        $rich = array_values(array_unique([...$mid, $purchaseMetric, $valueMetric]));
 
-        foreach ([$rich, $base] as $metrics) {
+        foreach ([$rich, $mid, $base] as $metrics) {
             try {
                 $data = $this->client->get('report/integrated/get/', [
                     'advertiser_id' => $advertiserId,
