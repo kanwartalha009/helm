@@ -128,7 +128,30 @@ export interface AdsOverviewResponse {
   byDeviceDetail: AdsByCountry; // impression device, by spend (Overview donut is by purchases)
   byAudience: AdsByCountry; // ASC segment: new / engaged / existing / unknown
   byRegion: AdsByCountry; // country rolled up into regions (Europe, North America, …)
+  tiktokNative: AdsTikTokNative | null; // TikTok-only video + social engagement
   campaigns: AdsCampaignRow[];
+}
+
+// TikTok-native engagement (video completion + social) — TikTok only.
+export interface AdsTikTokNative {
+  hasData: boolean;
+  video: {
+    plays: number;
+    watched2s: number;
+    watched6s: number;
+    p25: number;
+    p50: number;
+    p75: number;
+    p100: number;
+    completionRate: number | null; // p100 ÷ plays %
+  };
+  social: {
+    likes: number;
+    comments: number;
+    shares: number;
+    follows: number;
+    profileVisits: number;
+  };
 }
 
 // Campaign drill-down (Phase B) — one campaign's KPIs + daily trend.

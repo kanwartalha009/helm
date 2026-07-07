@@ -25,6 +25,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
   const unit = (v: number | null) => formatMoney(v, currency);
   const s = data.summary;
   const isMeta = data.platform === 'meta';
+  const breakdownable = data.platform === 'meta' || data.platform === 'tiktok';
   const platformLabel = data.platform === 'google' ? 'Google' : data.platform === 'tiktok' ? 'TikTok' : 'Meta';
   const [drill, setDrill] = useState<{ id: string; name: string } | null>(null);
   const [showAllRegions, setShowAllRegions] = useState(false);
@@ -93,8 +94,8 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
         </div>
       </div>
 
-      {/* Region + device — Meta-only breakdowns; hidden on other platforms. */}
-      {isMeta && (
+      {/* Region + device — Meta + TikTok breakdowns; hidden on platforms without them (Google). */}
+      {breakdownable && (
       <div className="ads-grid-2">
         <div className="ads-panel">
           <div className="ads-ph"><h3>Performance by region</h3></div>
@@ -140,7 +141,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
               </div>
             </div>
           ) : (
-            <div className="ads-empty">{data.platform === 'meta' ? (<>Country breakdown not synced yet. Run <code>meta:backfill-breakdown country</code> for this brand.</>) : 'Region breakdown is available for Meta only.'}</div>
+            <div className="ads-empty">{data.platform === 'tiktok' ? (<>Country breakdown not synced yet. Run <code>tiktok:backfill-breakdown --type=country</code> for this brand.</>) : data.platform === 'meta' ? (<>Country breakdown not synced yet. Run <code>meta:backfill-breakdown country</code> for this brand.</>) : 'Region breakdown is available for Meta only.'}</div>
           )}
         </div>
 
@@ -150,10 +151,32 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
           {data.byDevice.hasData ? (
             <DeviceDonut device={data.byDevice} />
           ) : (
-            <div className="ads-empty">{data.platform === 'meta' ? (<>Device breakdown not synced yet. Run <code>meta:backfill-breakdown device</code> for this brand.</>) : 'Device breakdown is available for Meta only.'}</div>
+            <div className="ads-empty">{data.platform === 'tiktok' ? (<>Device breakdown not synced yet. Run <code>tiktok:backfill-breakdown --type=device</code> for this brand.</>) : data.platform === 'meta' ? (<>Device breakdown not synced yet. Run <code>meta:backfill-breakdown device</code> for this brand.</>) : 'Device breakdown is available for Meta only.'}</div>
           )}
         </div>
       </div>
+      )}
+
+      {/* TikTok-native engagement — video completion + social (TikTok only) */}
+      {data.tiktokNative && (
+        <div className="ads-panel">
+          <div className="ads-ph"><h3>TikTok engagement</h3></div>
+          <div className="ads-psub">Video completion &amp; social · {rangeLabel(data.from, data.to)}</div>
+          <div className="ads-eff">
+            <EffStat label="Video plays" value={formatNumber(data.tiktokNative.video.plays)} />
+            <EffStat label="2-sec views" value={formatNumber(data.tiktokNative.video.watched2s)} />
+            <EffStat label="6-sec views" value={formatNumber(data.tiktokNative.video.watched6s)} />
+            <EffStat label="Completed" value={formatNumber(data.tiktokNative.video.p100)} />
+            <EffStat label="Completion" value={data.tiktokNative.video.completionRate != null ? `${data.tiktokNative.video.completionRate}%` : '—'} />
+          </div>
+          <div className="ads-eff" style={{ marginTop: 10 }}>
+            <EffStat label="Likes" value={formatNumber(data.tiktokNative.social.likes)} />
+            <EffStat label="Comments" value={formatNumber(data.tiktokNative.social.comments)} />
+            <EffStat label="Shares" value={formatNumber(data.tiktokNative.social.shares)} />
+            <EffStat label="Follows" value={formatNumber(data.tiktokNative.social.follows)} />
+            <EffStat label="Profile visits" value={formatNumber(data.tiktokNative.social.profileVisits)} />
+          </div>
+        </div>
       )}
 
       {/* Campaign analysis */}

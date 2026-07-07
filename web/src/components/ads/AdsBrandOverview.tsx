@@ -20,10 +20,13 @@ export function AdsBrandOverview({ slug, period, platform }: { slug: string | un
 
   // Meta-only tabs disappear off Meta; snap back to Overview so we never render
   // a hidden tab's content.
-  const metaTabs = platform === 'meta';
+  // Audience works for Meta + TikTok (both have breakdowns); Creatives is Meta-only
+  // (ad_creative_daily is Meta today).
+  const showAudience = platform === 'meta' || platform === 'tiktok';
+  const showCreatives = platform === 'meta';
   useEffect(() => {
-    if (!metaTabs && tab !== 'overview') setTab('overview');
-  }, [metaTabs, tab]);
+    if ((tab === 'audience' && !showAudience) || (tab === 'creatives' && !showCreatives)) setTab('overview');
+  }, [tab, showAudience, showCreatives]);
 
   if (q.isError) {
     return <StateCard>Couldn’t load ad performance for this brand. Try refreshing, or check the brand’s Meta connection.</StateCard>;
@@ -35,7 +38,8 @@ export function AdsBrandOverview({ slug, period, platform }: { slug: string | un
 
   const tabs: { key: AdsTab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
-    ...(metaTabs ? ([{ key: 'audience', label: 'Audience' }, { key: 'creatives', label: 'Creatives' }] as { key: AdsTab; label: string }[]) : []),
+    ...(showAudience ? ([{ key: 'audience', label: 'Audience' }] as { key: AdsTab; label: string }[]) : []),
+    ...(showCreatives ? ([{ key: 'creatives', label: 'Creatives' }] as { key: AdsTab; label: string }[]) : []),
   ];
   const active: AdsTab = tabs.some((t) => t.key === tab) ? tab : 'overview';
 

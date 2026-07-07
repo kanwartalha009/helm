@@ -34,6 +34,17 @@ use RuntimeException;
  */
 final class ReportsFetcher
 {
+    /**
+     * TikTok-native engagement metrics (video completion + social) — summable
+     * counts, stored in daily_metrics.metadata['tiktok']. Override via
+     * config services.tiktok.native_metrics; validate names with tiktok:diagnose.
+     */
+    private const NATIVE_METRICS = [
+        'video_play_actions', 'video_watched_2s', 'video_watched_6s',
+        'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100',
+        'likes', 'comments', 'shares', 'follows', 'profile_visits',
+    ];
+
     public function __construct(
         private readonly TikTokClient $client,
     ) {}
@@ -48,7 +59,11 @@ final class ReportsFetcher
         $brandId       = (int) $conn->brand_id;
 
         $purchaseMetric = (string) config('services.tiktok.purchase_metric', 'complete_payment');
-        $valueMetric    = (string) config('services.tiktok.value_metric', 'total_complete_payment');
+        $valueMetric    = (string) config('services.tiktok.value_metric', 'value_per_complete_payment');
+        // Nude Project's account exposes AOV (value_per_complete_payment), not a
+        // total, so total revenue = AOV × purchases. Set value_metric_kind=total
+        // for accounts that expose a true total value metric instead.
+        $perPurchase    = config('services.tiktok.value_metric_kind', 'per_purchase') === 'per_purchase';
 
         $spend       = 0.0;
         $impressions = 0;
@@ -66,12 +81,24 @@ final class ReportsFetcher
                 $clicks      += (int) ($m['clicks'] ?? 0);
                 // Purchases: the payment-specific metric when present, else the
                 // generic conversion count (base-set fallback).
-                $conversions += (int) round((float) ($m[$purchaseMetric] ?? $m['conversion'] ?? 0));
-                $value       += (float) ($m[$valueMetric] ?? 0);
+                $rowPurch     = (int) round((float) ($m[$purchaseMetric] ?? $m['conversion'] ?? 0));
+                $conversions += $rowPurch;
+                $rowVal       = (float) ($m[$valueMetric] ?? 0);
+                $value       += $perPurchase ? $rowVal * $rowPurch : $rowVal;
                 if (array_key_exists('reach', $m)) {
                     $sawReach = true;
                     $reach   += (int) $m['reach'];
                 }
+            }
+        }
+
+        // TikTok-native engagement (video completion + social) — a SEPARATE,
+        // isolated call per advertiser so a bad native-metric name can only fail
+        // this, never the spend/revenue/reach row above. Summed to metadata.
+        $native = [];
+        foreach ($advertiserIds as $advertiserId) {
+            foreach ($this->fetchNative($advertiserId, $day) as $k => $v) {
+                $native[$k] = ($native[$k] ?? 0) + $v;
             }
         }
 
@@ -88,9 +115,52 @@ final class ReportsFetcher
             // reach stays null (→ UI hides Reach/Frequency) when TikTok didn't
             // return it, e.g. the metric fell back out; a real 0 is kept as null too.
             reach: ($sawReach && $reach > 0) ? $reach : null,
-            metadata: ['advertiser_ids' => array_values($advertiserIds)],
+            metadata: ['advertiser_ids' => array_values($advertiserIds), 'tiktok' => $native],
             isComplete: $isComplete,
         );
+    }
+
+    /**
+     * TikTok-native engagement metrics for one advertiser-day (video completion +
+     * social), summed to a flat name=>value map for daily_metrics.metadata. Its
+     * own call, caught on failure (returns []), so it's isolated from the main
+     * pull. @return array<string, float>
+     */
+    private function fetchNative(string $advertiserId, string $day): array
+    {
+        $metrics = (array) config('services.tiktok.native_metrics', self::NATIVE_METRICS);
+        if ($metrics === []) {
+            return [];
+        }
+
+        try {
+            $data = $this->client->get('report/integrated/get/', [
+                'advertiser_id' => $advertiserId,
+                'report_type'   => 'BASIC',
+                'data_level'    => 'AUCTION_ADVERTISER',
+                'dimensions'    => json_encode(['advertiser_id']),
+                'metrics'       => json_encode(array_values($metrics)),
+                'start_date'    => $day,
+                'end_date'      => $day,
+                'page'          => 1,
+                'page_size'     => 10,
+            ]);
+        } catch (RuntimeException $e) {
+            Log::warning('tiktok.native.failed', ['advertiser' => $advertiserId, 'error' => $e->getMessage()]);
+
+            return [];
+        }
+
+        $out = [];
+        foreach (($data['list'] ?? []) as $row) {
+            foreach (($row['metrics'] ?? []) as $k => $v) {
+                if (is_numeric($v)) {
+                    $out[$k] = ($out[$k] ?? 0) + (float) $v;
+                }
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -154,7 +224,8 @@ final class ReportsFetcher
         }
         $currency       = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
         $purchaseMetric = (string) config('services.tiktok.purchase_metric', 'complete_payment');
-        $valueMetric    = (string) config('services.tiktok.value_metric', 'total_complete_payment');
+        $valueMetric    = (string) config('services.tiktok.value_metric', 'value_per_complete_payment');
+        $perPurchase    = config('services.tiktok.value_metric_kind', 'per_purchase') === 'per_purchase';
 
         $out = [];
         foreach ($advertiserIds as $advertiserId) {
@@ -167,6 +238,9 @@ final class ReportsFetcher
                     continue;
                 }
 
+                $purch = (int) round((float) ($m[$purchaseMetric] ?? $m['conversion'] ?? 0));
+                $val   = (float) ($m[$valueMetric] ?? 0);
+
                 $out[] = [
                     'date'             => $day,
                     'campaign_id'      => $cid,
@@ -174,8 +248,8 @@ final class ReportsFetcher
                     'spend'            => (float) ($m['spend'] ?? 0),
                     'impressions'      => (int) ($m['impressions'] ?? 0),
                     'clicks'           => (int) ($m['clicks'] ?? 0),
-                    'conversions'      => (int) round((float) ($m[$purchaseMetric] ?? $m['conversion'] ?? 0)),
-                    'conversion_value' => (float) ($m[$valueMetric] ?? 0),
+                    'conversions'      => $purch,
+                    'conversion_value' => $perPurchase ? $val * $purch : $val,
                     'currency'         => $currency,
                 ];
             }
@@ -213,6 +287,100 @@ final class ReportsFetcher
                     throw $e;
                 }
                 Log::warning('tiktok.campaign.metric_fallback', ['advertiser' => $advertiserId, 'error' => $e->getMessage()]);
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Audience breakdown rows over [from, to] for one axis (dimensions) — powers
+     * the TikTok Audience view (region/device/age/gender), stored in
+     * meta_breakdown_daily[platform=tiktok]. TikTok's AUDIENCE report aggregates a
+     * whole range (no daily dimension), so we pull one call PER DAY and tag each
+     * row with that day — matching how Meta's per-day breakdown rows are stored.
+     *
+     * @param array<int, string> $dimensions
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchBreakdownRange(PlatformConnection $conn, array $dimensions, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $advertiserIds = $this->advertiserIdsFor($conn);
+        if ($advertiserIds === [] || $dimensions === []) {
+            return [];
+        }
+        $currency       = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+        $purchaseMetric = (string) config('services.tiktok.purchase_metric', 'complete_payment');
+        $valueMetric    = (string) config('services.tiktok.value_metric', 'value_per_complete_payment');
+        $perPurchase    = config('services.tiktok.value_metric_kind', 'per_purchase') === 'per_purchase';
+
+        $out = [];
+        foreach ($advertiserIds as $advertiserId) {
+            for ($d = $from; $d->lessThanOrEqualTo($to); $d = $d->addDay()) {
+                $day = $d->toDateString();
+                foreach ($this->audienceRows($advertiserId, $dimensions, $day, $purchaseMetric, $valueMetric) as $row) {
+                    $dims = $row['dimensions'] ?? [];
+                    $m    = $row['metrics'] ?? [];
+
+                    $parts = [];
+                    foreach ($dimensions as $dim) {
+                        $v = $dims[$dim] ?? null;
+                        if ($v !== null && $v !== '') {
+                            $parts[] = (string) $v;
+                        }
+                    }
+                    $segment = $parts === [] ? 'unknown' : implode(' · ', $parts);
+
+                    $purch = (int) round((float) ($m[$purchaseMetric] ?? $m['conversion'] ?? 0));
+                    $val   = (float) ($m[$valueMetric] ?? 0);
+
+                    $out[] = [
+                        'date'             => $day,
+                        'segment_key'      => $segment,
+                        'segment_label'    => $segment,
+                        'spend'            => (float) ($m['spend'] ?? 0),
+                        'impressions'      => (int) ($m['impressions'] ?? 0),
+                        'clicks'           => (int) ($m['clicks'] ?? 0),
+                        'conversions'      => $purch,
+                        'conversion_value' => $perPurchase ? $val * $purch : $val,
+                        'currency'         => $currency,
+                    ];
+                }
+                usleep(150_000);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * One advertiser-day's AUDIENCE report rows for the given dimensions, with the
+     * rich→base metric fallback so a bad value-metric name can't fail the axis.
+     *
+     * @param array<int, string> $dimensions
+     * @return array<int, array<string, mixed>>
+     */
+    private function audienceRows(string $advertiserId, array $dimensions, string $day, string $purchaseMetric, string $valueMetric): array
+    {
+        $base = ['spend', 'impressions', 'clicks', 'conversion'];
+        $rich = array_values(array_unique([...$base, $purchaseMetric, $valueMetric]));
+
+        foreach ([$rich, $base] as $metrics) {
+            try {
+                return $this->client->paged('report/integrated/get/', [
+                    'advertiser_id' => $advertiserId,
+                    'report_type'   => 'AUDIENCE',
+                    'data_level'    => 'AUCTION_ADVERTISER',
+                    'dimensions'    => json_encode($dimensions),
+                    'metrics'       => json_encode($metrics),
+                    'start_date'    => $day,
+                    'end_date'      => $day,
+                ]);
+            } catch (RuntimeException $e) {
+                if ($metrics === $base) {
+                    throw $e;
+                }
+                Log::warning('tiktok.audience.metric_fallback', ['advertiser' => $advertiserId, 'dims' => $dimensions, 'error' => $e->getMessage()]);
             }
         }
 

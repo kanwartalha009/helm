@@ -134,6 +134,49 @@ final class CampaignSync
             return 0;
         }
 
+        return $this->storeBreakdown($conn, 'meta', $date, $type, $rows);
+    }
+
+    /**
+     * TikTok audience breakdown for one axis (config tiktok_breakdowns.{type}) →
+     * meta_breakdown_daily[platform=tiktok]. Best-effort, mirrors syncMetaBreakdown;
+     * the fetcher's metric fallback means a bad name never fails the day.
+     */
+    public function syncTikTokBreakdown(PlatformConnection $conn, CarbonImmutable $date, string $type): int
+    {
+        if ($conn->platform !== 'tiktok') {
+            return 0;
+        }
+        $dimensions = (array) config("tiktok_breakdowns.{$type}", []);
+        if ($dimensions === []) {
+            return 0;
+        }
+
+        try {
+            $rows = $this->tiktok->fetchBreakdownRange($conn, $dimensions, $date, $date);
+        } catch (Throwable $e) {
+            Log::warning('sync.tiktok_breakdown.failed', [
+                'brand_id' => $conn->brand_id,
+                'type'     => $type,
+                'date'     => $date->toDateString(),
+                'error'    => $e->getMessage(),
+            ]);
+
+            return 0;
+        }
+
+        return $this->storeBreakdown($conn, 'tiktok', $date, $type, $rows);
+    }
+
+    /**
+     * Shared upsert of one day's breakdown rows into meta_breakdown_daily, keyed
+     * by (brand, platform, date, breakdown_type, segment). Native money + stored
+     * fx snapshot (spec rule 7).
+     *
+     * @param array<int, array<string, mixed>> $rows
+     */
+    private function storeBreakdown(PlatformConnection $conn, string $platform, CarbonImmutable $date, string $type, array $rows): int
+    {
         if ($rows === []) {
             return 0;
         }
@@ -151,6 +194,7 @@ final class CampaignSync
 
             $records[] = [
                 'brand_id'         => $brandId,
+                'platform'         => $platform,
                 'date'             => $date->toDateString(),
                 'breakdown_type'   => $type,
                 'segment_key'      => mb_substr($seg, 0, 191),
@@ -170,7 +214,7 @@ final class CampaignSync
         foreach (array_chunk($records, 500) as $chunk) {
             MetaBreakdownDaily::upsert(
                 $chunk,
-                ['brand_id', 'date', 'breakdown_type', 'segment_key'],
+                ['brand_id', 'platform', 'date', 'breakdown_type', 'segment_key'],
                 ['segment_label', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
             );
         }

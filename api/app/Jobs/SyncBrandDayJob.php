@@ -149,6 +149,12 @@ class SyncBrandDayJob implements ShouldQueue
             // the dashboard's Audience view. Meta-only + best-effort (self-guards
             // and swallows its own errors), so it never affects the main sync.
             $campaignSync->syncMetaBreakdown($this->platformConnection, $this->date);
+
+            // TikTok audience breakdowns (country/device/age×gender) for the ads
+            // hub's TikTok Audience view. Also best-effort + self-guarded to tiktok.
+            foreach (['country', 'device', 'age_gender'] as $tiktokAxis) {
+                $campaignSync->syncTikTokBreakdown($this->platformConnection, $this->date, $tiktokAxis);
+            }
         } catch (Throwable $e) {
             $log->update([
                 'status'        => 'failed',

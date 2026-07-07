@@ -65,9 +65,50 @@ class TikTokDiagnoseCommand extends Command
 
         if ($firstAdv !== null) {
             $this->probeMetrics($client, $firstAdv);
+            $this->probeDimensions($client, $firstAdv);
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Probe AUDIENCE breakdown dimension names (config/tiktok_breakdowns.php) — the
+     * region/device/age/gender axes. Prints which return segments + a sample value
+     * so the config can be corrected if a name is wrong for the account.
+     */
+    private function probeDimensions(TikTokClient $client, string $advertiserId): void
+    {
+        $end   = CarbonImmutable::now()->subDay();
+        $start = $end->subDays(6);
+        $this->newLine();
+        $this->line('Probing AUDIENCE dimensions (breakdown axes):');
+
+        foreach (['country_code', 'age', 'gender', 'platform', 'province_id', 'dma', 'placement'] as $dim) {
+            try {
+                $data = $client->get('report/integrated/get/', [
+                    'advertiser_id' => $advertiserId,
+                    'report_type'   => 'AUDIENCE',
+                    'data_level'    => 'AUCTION_ADVERTISER',
+                    'dimensions'    => json_encode([$dim]),
+                    'metrics'       => json_encode(['spend']),
+                    'start_date'    => $start->toDateString(),
+                    'end_date'      => $end->toDateString(),
+                    'page'          => 1,
+                    'page_size'     => 10,
+                ]);
+                $list   = $data['list'] ?? [];
+                $sample = $list !== [] ? (string) ($list[0]['dimensions'][$dim] ?? '') : '';
+                $this->info(sprintf('  OK   %-14s %d segment(s)  e.g. "%s"', $dim, count($list), $sample));
+            } catch (Throwable $e) {
+                $this->line(sprintf('  bad  %-14s %s', $dim, $e->getMessage()));
+            }
+            usleep(200_000);
+        }
+
+        $this->newLine();
+        $this->line('  -> Map the VALID dimensions in config/tiktok_breakdowns.php');
+        $this->line('     (country=>[country_code], device=>[platform], age=>[age], gender=>[gender]), then:');
+        $this->line('     php artisan tiktok:backfill-breakdown nude-project --type=all --since=<date>');
     }
 
     /**
@@ -90,6 +131,10 @@ class TikTokDiagnoseCommand extends Command
             'purchase', 'total_purchase', 'total_purchase_value',
             'onsite_shopping', 'total_onsite_shopping_value',
             'value_per_complete_payment', 'total_landing_page_view',
+            // native engagement (metadata['tiktok']) — validate these too
+            'video_play_actions', 'video_watched_2s', 'video_watched_6s',
+            'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100',
+            'likes', 'comments', 'shares', 'follows', 'profile_visits',
         ];
 
         foreach ($candidates as $metric) {

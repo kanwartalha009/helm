@@ -19,4 +19,20 @@ return [
         'version'     => env('META_API_VERSION', 'v24.0'),
         'business_id' => env('META_BUSINESS_ID'),
     ],
+
+    /*
+    | TikTok Marketing API — the purchase + purchase-VALUE report metric names
+    | (they vary by advertiser). Validate with `php artisan tiktok:diagnose`,
+    | which probes candidate names and prints which are valid + their sums.
+    |
+    | value_metric_kind: 'per_purchase' when value_metric is an AVERAGE
+    | (value_per_complete_payment — total revenue = value × purchases, the case
+    | for Nude Project) or 'total' when it's already a total (e.g. a valid
+    | total_complete_payment on accounts that expose one).
+    */
+    'tiktok' => [
+        'purchase_metric'   => env('TIKTOK_PURCHASE_METRIC', 'complete_payment'),
+        'value_metric'      => env('TIKTOK_VALUE_METRIC', 'value_per_complete_payment'),
+        'value_metric_kind' => env('TIKTOK_VALUE_METRIC_KIND', 'per_purchase'),
+    ],
 ];

@@ -58,8 +58,11 @@ final class AdsOverviewQuery
 
         $summary = $this->summary((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money);
 
-        // age_gender fetched once, folded into age×gender + gender + age (Meta only).
-        $ag = $isMeta ? $this->ageGenderBreakdowns((int) $brand->id, $start, $end, $money) : null;
+        // Breakdowns (audience view + region/device) come from meta_breakdown_daily,
+        // now Meta + TikTok. Placement + ASC-audience axes stay Meta-only (TikTok
+        // has no equivalent). age_gender fetched once → age×gender / gender / age.
+        $breakdownable = in_array($platform, ['meta', 'tiktok'], true);
+        $ag = $breakdownable ? $this->ageGenderBreakdowns((int) $brand->id, $start, $end, $money, $platform) : null;
 
         return [
             'brand' => [
@@ -93,16 +96,17 @@ final class AdsOverviewQuery
             // Meta only. For Google/TikTok they're not applicable, so the panels
             // degrade to a "Meta only" state rather than show Meta's numbers under
             // a Google view.
-            'byCountry'         => $isMeta ? $this->breakdown((int) $brand->id, 'country', $start, $end, $money) : $this->notApplicable(),
-            'byDevice'          => $isMeta ? $this->deviceSplit((int) $brand->id, $start, $end, $money) : ['hasData' => false, 'metric' => 'purchases', 'total' => 0, 'rows' => []],
+            'byCountry'         => $breakdownable ? $this->breakdown((int) $brand->id, 'country', $start, $end, $money, $platform) : $this->notApplicable(),
+            'byDevice'          => $breakdownable ? $this->deviceSplit((int) $brand->id, $start, $end, $money, $platform) : ['hasData' => false, 'metric' => 'purchases', 'total' => 0, 'rows' => []],
             'byAgeGender'       => $ag['ageGender'] ?? $this->notApplicable(),
             'byGender'          => $ag['gender'] ?? $this->notApplicable(),
             'byAge'             => $ag['age'] ?? $this->notApplicable(),
             'byPlacement'       => $isMeta ? $this->breakdown((int) $brand->id, 'placement_platform', $start, $end, $money) : $this->notApplicable(),
             'byPlacementDetail' => $isMeta ? $this->breakdown((int) $brand->id, 'placement', $start, $end, $money) : $this->notApplicable(),
-            'byDeviceDetail'    => $isMeta ? $this->breakdown((int) $brand->id, 'device', $start, $end, $money) : $this->notApplicable(),
+            'byDeviceDetail'    => $breakdownable ? $this->breakdown((int) $brand->id, 'device', $start, $end, $money, $platform) : $this->notApplicable(),
             'byAudience'        => $isMeta ? $this->breakdown((int) $brand->id, 'audience', $start, $end, $money) : $this->notApplicable(),
-            'byRegion'          => $isMeta ? $this->regionRollup((int) $brand->id, $start, $end, $money) : $this->notApplicable(),
+            'byRegion'          => $breakdownable ? $this->regionRollup((int) $brand->id, $start, $end, $money, $platform) : $this->notApplicable(),
+            'tiktokNative'      => $platform === 'tiktok' ? $this->tiktokNative((int) $brand->id, $start, $end) : null,
             'campaigns'         => $this->campaigns((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money),
         ];
     }
@@ -278,10 +282,11 @@ final class AdsOverviewQuery
      *
      * @return array{hasData: bool, top: array<string, mixed>|null, rows: array<int, array<string, mixed>>}
      */
-    private function breakdown(int $brandId, string $type, string $start, string $end, callable $money): array
+    private function breakdown(int $brandId, string $type, string $start, string $end, callable $money, string $platform = 'meta'): array
     {
         $rows = MetaBreakdownDaily::query()
             ->where('brand_id', $brandId)
+            ->where('platform', $platform)
             ->where('breakdown_type', $type)
             ->whereBetween('date', [$start, $end])
             ->groupBy('segment_key', 'segment_label')
@@ -364,10 +369,11 @@ final class AdsOverviewQuery
      *
      * @return array{ageGender: array<string,mixed>, gender: array<string,mixed>, age: array<string,mixed>}
      */
-    private function ageGenderBreakdowns(int $brandId, string $start, string $end, callable $money): array
+    private function ageGenderBreakdowns(int $brandId, string $start, string $end, callable $money, string $platform = 'meta'): array
     {
         $rows = MetaBreakdownDaily::query()
             ->where('brand_id', $brandId)
+            ->where('platform', $platform)
             ->where('breakdown_type', 'age_gender')
             ->whereBetween('date', [$start, $end])
             ->groupBy('segment_key', 'segment_label')
@@ -444,10 +450,11 @@ final class AdsOverviewQuery
      *
      * @return array{hasData: bool, top: ?array<string, mixed>, total: float, rows: array<int, array<string, mixed>>}
      */
-    private function regionRollup(int $brandId, string $start, string $end, callable $money): array
+    private function regionRollup(int $brandId, string $start, string $end, callable $money, string $platform = 'meta'): array
     {
         $rows = MetaBreakdownDaily::query()
             ->where('brand_id', $brandId)
+            ->where('platform', $platform)
             ->where('breakdown_type', 'country')
             ->whereBetween('date', [$start, $end])
             ->groupBy('segment_key', 'segment_label')
@@ -479,6 +486,63 @@ final class AdsOverviewQuery
         return $this->packRows(array_values($acc));
     }
 
+    /**
+     * TikTok-native engagement (video completion + social) summed from
+     * daily_metrics.metadata['tiktok'] over the window. Null when nothing synced
+     * (→ the UI hides the panel). Metadata is cast to array on the model.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function tiktokNative(int $brandId, string $start, string $end): ?array
+    {
+        $metas = DailyMetric::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'tiktok')
+            ->whereBetween('date', [$start, $end])
+            ->pluck('metadata');
+
+        $sum = [];
+        foreach ($metas as $meta) {
+            $native = is_array($meta) ? ($meta['tiktok'] ?? null) : null;
+            if (! is_array($native)) {
+                continue;
+            }
+            foreach ($native as $k => $v) {
+                if (is_numeric($v)) {
+                    $sum[(string) $k] = ($sum[(string) $k] ?? 0) + (float) $v;
+                }
+            }
+        }
+
+        if ($sum === []) {
+            return null;
+        }
+
+        $plays = (float) ($sum['video_play_actions'] ?? 0);
+        $g     = static fn (string $k): int => (int) round((float) ($sum[$k] ?? 0));
+
+        return [
+            'hasData' => true,
+            'video'   => [
+                'plays'          => $g('video_play_actions'),
+                'watched2s'      => $g('video_watched_2s'),
+                'watched6s'      => $g('video_watched_6s'),
+                'p25'            => $g('video_views_p25'),
+                'p50'            => $g('video_views_p50'),
+                'p75'            => $g('video_views_p75'),
+                'p100'           => $g('video_views_p100'),
+                'completionRate' => $plays > 0 ? round(((float) ($sum['video_views_p100'] ?? 0)) / $plays * 100, 1) : null,
+            ],
+            'social'  => [
+                'likes'         => $g('likes'),
+                'comments'      => $g('comments'),
+                'shares'        => $g('shares'),
+                'follows'       => $g('follows'),
+                'profileVisits' => $g('profile_visits'),
+            ],
+        ];
+    }
+
     /** Map an ISO-2 country code to its region label (country_regions config). */
     private function countryRegion(string $code): string
     {
@@ -495,10 +559,11 @@ final class AdsOverviewQuery
      *
      * @return array{hasData: bool, metric: string, total: int, rows: array<int, array<string, mixed>>}
      */
-    private function deviceSplit(int $brandId, string $start, string $end, callable $money): array
+    private function deviceSplit(int $brandId, string $start, string $end, callable $money, string $platform = 'meta'): array
     {
         $rows = MetaBreakdownDaily::query()
             ->where('brand_id', $brandId)
+            ->where('platform', $platform)
             ->where('breakdown_type', 'device')
             ->whereBetween('date', [$start, $end])
             ->groupBy('segment_key', 'segment_label')

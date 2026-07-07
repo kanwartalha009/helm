@@ -120,7 +120,7 @@ class MetaBackfillBreakdownCommand extends Command
                         foreach (array_chunk($records, 500) as $chunk) {
                             MetaBreakdownDaily::upsert(
                                 $chunk,
-                                ['brand_id', 'date', 'breakdown_type', 'segment_key'],
+                                ['brand_id', 'platform', 'date', 'breakdown_type', 'segment_key'],
                                 ['segment_label', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                             );
                         }
@@ -197,6 +197,7 @@ class MetaBackfillBreakdownCommand extends Command
 
             $records[] = [
                 'brand_id'         => $brand->id,
+                'platform'         => 'meta',
                 'date'             => $date,
                 'breakdown_type'   => $type,
                 'segment_key'      => mb_substr($seg, 0, 191),

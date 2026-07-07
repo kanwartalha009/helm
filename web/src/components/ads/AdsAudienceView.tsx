@@ -82,7 +82,7 @@ export function AdsAudienceView({ data }: { data: AdsOverviewResponse }) {
       {!hasAny ? (
         <div className="ads-panel">
           <div className="ads-empty">
-            No audience breakdowns synced yet. Run <code>meta:backfill-breakdown --type=all</code> for this brand.
+            No audience breakdowns synced yet. Run <code>{data.platform === 'tiktok' ? 'tiktok:backfill-breakdown --type=all' : 'meta:backfill-breakdown --type=all'}</code> for this brand.
           </div>
         </div>
       ) : (
