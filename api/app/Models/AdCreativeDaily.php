@@ -38,6 +38,7 @@ class AdCreativeDaily extends Model
     protected $fillable = [
         'brand_id', 'platform', 'date', 'ad_id', 'ad_name', 'campaign_id', 'thumbnail_url', 'media_type',
         'spend', 'impressions', 'clicks', 'conversions', 'conversion_value',
+        'video_3s', 'thruplays', 'add_to_cart',
         'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at',
     ];
 
@@ -47,6 +48,9 @@ class AdCreativeDaily extends Model
         'impressions'      => 'integer',
         'clicks'           => 'integer',
         'conversions'      => 'integer',
+        'video_3s'         => 'integer',
+        'thruplays'        => 'integer',
+        'add_to_cart'      => 'integer',
         'conversion_value' => 'decimal:2',
         'fx_rate_to_usd'   => 'decimal:8',
         'is_complete'      => 'boolean',

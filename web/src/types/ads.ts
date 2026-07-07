@@ -4,7 +4,7 @@
 // ?currency=USD. Metrics are Meta-ATTRIBUTED (7d_click purchases + value ÷
 // spend), not blended — an ads view ranks campaigns / countries / devices.
 
-export type AdsPeriod = 'last7' | 'last30' | 'mtd' | 'custom';
+export type AdsPeriod = 'last7' | 'last14' | 'last30' | 'mtd' | 'custom';
 export type AdsPlatform = 'meta' | 'google' | 'tiktok';
 
 export interface AdsBrand {
@@ -136,12 +136,16 @@ export interface AdsCampaignDetail {
 }
 
 // Creatives (Phase D) — one ad-level card.
+export type AdsCreativeState = 'scaling' | 'declining' | 'holding' | 'testing' | 'hidden';
+
 export interface AdsCreative {
   adId: string;
   name: string;
   campaignId: string | null;
   thumbnail: string | null;
   mediaType: 'image' | 'video';
+  state: AdsCreativeState;
+  wow: number | null; // spend % vs prior equal window; null = new ad (no baseline)
   spend: number;
   revenue: number;
   purchases: number;
@@ -150,6 +154,10 @@ export interface AdsCreative {
   roas: number | null;
   cpa: number | null;
   ctr: number | null;
+  ts: number | null; // Thumbstop % (video only): 3-sec views / impressions
+  hr: number | null; // Hold rate % (video only): ThruPlays / impressions
+  ctp: number | null; // Click→Purchase %: purchases / clicks
+  ctatc: number | null; // Click→Add-to-cart %: add-to-cart / clicks
 }
 
 export interface AdsCreativesResponse {
@@ -158,5 +166,7 @@ export interface AdsCreativesResponse {
   to: string;
   currency: string;
   baseCurrency: string;
+  count: number; // total ads analyzed in the window (uncapped)
+  totalSpend: number; // total spend across all ads (denominator for % visible)
   rows: AdsCreative[];
 }

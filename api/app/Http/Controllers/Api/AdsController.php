@@ -29,7 +29,7 @@ class AdsController extends Controller
         $this->authorize('view', $brand);
 
         $params = $request->validate([
-            'period'   => ['nullable', 'in:last7,last30,mtd,custom'],
+            'period'   => ['nullable', 'in:last7,last14,last30,mtd,custom'],
             'from'     => ['nullable', 'date_format:Y-m-d'],
             'to'       => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
             'currency' => ['nullable', 'in:native,USD,usd'],
@@ -49,7 +49,7 @@ class AdsController extends Controller
         $this->authorize('view', $brand);
 
         $params = $request->validate([
-            'period'   => ['nullable', 'in:last7,last30,mtd,custom'],
+            'period'   => ['nullable', 'in:last7,last14,last30,mtd,custom'],
             'from'     => ['nullable', 'date_format:Y-m-d'],
             'to'       => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
             'currency' => ['nullable', 'in:native,USD,usd'],
@@ -78,7 +78,7 @@ class AdsController extends Controller
         $this->authorize('view', $brand);
 
         $params = $request->validate([
-            'period'   => ['nullable', 'in:last7,last30,mtd,custom'],
+            'period'   => ['nullable', 'in:last7,last14,last30,mtd,custom'],
             'from'     => ['nullable', 'date_format:Y-m-d'],
             'to'       => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
             'currency' => ['nullable', 'in:native,USD,usd'],

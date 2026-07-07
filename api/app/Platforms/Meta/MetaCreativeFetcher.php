@@ -36,6 +36,16 @@ final class MetaCreativeFetcher
         'offsite_conversion.fb_pixel_purchase',
     ];
 
+    /** 3-second video views (Meta's `video_view` action) → Thumbstop numerator. */
+    private const VIDEO_3S_ACTION_TYPES = ['video_view'];
+
+    /** Add-to-cart in priority order — first present wins → Click-to-ATC numerator. */
+    private const ADD_TO_CART_ACTION_TYPES = [
+        'omni_add_to_cart',
+        'add_to_cart',
+        'offsite_conversion.fb_pixel_add_to_cart',
+    ];
+
     public function __construct(private readonly MetaClient $client) {}
 
     /**
@@ -61,7 +71,7 @@ final class MetaCreativeFetcher
                 try {
                     $body = $this->client->get($accountId . '/insights', [
                         'level'                      => 'ad',
-                        'fields'                     => 'ad_id,ad_name,campaign_id,spend,impressions,clicks,actions,action_values,account_currency',
+                        'fields'                     => 'ad_id,ad_name,campaign_id,spend,impressions,clicks,actions,action_values,video_thruplay_watched_actions,account_currency',
                         'action_attribution_windows' => json_encode([self::ATTRIBUTION_WINDOW]),
                         'time_range'                 => json_encode(['since' => $day, 'until' => $day]),
                         'limit'                      => 500,
@@ -89,6 +99,9 @@ final class MetaCreativeFetcher
                         'clicks'           => (int) ($r['clicks'] ?? 0),
                         'conversions'      => (int) round(self::attributedTotal($r['actions'] ?? [], self::PURCHASE_ACTION_TYPES)),
                         'conversion_value' => round(self::attributedTotal($r['action_values'] ?? [], self::PURCHASE_ACTION_TYPES), 2),
+                        'video_3s'         => (int) round(self::attributedTotal($r['actions'] ?? [], self::VIDEO_3S_ACTION_TYPES)),
+                        'thruplays'        => (int) round(self::sumFieldValues($r['video_thruplay_watched_actions'] ?? [])),
+                        'add_to_cart'      => (int) round(self::attributedTotal($r['actions'] ?? [], self::ADD_TO_CART_ACTION_TYPES)),
                         'currency'         => strtoupper((string) ($r['account_currency'] ?? $fallbackCcy)),
                         'thumbnail_url'    => null,
                         'media_type'       => 'image',
@@ -113,11 +126,19 @@ final class MetaCreativeFetcher
         return $rows;
     }
 
+    /** Server-side render size for Meta's thumbnail_url — big enough for a retina card. */
+    private const THUMB_PX = 600;
+
     /**
-     * ad_id => ['image' => best full-res image URL, 'media' => 'image'|'video'],
-     * batched with pacing. The image is Meta's full image_url / video poster (NOT
-     * the tiny thumbnail_url), so the grid isn't pixelated; media flags video ads
-     * so the UI can offer playback.
+     * ad_id => ['image' => best display image URL, 'media' => 'image'|'video'],
+     * batched with pacing.
+     *
+     * Quality: most top-spend ads are VIDEO, which have no image_url — the naive
+     * fallback is Meta's ~64px thumbnail_url, which pixelates in the card. We ask
+     * Meta to RENDER thumbnail_url at THUMB_PX (top-level thumbnail_width/height —
+     * Meta resizes server-side; ignored harmlessly if unsupported) and promote it
+     * above the tiny link picture. So: full image_url → video poster → feed image
+     * → sized thumbnail → link picture.
      *
      * @param array<int, string> $adIds
      * @return array<string, array{image: ?string, media: string}>
@@ -128,8 +149,10 @@ final class MetaCreativeFetcher
         foreach (array_chunk($adIds, self::BATCH) as $chunk) {
             try {
                 $batch = $this->client->get('', [
-                    'ids'    => implode(',', $chunk),
-                    'fields' => 'id,creative{image_url,thumbnail_url,video_id,object_story_spec{video_data{video_id,image_url},link_data{picture}},asset_feed_spec{videos{video_id},images{url}}}',
+                    'ids'              => implode(',', $chunk),
+                    'fields'           => 'id,creative{image_url,thumbnail_url,video_id,object_story_spec{video_data{video_id,image_url},link_data{picture}},asset_feed_spec{videos{video_id,thumbnail_url},images{url}}}',
+                    'thumbnail_width'  => self::THUMB_PX,
+                    'thumbnail_height' => self::THUMB_PX,
                 ]);
             } catch (Throwable $e) {
                 Log::warning('meta.creative.creatives_failed', ['error' => $e->getMessage(), 'count' => count($chunk)]);
@@ -149,13 +172,15 @@ final class MetaCreativeFetcher
                     ?? $cr['video_id']
                     ?? ($feed['videos'][0]['video_id'] ?? null);
 
-                // Best full-res image, in priority order — never the tiny thumbnail
-                // unless nothing else is present.
+                // Best display image, in priority order. thumbnail_url is now the
+                // SIZED render (THUMB_PX), so it beats the tiny link picture — it's
+                // what saves the video cards from pixelating.
                 $image = $cr['image_url']
                     ?? ($oss['video_data']['image_url'] ?? null)
-                    ?? ($oss['link_data']['picture'] ?? null)
                     ?? ($feed['images'][0]['url'] ?? null)
-                    ?? ($cr['thumbnail_url'] ?? null);
+                    ?? ($cr['thumbnail_url'] ?? null)
+                    ?? ($feed['videos'][0]['thumbnail_url'] ?? null)
+                    ?? ($oss['link_data']['picture'] ?? null);
 
                 $out[$id] = [
                     'image' => is_string($image) && $image !== '' ? $image : null,
@@ -177,13 +202,17 @@ final class MetaCreativeFetcher
     public function fetchVideoSource(PlatformConnection $conn, string $adId): ?string
     {
         try {
-            $ad = $this->client->get($adId, ['fields' => 'creative{video_id,object_story_spec{video_data{video_id}}}']);
+            $ad = $this->client->get($adId, ['fields' => 'creative{video_id,object_story_spec{video_data{video_id}},asset_feed_spec{videos{video_id}}}']);
         } catch (Throwable $e) {
             Log::warning('meta.creative.video_ad_failed', ['ad' => $adId, 'error' => $e->getMessage()]);
             return null;
         }
         $cr  = (array) ($ad['creative'] ?? []);
-        $vid = $cr['object_story_spec']['video_data']['video_id'] ?? $cr['video_id'] ?? null;
+        // video_id can sit in object_story_spec (single video), directly on the
+        // creative, or under asset_feed_spec (dynamic creative) — check all three.
+        $vid = $cr['object_story_spec']['video_data']['video_id']
+            ?? $cr['video_id']
+            ?? ($cr['asset_feed_spec']['videos'][0]['video_id'] ?? null);
         if (! $vid) {
             return null;
         }
@@ -218,6 +247,25 @@ final class MetaCreativeFetcher
         }
 
         return 0.0;
+    }
+
+    /**
+     * Sum the `value` of every entry in a Meta insights field returned as an
+     * array of {action_type, value} — e.g. video_thruplay_watched_actions, which
+     * isn't part of the `actions` breakdown and has no attribution window.
+     *
+     * @param array<int, array<string, mixed>> $field
+     */
+    private static function sumFieldValues(array $field): float
+    {
+        $total = 0.0;
+        foreach ($field as $entry) {
+            if (is_array($entry) && isset($entry['value']) && is_numeric($entry['value'])) {
+                $total += (float) $entry['value'];
+            }
+        }
+
+        return $total;
     }
 
     /**

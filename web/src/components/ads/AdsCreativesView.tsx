@@ -1,23 +1,91 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAdsCreatives } from '@/hooks/useAdsCreatives';
-import { formatMoney, formatNumber, formatRoas } from '@/lib/formatters';
-import type { AdsCreative, AdsPeriod, AdsPlatform } from '@/types/ads';
+import { formatMoney, formatPercent, formatRoas } from '@/lib/formatters';
+import type { AdsCreative, AdsCreativeState, AdsPeriod, AdsPlatform } from '@/types/ads';
 import '@/styles/ads.css';
 
 /**
- * Creatives tab (Phase D) — a thumbnail grid of the brand's top ads by spend,
- * each with ROAS + key metrics, from ad_creative_daily. Thumbnails are the full
- * image / video poster (not Meta's tiny thumbnail_url), so they aren't pixelated.
- * Video ads get an IMG/VIDEO badge + a play button that opens an inline player;
- * the source URL is fetched fresh on click because Meta's are short-lived.
+ * Creatives tab (Phase D) — a creative-analytics grid: each ad carries a state
+ * badge (scaling/declining/holding/testing/hidden), WoW% and its efficiency
+ * metrics, on top of a full-res image or a playable video. Filter by media type,
+ * sort, and pick the period; the KPI strip recomputes for whatever is on screen.
+ * Data from ad_creative_daily via useAdsCreatives; "not synced" until the
+ * backfill has run — never a fake €0.
  */
+
+type MediaFilter = 'all' | 'video' | 'image';
+type SortKey = 'spend' | 'roas' | 'ctr' | 'wow';
+type PeriodChip = 'last7' | 'last14' | 'last30';
+
+const STATE_LABEL: Record<AdsCreativeState, string> = {
+  scaling: 'Scaling',
+  declining: 'Declining',
+  holding: 'Holding',
+  testing: 'Testing',
+  hidden: 'Hidden',
+};
+
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: 'spend', label: 'Spend' },
+  { key: 'roas', label: 'ROAS' },
+  { key: 'ctr', label: 'CTR' },
+  { key: 'wow', label: 'WoW' },
+];
+
+const PERIODS: { key: PeriodChip; label: string }[] = [
+  { key: 'last7', label: '7D' },
+  { key: 'last14', label: '14D' },
+  { key: 'last30', label: '30D' },
+];
+
+const RENDER_CAP = 48; // grid shows the top N by the active sort; "Show all" reveals the rest
+
 export function AdsCreativesView({ slug, period, platform }: { slug?: string; period: AdsPeriod; platform: AdsPlatform }) {
-  const q = useAdsCreatives(slug, period, !!slug, platform);
+  const [media, setMedia] = useState<MediaFilter>('all');
+  const [sortKey, setSortKey] = useState<SortKey>('spend');
+  const [dir, setDir] = useState<'desc' | 'asc'>('desc');
+  const [chip, setChip] = useState<PeriodChip>(period === 'last7' ? 'last7' : period === 'last30' ? 'last30' : 'last14');
+  const [expanded, setExpanded] = useState(false);
   const [playing, setPlaying] = useState<AdsCreative | null>(null);
+
+  const q = useAdsCreatives(slug, chip, !!slug, platform);
   const d = q.data;
   const currency = d ? (d.currency === 'usd' ? 'USD' : d.baseCurrency || 'EUR') : 'EUR';
   const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+
+  const rows = useMemo(() => d?.rows ?? [], [d]);
+  const filtered = useMemo(
+    () => (media === 'all' ? rows : rows.filter((r) => r.mediaType === media)),
+    [rows, media],
+  );
+
+  const sorted = useMemo(() => {
+    const val = (r: AdsCreative): number =>
+      sortKey === 'spend' ? r.spend
+      : sortKey === 'roas' ? (r.roas ?? -1)
+      : sortKey === 'ctr' ? (r.ctr ?? -1)
+      : (r.wow ?? Number.NEGATIVE_INFINITY);
+    return [...filtered].sort((a, b) => (dir === 'desc' ? val(b) - val(a) : val(a) - val(b)));
+  }, [filtered, sortKey, dir]);
+
+  const shown = expanded ? sorted : sorted.slice(0, RENDER_CAP);
+
+  const kpi = useMemo(() => {
+    const sum = (sel: (r: AdsCreative) => number) => filtered.reduce((s, r) => s + sel(r), 0);
+    const spend = sum((r) => r.spend);
+    const rev = sum((r) => r.revenue);
+    const clk = sum((r) => r.clicks);
+    const imp = sum((r) => r.impressions);
+    const shownSpend = shown.reduce((s, r) => s + r.spend, 0);
+    return {
+      count: filtered.length,
+      spend,
+      roas: spend > 0 ? rev / spend : null,
+      ctr: imp > 0 ? (clk / imp) * 100 : null,
+      visiblePct: spend > 0 ? (shownSpend / spend) * 100 : null,
+    };
+  }, [filtered, shown]);
 
   if (q.isError) {
     return <div className="ads-root"><div className="ads-panel"><div className="ads-empty">Couldn’t load creatives. Try refreshing.</div></div></div>;
@@ -27,21 +95,71 @@ export function AdsCreativesView({ slug, period, platform }: { slug?: string; pe
   }
   if (!d) return null;
 
+  if (!d.hasData) {
+    return (
+      <div className="ads-root">
+        <div className="ads-panel">
+          <div className="ads-ph"><h3>Creatives</h3></div>
+          <div className="ads-empty">Not synced yet. Run <code>meta:backfill-creatives</code> for this brand.</div>
+        </div>
+      </div>
+    );
+  }
+
+  const mediaLabel = media === 'video' ? 'Video ads' : media === 'image' ? 'Image ads' : 'All creatives';
+  const mediaIcon = media === 'video' ? '🎬' : media === 'image' ? '🖼️' : '📊';
+
   return (
     <div className="ads-root">
       <div className="ads-panel">
         <div className="ads-ph"><h3>Creatives</h3></div>
-        <div className="ads-psub">Top ads by spend · {d.from} – {d.to}</div>
-        {d.hasData ? (
-          <div className="acrea-grid">
-            {d.rows.map((c) => (
-              <CreativeCard key={c.adId} c={c} money={money} onPlay={() => setPlaying(c)} />
+
+        {/* controls */}
+        <div className="acrea-bar">
+          <Seg value={media} onChange={(v) => { setMedia(v); setExpanded(false); }} options={[['all', 'All'], ['video', 'Video'], ['image', 'Image']]} />
+          <div className="acrea-sort">
+            <span className="acrea-sort-lbl">Sort</span>
+            {SORTS.map((s) => (
+              <button key={s.key} className={`acrea-chip${sortKey === s.key ? ' is-on' : ''}`} onClick={() => setSortKey(s.key)}>{s.label}</button>
             ))}
+            <button
+              className="acrea-dir"
+              onClick={() => setDir((x) => (x === 'desc' ? 'asc' : 'desc'))}
+              title={dir === 'desc' ? 'Best first (high → low)' : 'Worst first (low → high)'}
+            >
+              {dir === 'desc' ? '↓' : '↑'}
+            </button>
           </div>
+          <Seg value={chip} onChange={setChip} options={PERIODS.map((p) => [p.key, p.label] as [PeriodChip, string])} className="acrea-seg-right" />
+        </div>
+
+        {/* KPI strip — recomputed for the active media filter */}
+        <div className="acrea-kpis">
+          <Kpi label="Unique creatives" value={String(kpi.count)} />
+          <Kpi label="Weighted ROAS" value={formatRoas(kpi.roas)} />
+          <Kpi label="Weighted CTR" value={kpi.ctr != null ? `${kpi.ctr.toFixed(2)}%` : '—'} />
+          <Kpi label="Total spend" value={money(kpi.spend)} />
+          <Kpi label="Spend shown" value={kpi.visiblePct != null ? `${Math.round(kpi.visiblePct)}%` : '—'} />
+        </div>
+        <div className="acrea-head">
+          {mediaIcon} {mediaLabel} · {kpi.count} {kpi.count === 1 ? 'creative' : 'creatives'} · {d.from} – {d.to}
+        </div>
+
+        {shown.length === 0 ? (
+          <div className="ads-empty">No {media === 'all' ? '' : media} creatives with spend in this window.</div>
         ) : (
-          <div className="ads-empty">
-            Not synced yet. Run <code>meta:backfill-creatives</code> for this brand.
-          </div>
+          <>
+            <div className="acrea-grid">
+              {shown.map((c) => (
+                <CreativeCard key={c.adId} c={c} money={money} wRoas={kpi.roas} spendDenom={kpi.spend} onPlay={() => setPlaying(c)} />
+              ))}
+            </div>
+            {sorted.length > RENDER_CAP && (
+              <button className="ads-viewall" onClick={() => setExpanded((x) => !x)}>
+                {expanded ? 'Show top 48' : `Show all ${sorted.length}`}
+              </button>
+            )}
+          </>
         )}
       </div>
       {playing && slug && <VideoModal slug={slug} c={playing} onClose={() => setPlaying(null)} />}
@@ -49,8 +167,40 @@ export function AdsCreativesView({ slug, period, platform }: { slug?: string; pe
   );
 }
 
-function CreativeCard({ c, money, onPlay }: { c: AdsCreative; money: (v: number | null) => string; onPlay: () => void }) {
+function Seg<T extends string>({ value, onChange, options, className }: { value: T; onChange: (v: T) => void; options: [T, string][]; className?: string }) {
+  return (
+    <div className={`acrea-seg${className ? ` ${className}` : ''}`}>
+      {options.map(([v, label]) => (
+        <button key={v} className={value === v ? 'is-on' : ''} onClick={() => onChange(v)}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+function Kpi({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="acrea-kpi">
+      <div className="k-label">{label}</div>
+      <div className="k-val">{value}</div>
+    </div>
+  );
+}
+
+function CreativeCard({
+  c, money, wRoas, spendDenom, onPlay,
+}: {
+  c: AdsCreative;
+  money: (v: number | null) => string;
+  wRoas: number | null;
+  spendDenom: number;
+  onPlay: () => void;
+}) {
   const isVideo = c.mediaType === 'video';
+  const spendPct = spendDenom > 0 ? (c.spend / spendDenom) * 100 : null;
+  // ROAS colored against the set's weighted ROAS: green ≥ weighted, red < 90% of it.
+  const roasTone = c.roas == null || wRoas == null || wRoas <= 0 ? '' : c.roas >= wRoas ? ' pos' : c.roas < 0.9 * wRoas ? ' neg' : '';
+  const wowTone = c.wow == null ? '' : c.wow > 0 ? ' pos' : c.wow < 0 ? ' neg' : '';
+
   return (
     <div className={`acrea-card${isVideo ? ' is-video' : ''}`}>
       <div
@@ -65,18 +215,41 @@ function CreativeCard({ c, money, onPlay }: { c: AdsCreative; money: (v: number 
         ) : (
           <span className="acrea-noimg">No preview</span>
         )}
+        <span className={`acrea-state ${c.state}`}>{STATE_LABEL[c.state]}</span>
+        {c.wow != null && <span className={`acrea-wow${wowTone}`}>WoW {formatPercent(c.wow, { signed: true, decimals: 0 })}</span>}
+        {c.wow == null && <span className="acrea-wow new">New</span>}
+        {isVideo && <span className="acrea-play" aria-hidden><span /></span>}
         <span className="acrea-badge">{isVideo ? 'Video' : 'Image'}</span>
-        {isVideo && <span className="acrea-play"><span /></span>}
-        {c.roas != null && <span className="acrea-roas">{formatRoas(c.roas)}</span>}
       </div>
       <div className="acrea-body">
         <div className="acrea-name" title={c.name}>{c.name}</div>
-        <div className="acrea-metrics">
-          <span><b>{money(c.spend)}</b> spend</span>
-          <span><b>{formatNumber(c.purchases)}</b> purch.</span>
-          <span><b>{c.ctr != null ? `${c.ctr}%` : '—'}</b> CTR</span>
+        <div className="acrea-stats">
+          <Stat label="Spend" value={money(c.spend)} />
+          <Stat label="Spend%" value={spendPct != null ? `${spendPct.toFixed(1)}%` : '—'} />
+          <Stat label="ROAS" value={formatRoas(c.roas)} tone={roasTone} />
+          <Stat label="CTR" value={c.ctr != null ? `${c.ctr.toFixed(2)}%` : '—'} />
+          {isVideo ? (
+            <>
+              <Stat label="TS" value={c.ts != null ? `${c.ts.toFixed(1)}%` : '—'} />
+              <Stat label="HR" value={c.hr != null ? `${c.hr.toFixed(1)}%` : '—'} />
+            </>
+          ) : (
+            <>
+              <Stat label="CtP" value={c.ctp != null ? `${c.ctp.toFixed(2)}%` : '—'} />
+              <Stat label="CtATC" value={c.ctatc != null ? `${c.ctatc.toFixed(1)}%` : '—'} />
+            </>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="acrea-stat">
+      <span className="s-label">{label}</span>
+      <span className={`s-val${tone}`}>{value}</span>
     </div>
   );
 }
@@ -84,15 +257,12 @@ function CreativeCard({ c, money, onPlay }: { c: AdsCreative; money: (v: number 
 /**
  * Inline player. On open it asks the API for a fresh video source URL (short-
  * lived on Meta's side, so resolved per-view). Falls back to the poster image +
- * a message when Meta won't return a source (dark posts / permission-gated),
- * rather than showing a broken player.
+ * a message when Meta won't return a source (dark posts / permission-gated).
  */
 function VideoModal({ slug, c, onClose }: { slug: string; c: AdsCreative; onClose: () => void }) {
   const [state, setState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [url, setUrl] = useState<string | null>(null);
 
-  // Resolve a fresh source when the modal opens; ignore the result if the user
-  // closes (or switches ads) before it lands.
   useEffect(() => {
     let live = true;
     api

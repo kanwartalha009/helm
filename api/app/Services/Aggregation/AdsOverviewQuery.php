@@ -486,8 +486,16 @@ final class AdsOverviewQuery
         $usd      = strtoupper((string) ($params['currency'] ?? '')) === 'USD';
         $platform = $this->resolvePlatform($params);
 
-        [$start, $end] = $this->window($params, $tz);
+        [$start, $end]   = $this->window($params, $tz);
+        [$pStart, $pEnd] = $this->priorWindow($start, $end);
         $money = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+
+        $base = [
+            'from'         => $start,
+            'to'           => $end,
+            'currency'     => $usd ? 'usd' : 'native',
+            'baseCurrency' => $brand->base_currency,
+        ];
 
         $rows = AdCreativeDaily::query()
             ->where('brand_id', $brand->id)
@@ -504,46 +512,111 @@ final class AdsOverviewQuery
                  COALESCE(SUM(" . $money('conversion_value') . "), 0) AS revenue,
                  COALESCE(SUM(conversions), 0)                        AS purchases,
                  COALESCE(SUM(impressions), 0)                        AS impressions,
-                 COALESCE(SUM(clicks), 0)                             AS clicks"
+                 COALESCE(SUM(clicks), 0)                             AS clicks,
+                 COALESCE(SUM(video_3s), 0)                           AS video_3s,
+                 COALESCE(SUM(thruplays), 0)                          AS thruplays,
+                 COALESCE(SUM(add_to_cart), 0)                        AS add_to_cart"
             )
             ->get();
 
-        $base = [
-            'from'         => $start,
-            'to'           => $end,
-            'currency'     => $usd ? 'usd' : 'native',
-            'baseCurrency' => $brand->base_currency,
-        ];
-
         if ($rows->isEmpty()) {
-            return $base + ['hasData' => false, 'rows' => []];
+            return $base + ['hasData' => false, 'count' => 0, 'totalSpend' => 0.0, 'rows' => []];
         }
 
-        $mapped = $rows->map(static function ($r) {
-            $spend = round((float) $r->spend, 2);
-            $rev   = round((float) $r->revenue, 2);
-            $purch = (int) $r->purchases;
-            $impr  = (int) $r->impressions;
-            $clk   = (int) $r->clicks;
+        // Prior equal-length window, spend per ad — the baseline for WoW% and the
+        // blended state. One grouped query, keyed by ad for O(1) lookup.
+        $prior = AdCreativeDaily::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', $platform)
+            ->whereBetween('date', [$pStart, $pEnd])
+            ->groupBy('ad_id')
+            ->selectRaw('ad_id, COALESCE(SUM(' . $money('spend') . '), 0) AS spend')
+            ->get()
+            ->keyBy('ad_id');
+
+        // Weighted account ROAS over the window is the yardstick for "strong" vs
+        // "weak" per-ad ROAS in the blended state rule.
+        $totalSpend = round((float) $rows->sum(static fn ($r) => (float) $r->spend), 2);
+        $totalRev   = (float) $rows->sum(static fn ($r) => (float) $r->revenue);
+        $wRoas      = $totalSpend > 0 ? $totalRev / $totalSpend : 0.0;
+
+        $mapped = $rows->map(function ($r) use ($prior, $totalSpend, $wRoas) {
+            $spend   = round((float) $r->spend, 2);
+            $rev     = round((float) $r->revenue, 2);
+            $purch   = (int) $r->purchases;
+            $impr    = (int) $r->impressions;
+            $clk     = (int) $r->clicks;
+            $v3s     = (int) $r->video_3s;
+            $tp      = (int) $r->thruplays;
+            $atc     = (int) $r->add_to_cart;
+            $isVideo = ((string) $r->media_type) === 'video';
+
+            $roas   = $spend > 0 ? $rev / $spend : null;
+            $pSpend = ($p = $prior->get($r->ad_id)) ? round((float) $p->spend, 2) : 0.0;
+            $wow    = $pSpend > 0 ? ($spend - $pSpend) / $pSpend : null;
+            $share  = $totalSpend > 0 ? $spend / $totalSpend : 0.0;
+
+            $roasStrong = $roas !== null && $wRoas > 0 && $roas >= 1.30 * $wRoas;
+            $roasWeak   = $roas === null || ($wRoas > 0 ? $roas < 0.90 * $wRoas : $roas < 1.0);
+            $state      = $this->creativeState($pSpend, $wow, $share, $roasStrong, $roasWeak);
 
             return [
                 'adId'        => (string) $r->ad_id,
                 'name'        => (string) ($r->ad_name ?: $r->ad_id),
                 'campaignId'  => $r->campaign_id ? (string) $r->campaign_id : null,
                 'thumbnail'   => $r->thumbnail_url ? (string) $r->thumbnail_url : null,
-                'mediaType'   => ((string) $r->media_type) === 'video' ? 'video' : 'image',
+                'mediaType'   => $isVideo ? 'video' : 'image',
+                'state'       => $state,
+                'wow'         => $wow === null ? null : round($wow * 100, 1),
                 'spend'       => $spend,
                 'revenue'     => $rev,
                 'purchases'   => $purch,
                 'impressions' => $impr,
                 'clicks'      => $clk,
-                'roas'        => $spend > 0 ? round($rev / $spend, 2) : null,
+                'roas'        => $roas === null ? null : round($roas, 2),
                 'cpa'         => $purch > 0 ? round($spend / $purch, 2) : null,
                 'ctr'         => $impr > 0 ? round($clk / $impr * 100, 2) : null,
+                // Video engagement (null for image): TS = 3-sec views / impressions,
+                // HR = ThruPlays / impressions.
+                'ts'          => ($isVideo && $impr > 0) ? round($v3s / $impr * 100, 2) : null,
+                'hr'          => ($isVideo && $impr > 0) ? round($tp / $impr * 100, 2) : null,
+                // Funnel efficiency (shown on image cards): CtP = purchases / clicks,
+                // CtATC = add-to-cart / clicks.
+                'ctp'         => $clk > 0 ? round($purch / $clk * 100, 2) : null,
+                'ctatc'       => $clk > 0 ? round($atc / $clk * 100, 2) : null,
             ];
-        })->sortByDesc('spend')->values()->take(40)->all();
+        })->sortByDesc('spend')->values()->take(200)->all();
 
-        return $base + ['hasData' => true, 'rows' => $mapped];
+        return $base + [
+            'hasData'    => true,
+            'count'      => $rows->count(),
+            'totalSpend' => $totalSpend,
+            'rows'       => $mapped,
+        ];
+    }
+
+    /**
+     * Blended creative state (Kanwar's pick): WoW% is spend-based, but DECLINING
+     * requires spend down AND weak ROAS, so a good ad that simply spent less isn't
+     * alarmed. Priority: brand-new → under-scaled winner → scaling → declining →
+     * holding.
+     */
+    private function creativeState(float $priorSpend, ?float $wow, float $spendShare, bool $roasStrong, bool $roasWeak): string
+    {
+        if ($priorSpend <= 0) {
+            return 'testing';                                   // no prior spend — new this window
+        }
+        if ($spendShare < 0.005 && $roasStrong) {
+            return 'hidden';                                    // strong ROAS but starved of budget
+        }
+        if ($wow !== null && $wow >= 0.20) {
+            return 'scaling';                                   // budget up ≥ 20%
+        }
+        if ($wow !== null && $wow <= -0.20 && $roasWeak) {
+            return 'declining';                                 // budget down ≥ 20% AND efficiency weak
+        }
+
+        return 'holding';
     }
 
     /**
@@ -573,9 +646,10 @@ final class AdsOverviewQuery
         }
 
         $start = match ($period) {
-            'last7' => $now->subDays(7)->startOfDay(),
-            'mtd'   => $now->startOfMonth(),
-            default => $now->subDays(30)->startOfDay(),
+            'last7'  => $now->subDays(7)->startOfDay(),
+            'last14' => $now->subDays(14)->startOfDay(),
+            'mtd'    => $now->startOfMonth(),
+            default  => $now->subDays(30)->startOfDay(),
         };
         if ($start->greaterThan($yest)) {
             $start = $yest;
