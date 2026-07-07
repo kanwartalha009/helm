@@ -24,6 +24,8 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
   const money = (v: number | null) => formatMoney(v, currency, { whole: true });
   const unit = (v: number | null) => formatMoney(v, currency);
   const s = data.summary;
+  const isMeta = data.platform === 'meta';
+  const platformLabel = data.platform === 'google' ? 'Google' : data.platform === 'tiktok' ? 'TikTok' : 'Meta';
   const [drill, setDrill] = useState<{ id: string; name: string } | null>(null);
   const [showAllRegions, setShowAllRegions] = useState(false);
   const [showAllCampaigns, setShowAllCampaigns] = useState(false);
@@ -41,7 +43,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
       {/* KPI summary */}
       <div className="ads-panel">
         <div className="ads-ph"><h3>Performance summary</h3></div>
-        <div className="ads-psub">Attributed Meta performance · {rangeLabel(data.from, data.to)}</div>
+        <div className="ads-psub">Attributed {platformLabel} performance · {rangeLabel(data.from, data.to)}</div>
         <div className="ads-kpis">
           {kpis.map((k) => (
             <div className="ads-kpi" key={k.key}>
@@ -91,7 +93,8 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
         </div>
       </div>
 
-      {/* Region + device */}
+      {/* Region + device — Meta-only breakdowns; hidden on other platforms. */}
+      {isMeta && (
       <div className="ads-grid-2">
         <div className="ads-panel">
           <div className="ads-ph"><h3>Performance by region</h3></div>
@@ -151,6 +154,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
           )}
         </div>
       </div>
+      )}
 
       {/* Campaign analysis */}
       <div className="ads-panel">

@@ -158,7 +158,7 @@ final class AdsOverviewQuery
         $expectedDays = (int) CarbonImmutable::parse($start)->diffInDays(CarbonImmutable::parse($end)) + 1;
         $isComplete   = $expectedDays > 0 && (int) ($cur->complete_days ?? 0) >= $expectedDays;
 
-        return ['metrics' => $metrics, 'isComplete' => $isComplete, 'funnel' => $this->funnel($metrics, $cur)];
+        return ['metrics' => $metrics, 'isComplete' => $isComplete, 'funnel' => $this->funnel($metrics, $cur, $platform)];
     }
 
     /**
@@ -244,16 +244,30 @@ final class AdsOverviewQuery
      * @param array<string, mixed> $m
      * @return array<int, array<string, mixed>>
      */
-    private function funnel(array $m, object $cur): array
+    private function funnel(array $m, object $cur, string $platform): array
     {
+        $impressions = ['key' => 'impressions', 'label' => 'Impressions', 'value' => (int) $m['impressions'], 'pending' => false];
+        $purchases   = ['key' => 'purchases',   'label' => 'Purchases',   'value' => (int) $m['purchases'],   'pending' => false];
+
+        // Link clicks + Landing views are Meta-specific funnel fields. TikTok and
+        // Google don't sync them, so their funnel is Impressions → Clicks →
+        // Purchases (Clicks is universal) — no fake "not synced" middle steps.
+        if ($platform !== 'meta') {
+            return [
+                $impressions,
+                ['key' => 'clicks', 'label' => 'Clicks', 'value' => (int) $m['clicks'], 'pending' => false],
+                $purchases,
+            ];
+        }
+
         $lcN  = (int) ($cur->lc_n ?? 0);
         $lpvN = (int) ($cur->lpv_n ?? 0);
 
         return [
-            ['key' => 'impressions',        'label' => 'Impressions',   'value' => (int) $m['impressions'],                          'pending' => false],
+            $impressions,
             ['key' => 'link_clicks',        'label' => 'Link clicks',   'value' => $lcN > 0 ? (int) $cur->link_clicks : null,        'pending' => $lcN === 0],
             ['key' => 'landing_page_views', 'label' => 'Landing views', 'value' => $lpvN > 0 ? (int) $cur->landing_page_views : null, 'pending' => $lpvN === 0],
-            ['key' => 'purchases',          'label' => 'Purchases',     'value' => (int) $m['purchases'],                            'pending' => false],
+            $purchases,
         ];
     }
 

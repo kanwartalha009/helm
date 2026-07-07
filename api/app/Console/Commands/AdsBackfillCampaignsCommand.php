@@ -8,6 +8,7 @@ use App\Models\AdCampaignDailyMetric;
 use App\Models\Brand;
 use App\Platforms\Google\ReportsFetcher;
 use App\Platforms\Meta\InsightsFetcher;
+use App\Platforms\TikTok\ReportsFetcher as TikTokReportsFetcher;
 use App\Services\Currency\FxService;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
@@ -34,12 +35,12 @@ class AdsBackfillCampaignsCommand extends Command
     protected $signature = 'ads:backfill-campaigns '
         . '{brand? : slug or id; omit for all active brands} '
         . '{--since=2025-01-01 : first day to pull (Y-m-d)} '
-        . '{--platform= : meta|google; omit for both} '
+        . '{--platform= : meta|google|tiktok; omit for all} '
         . '{--chunk-days=7 : days per API request; lower it (e.g. 3 or 1) if Meta returns "reduce the amount of data"}';
 
-    protected $description = 'Backfill campaign-level Meta + Google performance into ad_campaign_daily_metrics for the ads audit.';
+    protected $description = 'Backfill campaign-level Meta + Google + TikTok performance into ad_campaign_daily_metrics for the ads audit.';
 
-    public function handle(InsightsFetcher $meta, ReportsFetcher $google, FxService $fx): int
+    public function handle(InsightsFetcher $meta, ReportsFetcher $google, TikTokReportsFetcher $tiktok, FxService $fx): int
     {
         $since = (string) $this->option('since');
         if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) {
@@ -49,9 +50,9 @@ class AdsBackfillCampaignsCommand extends Command
         }
 
         $platformOpt = strtolower(trim((string) ($this->option('platform') ?? '')));
-        $platforms   = $platformOpt === '' ? ['meta', 'google'] : [$platformOpt];
-        if (array_diff($platforms, ['meta', 'google']) !== []) {
-            $this->error('--platform must be meta or google.');
+        $platforms   = $platformOpt === '' ? ['meta', 'google', 'tiktok'] : [$platformOpt];
+        if (array_diff($platforms, ['meta', 'google', 'tiktok']) !== []) {
+            $this->error('--platform must be meta, google or tiktok.');
 
             return self::FAILURE;
         }
@@ -99,9 +100,11 @@ class AdsBackfillCampaignsCommand extends Command
                     }
 
                     try {
-                        $fetched = $platform === 'meta'
-                            ? $meta->fetchCampaignRange($conn, $cursor, $chunkEnd)
-                            : $google->fetchCampaignRange($conn, $cursor, $chunkEnd);
+                        $fetched = match ($platform) {
+                            'meta'   => $meta->fetchCampaignRange($conn, $cursor, $chunkEnd),
+                            'google' => $google->fetchCampaignRange($conn, $cursor, $chunkEnd),
+                            default  => $tiktok->fetchCampaignRange($conn, $cursor, $chunkEnd),
+                        };
                     } catch (Throwable $e) {
                         $this->error("· {$brand->name} [{$platform}] {$cursor->toDateString()}: {$e->getMessage()}");
                         $failed = true;

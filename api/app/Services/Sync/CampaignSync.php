@@ -9,6 +9,7 @@ use App\Models\MetaBreakdownDaily;
 use App\Models\PlatformConnection;
 use App\Platforms\Google\ReportsFetcher;
 use App\Platforms\Meta\InsightsFetcher;
+use App\Platforms\TikTok\ReportsFetcher as TikTokReportsFetcher;
 use App\Services\Currency\FxService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
@@ -29,6 +30,7 @@ final class CampaignSync
     public function __construct(
         private readonly InsightsFetcher $meta,
         private readonly ReportsFetcher $google,
+        private readonly TikTokReportsFetcher $tiktok,
         private readonly FxService $fx,
     ) {}
 
@@ -36,14 +38,16 @@ final class CampaignSync
     public function syncDay(PlatformConnection $conn, CarbonImmutable $date): int
     {
         $platform = $conn->platform;
-        if (! in_array($platform, ['meta', 'google'], true)) {
+        if (! in_array($platform, ['meta', 'google', 'tiktok'], true)) {
             return 0;
         }
 
         try {
-            $rows = $platform === 'meta'
-                ? $this->meta->fetchCampaignRange($conn, $date, $date)
-                : $this->google->fetchCampaignRange($conn, $date, $date);
+            $rows = match ($platform) {
+                'meta'   => $this->meta->fetchCampaignRange($conn, $date, $date),
+                'google' => $this->google->fetchCampaignRange($conn, $date, $date),
+                default  => $this->tiktok->fetchCampaignRange($conn, $date, $date),
+            };
         } catch (Throwable $e) {
             Log::warning('sync.campaigns.failed', [
                 'brand_id' => $conn->brand_id,
