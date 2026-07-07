@@ -34,6 +34,9 @@ return [
         'purchase_metric'   => env('TIKTOK_PURCHASE_METRIC', 'complete_payment'),
         'value_metric'      => env('TIKTOK_VALUE_METRIC', 'value_per_complete_payment'),
         'value_metric_kind' => env('TIKTOK_VALUE_METRIC_KIND', 'per_purchase'),
-        'cart_metric'       => env('TIKTOK_CART_METRIC', 'total_add_to_cart'), // creatives CtATC
+        // creatives CtATC. Empty = OFF: Nude Project's pixel reports no add-to-cart
+        // (total_add_to_cart / add_to_cart / on_web_add_to_cart all 40002-invalid
+        // per tiktok:diagnose). Set TIKTOK_CART_METRIC once an account exposes one.
+        'cart_metric'       => env('TIKTOK_CART_METRIC', ''),
     ],
 ];

@@ -153,7 +153,7 @@ export function AdsCreativesView({ slug, period, platform }: { slug?: string; pe
           <>
             <div className="acrea-grid">
               {shown.map((c) => (
-                <CreativeCard key={c.adId} c={c} money={money} wRoas={kpi.roas} spendDenom={kpi.spend} onPlay={() => setPlaying(c)} />
+                <CreativeCard key={c.adId} c={c} platform={platform} money={money} wRoas={kpi.roas} spendDenom={kpi.spend} onPlay={() => setPlaying(c)} />
               ))}
             </div>
             {sorted.length > RENDER_CAP && (
@@ -215,15 +215,21 @@ function Spark({ series, color }: { series: number[]; color: string }) {
 }
 
 function CreativeCard({
-  c, money, wRoas, spendDenom, onPlay,
+  c, platform, money, wRoas, spendDenom, onPlay,
 }: {
   c: AdsCreative;
+  platform: AdsPlatform;
   money: (v: number | null) => string;
   wRoas: number | null;
   spendDenom: number;
   onPlay: () => void;
 }) {
+  // A video is playable only if its asset actually resolved. TikTok video +
+  // no thumbnail = the /ad/get + /file endpoints were denied (token missing the
+  // Ads Management scope), so the source fetch would fail too — render a clean
+  // tile, not a dead play button. Meta is unaffected (its source always resolves).
   const isVideo = c.mediaType === 'video';
+  const playable = isVideo && (platform !== 'tiktok' || !!c.thumbnail);
   const spendPct = spendDenom > 0 ? (c.spend / spendDenom) * 100 : null;
   // ROAS colored against the set's weighted ROAS: green ≥ weighted, red < 90% of it.
   const roasTone = c.roas == null || wRoas == null || wRoas <= 0 ? '' : c.roas >= wRoas ? ' pos' : c.roas < 0.9 * wRoas ? ' neg' : '';
@@ -233,10 +239,10 @@ function CreativeCard({
     <div className={`acrea-card${isVideo ? ' is-video' : ''}`}>
       <div
         className="acrea-thumb"
-        onClick={isVideo ? onPlay : undefined}
-        role={isVideo ? 'button' : undefined}
-        tabIndex={isVideo ? 0 : undefined}
-        onKeyDown={isVideo ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(); } } : undefined}
+        onClick={playable ? onPlay : undefined}
+        role={playable ? 'button' : undefined}
+        tabIndex={playable ? 0 : undefined}
+        onKeyDown={playable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(); } } : undefined}
       >
         {c.thumbnail ? (
           <img src={c.thumbnail} alt="" loading="lazy" referrerPolicy="no-referrer" />
@@ -246,7 +252,7 @@ function CreativeCard({
         <span className={`acrea-state ${c.state}`}>{STATE_LABEL[c.state]}</span>
         {c.wow != null && <span className={`acrea-wow${wowTone}`}>WoW {formatPercent(c.wow, { signed: true, decimals: 0 })}</span>}
         {c.wow == null && <span className="acrea-wow new">New</span>}
-        {isVideo && <span className="acrea-play" aria-hidden><span /></span>}
+        {playable && <span className="acrea-play" aria-hidden><span /></span>}
         <span className="acrea-badge">{isVideo ? 'Video' : 'Image'}</span>
       </div>
       <div className="acrea-body">
