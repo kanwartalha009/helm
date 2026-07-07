@@ -8,8 +8,7 @@ import { useUsers } from '@/hooks/useApiData';
 import { useCurrentUser } from '@/hooks/useSettings';
 import { formatMoney, formatNumber, formatPercent, formatRoas, pctDelta, timeAgo } from '@/lib/formatters';
 import type { DashboardRow, DashboardRowBrand } from '@/types/domain';
-import type { CollectionGroup, InventoryPeriod, InventoryStatus, InventoryTrendPoint } from '@/types/inventory';
-import '@/styles/ads.css';
+import type { CollectionGroup, InventoryPeriod, InventoryStatus } from '@/types/inventory';
 
 type SortKey = 'spend' | 'units' | 'stock' | 'name' | 'status';
 type StatusFilter = 'all' | InventoryStatus;
@@ -338,8 +337,6 @@ export function InventoryPage() {
               </Banner>
             </div>
           )}
-
-          {data.trend.length > 1 && <InventoryTrend trend={data.trend} currency={currency} />}
 
           <div style={cardsGrid}>
             <SummaryCard label="Products" value={formatNumber(data.summary.products)} hint="in scope" />
@@ -972,83 +969,6 @@ function formatRange(from: Date, to: Date): string {
 }
 
 // Parse the API's Y-m-d window (brand tz) into a display range.
-/**
- * Compact dual-axis trend chart (revenue + Meta spend on the left money axis,
- * units on the right) — brings the Ads trend-graph language to Inventory. Uses
- * the Ads `.atrend-*` styling, scoped under a local `.ads-root` wrapper.
- */
-function InventoryTrend({ trend, currency }: { trend: InventoryTrendPoint[]; currency: string }) {
-  if (trend.length < 2) return null;
-  const W = 900, top = 10, bot = 150;
-  const leftStep = niceStep(Math.max(1, ...trend.map((t) => Math.max(t.revenue, t.spend))) / 3);
-  const rightStep = niceStep(Math.max(1, ...trend.map((t) => t.units)) / 3);
-  const leftMax = leftStep * 3, rightMax = rightStep * 3;
-  const x = (i: number) => (i / (trend.length - 1)) * W;
-  const yL = (v: number) => bot - (v / leftMax) * (bot - top);
-  const yR = (v: number) => bot - (v / rightMax) * (bot - top);
-  const line = (acc: (t: InventoryTrendPoint) => number, y: (v: number) => number) =>
-    trend.map((t, i) => `${x(i).toFixed(1)},${y(acc(t)).toFixed(1)}`).join(' ');
-  const gridY = [top, top + (bot - top) / 3, top + (2 * (bot - top)) / 3, bot];
-  const leftTicks = [leftStep * 3, leftStep * 2, leftStep, 0];
-  const rightTicks = [rightStep * 3, rightStep * 2, rightStep, 0];
-  const xTicks = pickTrendDates(trend, 7);
-  const cur = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '';
-
-  return (
-    <div className="ads-root" style={{ marginBottom: 16 }}>
-      <div className="ads-panel">
-        <div className="ads-ph"><h3>Trend</h3></div>
-        <div className="ads-psub">Revenue, Meta spend and units · {rangeLabel(trend[0].date, trend[trend.length - 1].date)}</div>
-        <div className="atrend-legend" style={{ marginBottom: 6 }}>
-          <span><i style={{ background: '#2563EB' }} />Revenue</span>
-          <span><i style={{ background: '#22C55E' }} />Meta spend</span>
-          <span><i style={{ background: '#0EA5B7' }} />Units</span>
-        </div>
-        <div className="atrend-chart">
-          <div className="atrend-axis l">{leftTicks.map((v, i) => <span key={i}>{v === 0 ? '0' : `${cur}${axisFmt(v)}`}</span>)}</div>
-          <svg className="atrend-svg" viewBox={`0 0 ${W} ${bot + 10}`} preserveAspectRatio="none">
-            {gridY.map((gy, i) => (
-              <line key={i} x1={0} y1={gy} x2={W} y2={gy} stroke="#E7E5E4" strokeWidth={1} strokeDasharray={i === 0 || i === 3 ? undefined : '2 6'} />
-            ))}
-            <polyline points={line((t) => t.units, yR)} fill="none" stroke="#0EA5B7" strokeWidth={1.8} strokeLinejoin="round" />
-            <polyline points={line((t) => t.spend, yL)} fill="none" stroke="#22C55E" strokeWidth={1.8} strokeLinejoin="round" />
-            <polyline points={line((t) => t.revenue, yL)} fill="none" stroke="#2563EB" strokeWidth={2} strokeLinejoin="round" />
-          </svg>
-          <div className="atrend-axis r">{rightTicks.map((v, i) => <span key={i}>{axisFmt(v)}</span>)}</div>
-        </div>
-        <div className="atrend-x">{xTicks.map((d, i) => <span key={i}>{d}</span>)}</div>
-        <div className="ads-psub" style={{ marginTop: 8, fontSize: 11 }}>Left axis: revenue &amp; spend · Right axis: units</div>
-      </div>
-    </div>
-  );
-}
-
-function niceStep(v: number): number {
-  if (v <= 0) return 1;
-  const pow = Math.pow(10, Math.floor(Math.log10(v)));
-  const n = v / pow;
-  const nice = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
-  return nice * pow;
-}
-
-function axisFmt(v: number): string {
-  if (v === 0) return '0';
-  if (v >= 1e6) return `${Number.isInteger(v / 1e6) ? v / 1e6 : (v / 1e6).toFixed(1)}M`;
-  if (v >= 1e3) return `${Number.isInteger(v / 1e3) ? v / 1e3 : (v / 1e3).toFixed(1)}K`;
-  return `${Math.round(v)}`;
-}
-
-function pickTrendDates(trend: InventoryTrendPoint[], n: number): string[] {
-  const len = trend.length;
-  const fmt = (iso: string) => {
-    const [y, m, d] = iso.split('-').map(Number);
-    return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-  };
-  if (len <= n) return trend.map((t) => fmt(t.date));
-  const out: string[] = [];
-  for (let i = 0; i < n; i++) out.push(fmt(trend[Math.round((i / (n - 1)) * (len - 1))].date));
-  return out;
-}
 
 function rangeLabel(fromStr: string, toStr: string): string {
   const parse = (s: string) => {

@@ -142,7 +142,6 @@ final class InventoryQuery
             'to'       => $to,
             'currency' => $ccy,
             'syncedAt' => $syncedAt,
-            'trend'    => $this->trend($bid, $from, $to),
             'summary'  => [
                 'products'        => $products->count(),
                 'pause'           => $cPause,
@@ -159,64 +158,6 @@ final class InventoryQuery
             'unattributed' => ['collection' => round($coll, 2), 'other' => round($other, 2), 'total' => round($coll + $other, 2)],
             'products'     => $rows,
         ];
-    }
-
-    /**
-     * Daily brand totals over the window — Meta spend (all product keys, incl. the
-     * unattributed __collection/__other), revenue (Total sales + refunds) and
-     * units — for the trend chart. Dense: every day in the window gets a point
-     * (gaps filled with 0) so the line has no holes.
-     *
-     * @return array<int, array{date: string, spend: float, revenue: float, units: int}>
-     */
-    private function trend(int $brandId, string $from, string $to): array
-    {
-        // Group by the real `date` column (not a SELECT alias) and key by a parsed
-        // date string, so this is safe across MySQL/MariaDB strict modes and
-        // whatever the model casts `date` to.
-        $spend = [];
-        foreach (AdProductDaily::query()
-            ->where('brand_id', $brandId)
-            ->whereBetween('date', [$from, $to])
-            ->groupBy('date')
-            ->selectRaw('date, COALESCE(SUM(spend), 0) AS spend')
-            ->get() as $r) {
-            $spend[CarbonImmutable::parse((string) $r->date)->toDateString()] = (float) $r->spend;
-        }
-
-        // dimension_type='product' + refunds_amount mirror the per-product revenue
-        // in run() exactly (revenue = Total sales + refunds), so the trend
-        // reconciles with the summary; without the dimension filter this would sum
-        // across every dimension_type.
-        $comm = [];
-        foreach (CommerceDailyMetric::query()
-            ->where('brand_id', $brandId)
-            ->where('dimension_type', 'product')
-            ->whereBetween('date', [$from, $to])
-            ->groupBy('date')
-            ->selectRaw('date, COALESCE(SUM(units), 0) AS units, COALESCE(SUM(total_sales), 0) AS total_sales, COALESCE(SUM(refunds_amount), 0) AS refunds')
-            ->get() as $r) {
-            $comm[CarbonImmutable::parse((string) $r->date)->toDateString()] = [
-                'units'   => (int) $r->units,
-                'revenue' => (float) $r->total_sales + (float) $r->refunds,
-            ];
-        }
-
-        $out    = [];
-        $cursor = CarbonImmutable::parse($from);
-        $end    = CarbonImmutable::parse($to);
-        while ($cursor->lessThanOrEqualTo($end)) {
-            $d = $cursor->toDateString();
-            $out[] = [
-                'date'    => $d,
-                'spend'   => round($spend[$d] ?? 0.0, 2),
-                'revenue' => round($comm[$d]['revenue'] ?? 0.0, 2),
-                'units'   => $comm[$d]['units'] ?? 0,
-            ];
-            $cursor = $cursor->addDay();
-        }
-
-        return $out;
     }
 
     /** Per-product-title commerce sums (units gross, total_sales, refunds) over a window. */

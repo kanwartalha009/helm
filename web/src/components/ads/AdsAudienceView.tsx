@@ -25,8 +25,10 @@ export function AdsAudienceView({ data }: { data: AdsOverviewResponse }) {
   ];
 
   const panels: { title: string; subtitle: string; bd: AdsByCountry; prettify: (s: string) => string }[] = [
+    { title: 'Gender', subtitle: 'Attributed spend by gender', bd: data.byGender, prettify: (x) => x },
     { title: 'Age', subtitle: 'Attributed spend by age', bd: data.byAge, prettify: (x) => x },
     { title: 'Age & gender', subtitle: 'Attributed spend by age × gender', bd: data.byAgeGender, prettify: prettyAgeGender },
+    { title: 'Audience', subtitle: 'New vs returning vs engaged', bd: data.byAudience, prettify: prettyAudience },
     { title: 'Placement', subtitle: 'By publisher platform', bd: data.byPlacement, prettify: prettyPlacement },
     { title: 'Placement detail', subtitle: 'By platform & position', bd: data.byPlacementDetail, prettify: prettyPlacementDetail },
     { title: 'Device', subtitle: 'By impression device', bd: data.byDeviceDetail, prettify: prettyDevice },
@@ -45,7 +47,7 @@ export function AdsAudienceView({ data }: { data: AdsOverviewResponse }) {
     { axis: 'Top region', bd: data.byRegion, prettify: (x: string) => x },
   ].filter((h) => h.bd.hasData && h.bd.top);
 
-  const hasAny = data.byGender.hasData || data.byAudience.hasData || visible.length > 0;
+  const hasAny = visible.length > 0;
 
   return (
     <div className="ads-root">
@@ -101,11 +103,6 @@ export function AdsAudienceView({ data }: { data: AdsOverviewResponse }) {
             </div>
           )}
 
-          <div className="ads-grid-even">
-            <SplitBar title="Gender" subtitle="Attributed spend by gender" bd={data.byGender} color={genderColor} prettify={(x) => x} money={money} />
-            <SplitBar title="Audience" subtitle="New vs returning vs engaged" bd={data.byAudience} color={audienceColor} prettify={prettyAudience} money={money} />
-          </div>
-
           <div className="ads-grid-cards">
             {visible.map((p) => (
               <BreakdownPanel key={p.title} title={p.title} subtitle={p.subtitle} bd={p.bd} currency={currency} prettify={p.prettify} />
@@ -149,54 +146,6 @@ function EffStat({ label, value }: { label: string; value: string }) {
       <span className="v num">{value}</span>
     </div>
   );
-}
-
-function SplitBar({
-  title, subtitle, bd, color, prettify, money,
-}: {
-  title: string;
-  subtitle: string;
-  bd: AdsByCountry;
-  color: (l: string) => string;
-  prettify: (s: string) => string;
-  money: (v: number | null) => string;
-}) {
-  if (!bd.hasData) return null;
-  const total = bd.rows.reduce((a, r) => a + r.spend, 0) || 1;
-  const rows = [...bd.rows].sort((a, b) => b.spend - a.spend);
-
-  return (
-    <div className="ads-panel">
-      <div className="ads-ph"><h3>{title}</h3></div>
-      <div className="ads-psub">{subtitle}</div>
-      <div className="agender-bar">
-        {rows.map((r) => (
-          <span key={r.key} style={{ width: `${(r.spend / total) * 100}%`, background: color(r.label) }} title={`${prettify(r.label)} · ${Math.round((r.spend / total) * 100)}%`} />
-        ))}
-      </div>
-      <div className="agender-legend">
-        {rows.map((r) => (
-          <div className="agender-item" key={r.key}>
-            <span className="dot" style={{ background: color(r.label) }} />
-            <b>{prettify(r.label)}</b>
-            <span className="agender-meta">{Math.round((r.spend / total) * 100)}% · {money(r.spend)} · {formatRoas(r.roas)}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function genderColor(l: string): string {
-  return /female/i.test(l) ? '#EC4899' : /male/i.test(l) ? '#2563EB' : '#94A3B8';
-}
-
-function audienceColor(l: string): string {
-  const s = l.toLowerCase();
-  if (s.includes('new')) return '#2563EB';
-  if (s.includes('exist') || s.includes('return')) return '#16A34A';
-  if (s.includes('engag')) return '#0EA5B7';
-  return '#94A3B8';
 }
 
 function prettyAudience(s: string): string {
