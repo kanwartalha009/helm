@@ -141,6 +141,7 @@ export interface AdsCreative {
   name: string;
   campaignId: string | null;
   thumbnail: string | null;
+  mediaType: 'image' | 'video';
   spend: number;
   revenue: number;
   purchases: number;

@@ -172,6 +172,25 @@
 .acrea-metrics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--a-muted); }
 .acrea-metrics b { color: var(--a-ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 
+/* media type badge (top-right) + play affordance for video ads */
+.acrea-badge { position: absolute; top: 8px; right: 8px; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; color: #fff; background: rgba(12,10,9,.62); border-radius: 5px; padding: 2px 6px; text-transform: uppercase; }
+.acrea-card.is-video .acrea-thumb { cursor: pointer; }
+.acrea-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .12s ease; }
+.acrea-card.is-video:hover .acrea-play { opacity: 1; }
+.acrea-play span { width: 44px; height: 44px; border-radius: 50%; background: rgba(12,10,9,.55); display: flex; align-items: center; justify-content: center; }
+.acrea-play span::after { content: ''; margin-left: 3px; border-style: solid; border-width: 8px 0 8px 13px; border-color: transparent transparent transparent #fff; }
+
+/* lightweight modal video player */
+.acrea-modal { position: fixed; inset: 0; z-index: 200; background: rgba(12,10,9,.72); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.acrea-modal-inner { position: relative; width: min(560px, 92vw); background: #0C0A09; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+.acrea-modal-close { position: absolute; top: 8px; right: 8px; z-index: 2; width: 30px; height: 30px; border-radius: 50%; border: none; background: rgba(12,10,9,.6); color: #fff; font-size: 17px; line-height: 1; cursor: pointer; }
+.acrea-modal-close:hover { background: rgba(12,10,9,.85); }
+.acrea-modal video { display: block; width: 100%; max-height: 78vh; background: #000; }
+.acrea-modal-state { display: flex; align-items: center; justify-content: center; min-height: 260px; color: #E7E5E4; font-size: 13px; padding: 24px; text-align: center; }
+.acrea-modal-state img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: .28; }
+.acrea-modal-state span { position: relative; z-index: 1; }
+.acrea-modal-cap { padding: 11px 14px; border-top: 1px solid rgba(255,255,255,.08); color: #E7E5E4; font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* Purchase funnel — glowing silhouette + stage rows with divider lines (mockup) */
 .lf-body { position: relative; height: 300px; margin-top: 8px; }
 .lf-svg { position: absolute; top: 0; left: 50%; transform: translateX(-50%); height: 100%; z-index: 1; }

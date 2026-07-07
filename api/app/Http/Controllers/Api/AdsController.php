@@ -6,7 +6,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdCampaignDailyMetric;
+use App\Models\AdCreativeDaily;
 use App\Models\Brand;
+use App\Platforms\Meta\MetaCreativeFetcher;
 use App\Services\Aggregation\AdsOverviewQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -84,5 +86,35 @@ class AdsController extends Controller
         ]);
 
         return response()->json($this->query->creatives($brand, $params));
+    }
+
+    /**
+     * Fresh, playable source URL for one video creative (Phase D) — resolved on
+     * demand because Meta's video source URLs are short-lived CDN links that go
+     * stale if stored. 404s an ad that isn't this brand's; returns {url:null}
+     * when the ad has no accessible video (image ad, dark post, permission-gated)
+     * so the UI can fall back to the poster image without erroring.
+     *
+     *   GET /api/brands/{brand}/ads/creatives/{ad}/video
+     */
+    public function creativeVideo(Brand $brand, string $ad, MetaCreativeFetcher $fetcher): JsonResponse
+    {
+        $this->authorize('view', $brand);
+
+        $belongs = AdCreativeDaily::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', 'meta')
+            ->where('ad_id', $ad)
+            ->exists();
+        abort_unless($belongs, 404);
+
+        $conn = $brand->connections()
+            ->where('platform', 'meta')
+            ->where('status', 'active')
+            ->first();
+
+        $url = $conn ? $fetcher->fetchVideoSource($conn, $ad) : null;
+
+        return response()->json(['url' => $url]);
     }
 }

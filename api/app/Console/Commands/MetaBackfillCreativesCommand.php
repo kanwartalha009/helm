@@ -105,7 +105,7 @@ class MetaBackfillCreativesCommand extends Command
                         AdCreativeDaily::upsert(
                             $chunk,
                             ['brand_id', 'platform', 'date', 'ad_id'],
-                            ['ad_name', 'campaign_id', 'thumbnail_url', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+                            ['ad_name', 'campaign_id', 'thumbnail_url', 'media_type', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                         );
                     }
                     $rows += count($records);
@@ -160,6 +160,7 @@ class MetaBackfillCreativesCommand extends Command
                 'ad_name'          => mb_substr((string) ($r['ad_name'] ?? ''), 0, 255),
                 'campaign_id'      => mb_substr((string) ($r['campaign_id'] ?? ''), 0, 64) ?: null,
                 'thumbnail_url'    => $r['thumbnail_url'] ?? null,
+                'media_type'       => in_array($r['media_type'] ?? 'image', ['image', 'video'], true) ? $r['media_type'] : 'image',
                 'spend'            => (float) ($r['spend'] ?? 0),
                 'impressions'      => (int) ($r['impressions'] ?? 0),
                 'clicks'           => (int) ($r['clicks'] ?? 0),

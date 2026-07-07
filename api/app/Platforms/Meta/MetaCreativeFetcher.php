@@ -91,6 +91,7 @@ final class MetaCreativeFetcher
                         'conversion_value' => round(self::attributedTotal($r['action_values'] ?? [], self::PURCHASE_ACTION_TYPES), 2),
                         'currency'         => strtoupper((string) ($r['account_currency'] ?? $fallbackCcy)),
                         'thumbnail_url'    => null,
+                        'media_type'       => 'image',
                     ];
                 }
                 usleep(150_000); // pace the per-day calls
@@ -101,9 +102,11 @@ final class MetaCreativeFetcher
             return [];
         }
 
-        $thumbs = $this->resolveThumbnails(array_keys($adIds));
+        $creatives = $this->resolveCreatives(array_keys($adIds));
         foreach ($rows as &$row) {
-            $row['thumbnail_url'] = $thumbs[$row['ad_id']] ?? null;
+            $c = $creatives[$row['ad_id']] ?? null;
+            $row['thumbnail_url'] = $c['image'] ?? null;
+            $row['media_type']    = $c['media'] ?? 'image';
         }
         unset($row);
 
@@ -111,39 +114,88 @@ final class MetaCreativeFetcher
     }
 
     /**
-     * ad_id => thumbnail_url (or null), reading creatives only for the given ids,
-     * batched with pacing to respect the rate limit.
+     * ad_id => ['image' => best full-res image URL, 'media' => 'image'|'video'],
+     * batched with pacing. The image is Meta's full image_url / video poster (NOT
+     * the tiny thumbnail_url), so the grid isn't pixelated; media flags video ads
+     * so the UI can offer playback.
      *
      * @param array<int, string> $adIds
-     * @return array<string, ?string>
+     * @return array<string, array{image: ?string, media: string}>
      */
-    private function resolveThumbnails(array $adIds): array
+    private function resolveCreatives(array $adIds): array
     {
         $out = [];
         foreach (array_chunk($adIds, self::BATCH) as $chunk) {
             try {
                 $batch = $this->client->get('', [
                     'ids'    => implode(',', $chunk),
-                    'fields' => 'id,creative{thumbnail_url}',
+                    'fields' => 'id,creative{image_url,thumbnail_url,video_id,object_story_spec{video_data{video_id,image_url},link_data{picture}},asset_feed_spec{videos{video_id},images{url}}}',
                 ]);
             } catch (Throwable $e) {
-                Log::warning('meta.creative.thumbnails_failed', ['error' => $e->getMessage(), 'count' => count($chunk)]);
+                Log::warning('meta.creative.creatives_failed', ['error' => $e->getMessage(), 'count' => count($chunk)]);
                 foreach ($chunk as $id) {
-                    $out[$id] = null;
+                    $out[$id] = ['image' => null, 'media' => 'image'];
                 }
                 usleep(400_000);
                 continue;
             }
 
             foreach ($chunk as $id) {
-                $ad  = is_array($batch[$id] ?? null) ? $batch[$id] : [];
-                $url = $ad['creative']['thumbnail_url'] ?? null;
-                $out[$id] = is_string($url) && $url !== '' ? $url : null;
+                $cr   = is_array($batch[$id] ?? null) ? (array) ($batch[$id]['creative'] ?? []) : [];
+                $oss  = (array) ($cr['object_story_spec'] ?? []);
+                $feed = (array) ($cr['asset_feed_spec'] ?? []);
+
+                $videoId = $oss['video_data']['video_id']
+                    ?? $cr['video_id']
+                    ?? ($feed['videos'][0]['video_id'] ?? null);
+
+                // Best full-res image, in priority order — never the tiny thumbnail
+                // unless nothing else is present.
+                $image = $cr['image_url']
+                    ?? ($oss['video_data']['image_url'] ?? null)
+                    ?? ($oss['link_data']['picture'] ?? null)
+                    ?? ($feed['images'][0]['url'] ?? null)
+                    ?? ($cr['thumbnail_url'] ?? null);
+
+                $out[$id] = [
+                    'image' => is_string($image) && $image !== '' ? $image : null,
+                    'media' => $videoId ? 'video' : 'image',
+                ];
             }
             usleep(250_000); // pace batches — Meta error 17 is complexity/volume based
         }
 
         return $out;
+    }
+
+    /**
+     * Resolve a FRESH, playable video source URL for one ad — on demand, because
+     * Meta's source URLs are short-lived CDN links that would be stale if stored.
+     * Returns null when the ad isn't a video or the source isn't accessible (dark
+     * posts / permission-gated), so the UI can fall back gracefully.
+     */
+    public function fetchVideoSource(PlatformConnection $conn, string $adId): ?string
+    {
+        try {
+            $ad = $this->client->get($adId, ['fields' => 'creative{video_id,object_story_spec{video_data{video_id}}}']);
+        } catch (Throwable $e) {
+            Log::warning('meta.creative.video_ad_failed', ['ad' => $adId, 'error' => $e->getMessage()]);
+            return null;
+        }
+        $cr  = (array) ($ad['creative'] ?? []);
+        $vid = $cr['object_story_spec']['video_data']['video_id'] ?? $cr['video_id'] ?? null;
+        if (! $vid) {
+            return null;
+        }
+        try {
+            $v = $this->client->get((string) $vid, ['fields' => 'source']);
+        } catch (Throwable $e) {
+            Log::warning('meta.creative.video_source_failed', ['video' => $vid, 'error' => $e->getMessage()]);
+            return null;
+        }
+        $src = $v['source'] ?? null;
+
+        return is_string($src) && $src !== '' ? $src : null;
     }
 
     /**
