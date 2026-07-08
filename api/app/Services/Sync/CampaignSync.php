@@ -169,6 +169,34 @@ final class CampaignSync
     }
 
     /**
+     * Google device breakdown for one day → meta_breakdown_daily[platform=google].
+     * Best-effort, mirrors the Meta/TikTok breakdown syncs. Only `device` is
+     * supported (geo deferred — see ReportsFetcher::fetchBreakdownRange); an
+     * unknown type is a no-op rather than an error.
+     */
+    public function syncGoogleBreakdown(PlatformConnection $conn, CarbonImmutable $date, string $type): int
+    {
+        if ($conn->platform !== 'google' || ! in_array($type, ['device'], true)) {
+            return 0;
+        }
+
+        try {
+            $rows = $this->google->fetchBreakdownRange($conn, $type, $date, $date);
+        } catch (Throwable $e) {
+            Log::warning('sync.google_breakdown.failed', [
+                'brand_id' => $conn->brand_id,
+                'type'     => $type,
+                'date'     => $date->toDateString(),
+                'error'    => $e->getMessage(),
+            ]);
+
+            return 0;
+        }
+
+        return $this->storeBreakdown($conn, 'google', $date, $type, $rows);
+    }
+
+    /**
      * Shared upsert of one day's breakdown rows into meta_breakdown_daily, keyed
      * by (brand, platform, date, breakdown_type, segment). Native money + stored
      * fx snapshot (spec rule 7).

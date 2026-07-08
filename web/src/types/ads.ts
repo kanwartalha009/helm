@@ -128,6 +128,8 @@ export interface AdsOverviewResponse {
   byDeviceDetail: AdsByCountry; // impression device, by spend (Overview donut is by purchases)
   byAudience: AdsByCountry; // ASC segment: new / engaged / existing / unknown
   byRegion: AdsByCountry; // country rolled up into regions (Europe, North America, …)
+  byChannel: AdsByCountry; // Google-only: campaigns folded into channel mix (PMax / Search·Brand / …)
+  byBrandType: AdsByCountry; // Google-only: Brand vs Non-brand vs Performance Max (incrementality lens)
   tiktokNative: AdsTikTokNative | null; // TikTok-only video + social engagement
   metaNative: AdsMetaNative | null; // Meta-only video completion + social engagement
   campaigns: AdsCampaignRow[];

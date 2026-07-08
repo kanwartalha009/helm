@@ -155,6 +155,10 @@ class SyncBrandDayJob implements ShouldQueue
             foreach (['country', 'device', 'age_gender'] as $tiktokAxis) {
                 $campaignSync->syncTikTokBreakdown($this->platformConnection, $this->date, $tiktokAxis);
             }
+
+            // Google device breakdown for the ads hub's Google Overview (donut +
+            // detail). Google-only + best-effort (self-guards to google).
+            $campaignSync->syncGoogleBreakdown($this->platformConnection, $this->date, 'device');
         } catch (Throwable $e) {
             $log->update([
                 'status'        => 'failed',

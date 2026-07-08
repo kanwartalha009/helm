@@ -62,6 +62,9 @@ final class AdsOverviewQuery
         // now Meta + TikTok. Placement + ASC-audience axes stay Meta-only (TikTok
         // has no equivalent). age_gender fetched once → age×gender / gender / age.
         $breakdownable = in_array($platform, ['meta', 'tiktok'], true);
+        // Google adds ONLY device (geo/demographics deferred), so the device panels
+        // gate on this wider set while country/region/age-gender stay Meta+TikTok.
+        $deviceable = $breakdownable || $platform === 'google';
         $ag = $breakdownable ? $this->ageGenderBreakdowns((int) $brand->id, $start, $end, $money, $platform) : null;
 
         return [
@@ -97,15 +100,17 @@ final class AdsOverviewQuery
             // degrade to a "Meta only" state rather than show Meta's numbers under
             // a Google view.
             'byCountry'         => $breakdownable ? $this->breakdown((int) $brand->id, 'country', $start, $end, $money, $platform) : $this->notApplicable(),
-            'byDevice'          => $breakdownable ? $this->deviceSplit((int) $brand->id, $start, $end, $money, $platform) : ['hasData' => false, 'metric' => 'purchases', 'total' => 0, 'rows' => []],
+            'byDevice'          => $deviceable ? $this->deviceSplit((int) $brand->id, $start, $end, $money, $platform) : ['hasData' => false, 'metric' => 'purchases', 'total' => 0, 'rows' => []],
             'byAgeGender'       => $ag['ageGender'] ?? $this->notApplicable(),
             'byGender'          => $ag['gender'] ?? $this->notApplicable(),
             'byAge'             => $ag['age'] ?? $this->notApplicable(),
             'byPlacement'       => $isMeta ? $this->breakdown((int) $brand->id, 'placement_platform', $start, $end, $money) : $this->notApplicable(),
             'byPlacementDetail' => $isMeta ? $this->breakdown((int) $brand->id, 'placement', $start, $end, $money) : $this->notApplicable(),
-            'byDeviceDetail'    => $breakdownable ? $this->breakdown((int) $brand->id, 'device', $start, $end, $money, $platform) : $this->notApplicable(),
+            'byDeviceDetail'    => $deviceable ? $this->breakdown((int) $brand->id, 'device', $start, $end, $money, $platform) : $this->notApplicable(),
             'byAudience'        => $isMeta ? $this->breakdown((int) $brand->id, 'audience', $start, $end, $money) : $this->notApplicable(),
             'byRegion'          => $breakdownable ? $this->regionRollup((int) $brand->id, $start, $end, $money, $platform) : $this->notApplicable(),
+            'byChannel'         => $platform === 'google' ? $this->channelBreakdown((int) $brand->id, $start, $end, $money) : $this->notApplicable(),
+            'byBrandType'       => $platform === 'google' ? $this->brandSplit((int) $brand->id, $start, $end, $money) : $this->notApplicable(),
             'tiktokNative'      => $platform === 'tiktok' ? $this->tiktokNative((int) $brand->id, $start, $end) : null,
             'metaNative'        => $platform === 'meta' ? $this->metaNative((int) $brand->id, $start, $end) : null,
             'campaigns'         => $this->campaigns((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money),
@@ -310,6 +315,152 @@ final class AdsOverviewQuery
             'impressions' => (int) $r->impressions,
             'clicks'      => (int) $r->clicks,
         ])->all());
+    }
+
+    /**
+     * Google "channel mix" breakdown — folds the brand's Google campaigns
+     * (ad_campaign_daily_metrics, ALREADY synced) into channel segments by parsing
+     * the campaign name: Performance Max / Search·Brand / Search·Generic / Shopping
+     * / Display / Video / Demand Gen / Other. This is the Google-native cut a DTC
+     * agency actually reviews (Google exposes no account-wide age/gender for PMax),
+     * and it needs NO new sync. Name-parsing (googleChannel) is convention-based
+     * with an 'Other' fallback, so an unrecognised name degrades gracefully.
+     */
+    private function channelBreakdown(int $brandId, string $start, string $end, callable $money): array
+    {
+        $seg = [];
+        foreach ($this->googleCampaignRows($brandId, $start, $end, $money) as $r) {
+            [$key, $label] = $this->googleChannel((string) $r->campaign_name);
+            $seg[$key] ??= ['key' => $key, 'label' => $label, 'spend' => 0.0, 'revenue' => 0.0, 'purchases' => 0, 'impressions' => 0, 'clicks' => 0];
+            $seg[$key]['spend']       += (float) $r->spend;
+            $seg[$key]['revenue']     += (float) $r->revenue;
+            $seg[$key]['purchases']   += (int) $r->purchases;
+            $seg[$key]['impressions'] += (int) $r->impressions;
+            $seg[$key]['clicks']      += (int) $r->clicks;
+        }
+
+        return $this->packRows(array_values($seg));
+    }
+
+    /**
+     * Classify a Google campaign into a channel segment from its name. Order
+     * matters: GENERIC is tested before BRAND because "BRAND-GENERIC" contains
+     * both tokens. Convention-based (fits the NP_<cc>_GADS_<CHANNEL>_… scheme);
+     * anything unrecognised falls to Other. Not white-label-proof — a later pass
+     * can store the real advertising_channel_type on the campaign row for channel
+     * certainty independent of naming.
+     *
+     * @return array{0: string, 1: string} [key, label]
+     */
+    private function googleChannel(string $name): array
+    {
+        $n = strtoupper($name);
+
+        if (str_contains($n, 'PMAX') || str_contains($n, 'PERFORMANCE MAX') || str_contains($n, 'PERFORMANCE_MAX')) {
+            return ['pmax', 'Performance Max'];
+        }
+        if (str_contains($n, 'SHOPPING')) {
+            return ['shopping', 'Shopping'];
+        }
+        if (str_contains($n, 'SEARCH')) {
+            if (str_contains($n, 'GENERIC') || str_contains($n, 'NONBRAND') || str_contains($n, 'NON-BRAND')) {
+                return ['search_generic', 'Search · Generic'];
+            }
+            if (str_contains($n, 'BRAND') || str_contains($n, 'PURE')) {
+                return ['search_brand', 'Search · Brand'];
+            }
+
+            return ['search', 'Search'];
+        }
+        if (str_contains($n, 'DISPLAY')) {
+            return ['display', 'Display'];
+        }
+        if (str_contains($n, 'YOUTUBE') || str_contains($n, 'VIDEO')) {
+            return ['video', 'Video'];
+        }
+        if (str_contains($n, 'DEMAND')) {
+            return ['demandgen', 'Demand Gen'];
+        }
+
+        return ['other', 'Other'];
+    }
+
+    /**
+     * Per-campaign Google rows (spend/revenue/purch/impr/clicks) summed over the
+     * window — the shared source for the channel-mix and brand-split folds. Reads
+     * ad_campaign_daily_metrics[google], already synced.
+     *
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    private function googleCampaignRows(int $brandId, string $start, string $end, callable $money): \Illuminate\Support\Collection
+    {
+        return AdCampaignDailyMetric::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'google')
+            ->whereBetween('date', [$start, $end])
+            ->groupBy('campaign_id')
+            ->selectRaw(
+                'campaign_id,
+                 MAX(campaign_name) AS campaign_name,
+                 COALESCE(SUM(' . $money('spend') . "), 0)            AS spend,
+                 COALESCE(SUM(" . $money('conversion_value') . "), 0) AS revenue,
+                 COALESCE(SUM(conversions), 0)                        AS purchases,
+                 COALESCE(SUM(impressions), 0)                        AS impressions,
+                 COALESCE(SUM(clicks), 0)                             AS clicks"
+            )
+            ->get();
+    }
+
+    /**
+     * Google brand-vs-non-brand split — the incrementality lens. Folds campaigns
+     * into Brand / Non-brand / Performance Max (mixed) by name. This is the single
+     * most important Google cut for a DTC agency: brand campaigns capture a huge
+     * share of REVENUE on a small share of SPEND because they largely harvest
+     * demand that would convert anyway (a "121×" brand ROAS is not incremental).
+     * PMax is kept separate because it blends brand + prospecting and can't be
+     * cleanly attributed to either. Deterministic — no margin/LLM assumptions; the
+     * UI carries the incrementality caveat.
+     */
+    private function brandSplit(int $brandId, string $start, string $end, callable $money): array
+    {
+        $seg = [
+            'brand'    => ['key' => 'brand', 'label' => 'Brand', 'spend' => 0.0, 'revenue' => 0.0, 'purchases' => 0, 'impressions' => 0, 'clicks' => 0],
+            'nonbrand' => ['key' => 'nonbrand', 'label' => 'Non-brand', 'spend' => 0.0, 'revenue' => 0.0, 'purchases' => 0, 'impressions' => 0, 'clicks' => 0],
+            'pmax'     => ['key' => 'pmax', 'label' => 'Performance Max (mixed)', 'spend' => 0.0, 'revenue' => 0.0, 'purchases' => 0, 'impressions' => 0, 'clicks' => 0],
+        ];
+
+        foreach ($this->googleCampaignRows($brandId, $start, $end, $money) as $r) {
+            $name = (string) $r->campaign_name;
+            $n    = strtoupper($name);
+            $k    = str_contains($n, 'PMAX') || str_contains($n, 'PERFORMANCE MAX') || str_contains($n, 'PERFORMANCE_MAX')
+                ? 'pmax'
+                : ($this->isBrandCampaign($n) ? 'brand' : 'nonbrand');
+
+            $seg[$k]['spend']       += (float) $r->spend;
+            $seg[$k]['revenue']     += (float) $r->revenue;
+            $seg[$k]['purchases']   += (int) $r->purchases;
+            $seg[$k]['impressions'] += (int) $r->impressions;
+            $seg[$k]['clicks']      += (int) $r->clicks;
+        }
+
+        // Drop buckets with no delivery so a Search-only account shows 2 rows, not 3.
+        $rows = array_values(array_filter($seg, static fn ($s) => $s['spend'] > 0 || $s['revenue'] > 0));
+
+        return $this->packRows($rows);
+    }
+
+    /**
+     * A campaign is "brand" when its name carries a brand token (BRAND / PURE) but
+     * NOT a generic/non-brand token — "BRAND-GENERIC" and "NON-BRAND" both contain
+     * BRAND yet are non-brand, so those are excluded first.
+     */
+    private function isBrandCampaign(string $upperName): bool
+    {
+        if (str_contains($upperName, 'GENERIC') || str_contains($upperName, 'NONBRAND') || str_contains($upperName, 'NON-BRAND')) {
+            return false;
+        }
+
+        return str_contains($upperName, 'BRAND') || str_contains($upperName, 'PURE');
     }
 
     /**

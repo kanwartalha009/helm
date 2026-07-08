@@ -8,6 +8,7 @@ use App\Models\PlatformConnection;
 use App\Platforms\Contracts\MetricSnapshot;
 use App\Services\Currency\FxService;
 use Carbon\CarbonImmutable;
+use Google\Ads\GoogleAds\V24\Enums\DeviceEnum\Device;
 
 /**
  * Pulls one day of Google Ads reporting metrics for a brand's connection and
@@ -211,6 +212,96 @@ final class ReportsFetcher
         }
 
         return $out;
+    }
+
+    /**
+     * Daily DEVICE breakdown for a date range → flat rows for
+     * meta_breakdown_daily[platform=google, breakdown_type=device]. GAQL from
+     * `campaign` with segments.device + segments.date, aggregated per (day,
+     * device) across the brand's customers (native money, or USD when the
+     * customers span currencies — same resolveMoney() as the account pull). Powers
+     * the Google Overview's device donut/detail.
+     *
+     * Only `device` is implemented. Geo is deliberately NOT built: for accounts
+     * running per-country campaigns (the norm here) a country breakdown duplicates
+     * the campaign table, and it would need geo_target_constant name resolution —
+     * cost without value. Add a 'country' branch only if a buyer runs single
+     * global campaigns.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchBreakdownRange(PlatformConnection $conn, string $dimension, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        if ($dimension !== 'device') {
+            return [];
+        }
+        $customerIds = $this->customerIdsFor($conn);
+        if ($customerIds === []) {
+            return [];
+        }
+        $baseCurrency = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+
+        $gaql = "SELECT segments.date, segments.device, customer.currency_code, "
+            . "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value "
+            . "FROM campaign WHERE segments.date BETWEEN '{$from->toDateString()}' AND '{$to->toDateString()}'";
+
+        // (date|device) => running per-currency totals + counts across customers.
+        $agg = [];
+        foreach ($customerIds as $customerId) {
+            foreach ($this->client->search($customerId, $gaql) as $row) {
+                $metrics  = $row->getMetrics();
+                $segments = $row->getSegments();
+                if ($metrics === null || $segments === null) {
+                    continue;
+                }
+                $day = (string) $segments->getDate();
+                if ($day === '') {
+                    continue;
+                }
+                // Version-correct enum decode (SDK is V24): 2 → 'MOBILE' etc.
+                $device = strtolower((string) Device::name($segments->getDevice()));
+                $ccy    = strtoupper((string) ($row->getCustomer()?->getCurrencyCode() ?: $baseCurrency));
+                $slot   = $day . '|' . $device;
+
+                $agg[$slot] ??= ['date' => $day, 'device' => $device, 'impressions' => 0, 'clicks' => 0, 'conversions' => 0.0, 'spendByCcy' => [], 'valueByCcy' => []];
+                $agg[$slot]['impressions'] += (int) $metrics->getImpressions();
+                $agg[$slot]['clicks']      += (int) $metrics->getClicks();
+                $agg[$slot]['conversions'] += (float) $metrics->getConversions();
+                $agg[$slot]['spendByCcy'][$ccy] = ($agg[$slot]['spendByCcy'][$ccy] ?? 0.0) + ((int) $metrics->getCostMicros()) / 1_000_000;
+                $agg[$slot]['valueByCcy'][$ccy] = ($agg[$slot]['valueByCcy'][$ccy] ?? 0.0) + (float) $metrics->getConversionsValue();
+            }
+        }
+
+        $out = [];
+        foreach ($agg as $a) {
+            $date = CarbonImmutable::parse($a['date']);
+            [$ccy, $spend, $value] = $this->resolveMoney($a['spendByCcy'], $a['valueByCcy'], $baseCurrency, $date);
+            $out[] = [
+                'date'             => $a['date'],
+                'segment_key'      => $a['device'],
+                'segment_label'    => $this->deviceLabel($a['device']),
+                'spend'            => round($spend, 2),
+                'impressions'      => $a['impressions'],
+                'clicks'           => $a['clicks'],
+                'conversions'      => (int) round($a['conversions']),
+                'conversion_value' => round($value, 2),
+                'currency'         => $ccy,
+            ];
+        }
+
+        return $out;
+    }
+
+    /** Google Device enum name (lower-case) → display label. */
+    private function deviceLabel(string $key): string
+    {
+        return match ($key) {
+            'mobile'       => 'Mobile',
+            'desktop'      => 'Desktop',
+            'tablet'       => 'Tablet',
+            'connected_tv' => 'Connected TV',
+            default        => ucfirst(str_replace('_', ' ', $key)), // other / unknown
+        };
     }
 
     /**

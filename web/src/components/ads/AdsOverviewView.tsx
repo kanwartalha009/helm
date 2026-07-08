@@ -4,6 +4,7 @@ import { AdsCampaignDrawer } from './AdsCampaignDrawer';
 import { countryName } from './countryNames';
 import { formatMoney, formatNumber, formatRoas } from '@/lib/formatters';
 import type {
+  AdsByCountry,
   AdsByDevice,
   AdsCampaignRow,
   AdsFunnelStep,
@@ -98,8 +99,9 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
         </div>
       </div>
 
-      {/* Region + device — Meta + TikTok breakdowns; hidden on platforms without them (Google). */}
-      {breakdownable && (
+      {/* Region + device — Meta/TikTok get both; Google gets device only (its
+          region panel points to the per-country campaign table instead). */}
+      {(breakdownable || data.byDevice.hasData) && (
       <div className="ads-grid-2">
         <div className="ads-panel">
           <div className="ads-ph"><h3>Performance by region</h3></div>
@@ -145,7 +147,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
               </div>
             </div>
           ) : (
-            <div className="ads-empty">{data.platform === 'tiktok' ? (<>Country breakdown not synced yet. Run <code>tiktok:backfill-breakdown --type=country</code> for this brand.</>) : data.platform === 'meta' ? (<>Country breakdown not synced yet. Run <code>meta:backfill-breakdown country</code> for this brand.</>) : 'Region breakdown is available for Meta only.'}</div>
+            <div className="ads-empty">{data.platform === 'tiktok' ? (<>Country breakdown not synced yet. Run <code>tiktok:backfill-breakdown --type=country</code> for this brand.</>) : data.platform === 'meta' ? (<>Country breakdown not synced yet. Run <code>meta:backfill-breakdown country</code> for this brand.</>) : 'Country performance is per campaign for Google — see the campaign breakdown below.'}</div>
           )}
         </div>
 
@@ -204,6 +206,16 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
             <EffStat label="Page likes" value={formatNumber(data.metaNative.social.pageLikes)} />
           </div>
         </div>
+      )}
+
+      {/* Google brand-vs-non-brand incrementality lens (Google only) */}
+      {data.byBrandType.hasData && (
+        <BrandSplit bd={data.byBrandType} currency={currency} from={data.from} to={data.to} />
+      )}
+
+      {/* Google channel mix — PMax / Search·Brand / Search·Generic / Shopping (Google only) */}
+      {data.byChannel.hasData && (
+        <ChannelMix bd={data.byChannel} currency={currency} from={data.from} to={data.to} />
       )}
 
       {/* Campaign analysis */}
@@ -510,6 +522,86 @@ function IconBag() { return <svg viewBox="0 0 24 24" width="15" height="15" fill
 function shortDate(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+// Google-only brand-vs-non-brand incrementality lens. The bar is share of
+// REVENUE (not spend) — that's what makes brand's dominance obvious: it takes a
+// small slice of spend but a huge slice of revenue because it harvests demand
+// that would convert anyway. The caveat under it is the guardrail, in-product.
+function BrandSplit({ bd, currency, from, to }: { bd: AdsByCountry; currency: string; from: string; to: string }) {
+  const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+  const rows = bd.rows;
+  const totalRev = Math.max(1, rows.reduce((s, r) => s + r.revenue, 0));
+  const totalSpend = rows.reduce((s, r) => s + r.spend, 0);
+  const brand = rows.find((r) => r.key === 'brand');
+
+  return (
+    <div className="ads-panel">
+      <div className="ads-ph"><h3>Brand vs non-brand</h3></div>
+      <div className="ads-psub">Where revenue actually comes from · {rangeLabel(from, to)}</div>
+      <div className="abrk">
+        <div className="abrk-row abrk-head">
+          <span>Segment</span>
+          <span />
+          <span className="abrk-val">Spend</span>
+          <span className="abrk-pct">Rev %</span>
+          <span className="abrk-roas">ROAS</span>
+        </div>
+        {rows.map((r) => (
+          <div className="abrk-row" key={r.key}>
+            <span className="abrk-label">{r.label}</span>
+            <span className="abrk-track"><span className="abrk-bar" style={{ width: `${Math.max(3, (r.revenue / totalRev) * 100)}%` }} /></span>
+            <span className="abrk-val num">{money(r.spend)}</span>
+            <span className="abrk-pct num">{`${Math.round((r.revenue / totalRev) * 100)}%`}</span>
+            <span className="abrk-roas num">{formatRoas(r.roas)}</span>
+          </div>
+        ))}
+      </div>
+      {brand && (
+        <div className="ads-psub" style={{ margin: '12px 0 0' }}>
+          Brand is {Math.round((brand.revenue / totalRev) * 100)}% of revenue on {totalSpend > 0 ? Math.round((brand.spend / totalSpend) * 100) : 0}% of spend — brand return is typically inflated by shoppers who'd have bought anyway. Non-brand ROAS is the truer growth signal.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Google-only channel mix: campaigns folded into PMax / Search·Brand / Search·
+// Generic / Shopping / … by name. Reuses the Audience .abrk bar layout.
+function ChannelMix({ bd, currency, from, to }: { bd: AdsByCountry; currency: string; from: string; to: string }) {
+  const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+  const rows = bd.rows.slice(0, 8);
+  const max = Math.max(1, ...rows.map((r) => r.spend));
+
+  return (
+    <div className="ads-panel">
+      <div className="ads-ph"><h3>Channel mix</h3></div>
+      <div className="ads-psub">Spend by Google campaign type · {rangeLabel(from, to)}</div>
+      <div className="abrk">
+        <div className="abrk-row abrk-head">
+          <span>Channel</span>
+          <span />
+          <span className="abrk-val">Spend</span>
+          <span className="abrk-pct">%</span>
+          <span className="abrk-roas">ROAS</span>
+        </div>
+        {rows.map((r) => (
+          <div className="abrk-row" key={r.key}>
+            <span className="abrk-label" title={r.label}>{r.label}</span>
+            <span className="abrk-track"><span className="abrk-bar" style={{ width: `${Math.max(3, (r.spend / max) * 100)}%` }} /></span>
+            <span className="abrk-val num">{money(r.spend)}</span>
+            <span className="abrk-pct num">{`${r.pct}%`}</span>
+            <span className="abrk-roas num">{formatRoas(r.roas)}</span>
+          </div>
+        ))}
+      </div>
+      {bd.top && (
+        <div className="ads-psub" style={{ margin: '12px 0 0' }}>
+          Top: <strong>{bd.top.label}</strong> · {formatNumber(bd.top.purchases)} purchases · {bd.top.pct}% of spend
+        </div>
+      )}
+    </div>
+  );
 }
 
 function rangeLabel(from: string, to: string): string {
