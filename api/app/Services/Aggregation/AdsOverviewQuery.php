@@ -62,9 +62,10 @@ final class AdsOverviewQuery
         // now Meta + TikTok. Placement + ASC-audience axes stay Meta-only (TikTok
         // has no equivalent). age_gender fetched once → age×gender / gender / age.
         $breakdownable = in_array($platform, ['meta', 'tiktok'], true);
-        // Google adds ONLY device (geo/demographics deferred), so the device panels
-        // gate on this wider set while country/region/age-gender stay Meta+TikTok.
-        $deviceable = $breakdownable || $platform === 'google';
+        // Google has the spend-based breakdowns (device + country/region) but NOT
+        // demographics / placement / ASC-audience, so those wider panels gate on
+        // this set while age-gender / placement / audience stay Meta+TikTok.
+        $geoDeviceable = $breakdownable || $platform === 'google';
         $ag = $breakdownable ? $this->ageGenderBreakdowns((int) $brand->id, $start, $end, $money, $platform) : null;
 
         return [
@@ -99,16 +100,16 @@ final class AdsOverviewQuery
             // Meta only. For Google/TikTok they're not applicable, so the panels
             // degrade to a "Meta only" state rather than show Meta's numbers under
             // a Google view.
-            'byCountry'         => $breakdownable ? $this->breakdown((int) $brand->id, 'country', $start, $end, $money, $platform) : $this->notApplicable(),
-            'byDevice'          => $deviceable ? $this->deviceSplit((int) $brand->id, $start, $end, $money, $platform) : ['hasData' => false, 'metric' => 'purchases', 'total' => 0, 'rows' => []],
+            'byCountry'         => $geoDeviceable ? $this->breakdown((int) $brand->id, 'country', $start, $end, $money, $platform) : $this->notApplicable(),
+            'byDevice'          => $geoDeviceable ? $this->deviceSplit((int) $brand->id, $start, $end, $money, $platform) : ['hasData' => false, 'metric' => 'purchases', 'total' => 0, 'rows' => []],
             'byAgeGender'       => $ag['ageGender'] ?? $this->notApplicable(),
             'byGender'          => $ag['gender'] ?? $this->notApplicable(),
             'byAge'             => $ag['age'] ?? $this->notApplicable(),
             'byPlacement'       => $isMeta ? $this->breakdown((int) $brand->id, 'placement_platform', $start, $end, $money) : $this->notApplicable(),
             'byPlacementDetail' => $isMeta ? $this->breakdown((int) $brand->id, 'placement', $start, $end, $money) : $this->notApplicable(),
-            'byDeviceDetail'    => $deviceable ? $this->breakdown((int) $brand->id, 'device', $start, $end, $money, $platform) : $this->notApplicable(),
+            'byDeviceDetail'    => $geoDeviceable ? $this->breakdown((int) $brand->id, 'device', $start, $end, $money, $platform) : $this->notApplicable(),
             'byAudience'        => $isMeta ? $this->breakdown((int) $brand->id, 'audience', $start, $end, $money) : $this->notApplicable(),
-            'byRegion'          => $breakdownable ? $this->regionRollup((int) $brand->id, $start, $end, $money, $platform) : $this->notApplicable(),
+            'byRegion'          => $geoDeviceable ? $this->regionRollup((int) $brand->id, $start, $end, $money, $platform) : $this->notApplicable(),
             'byChannel'         => $platform === 'google' ? $this->channelBreakdown((int) $brand->id, $start, $end, $money) : $this->notApplicable(),
             'byBrandType'       => $platform === 'google' ? $this->brandSplit((int) $brand->id, $start, $end, $money) : $this->notApplicable(),
             'tiktokNative'      => $platform === 'tiktok' ? $this->tiktokNative((int) $brand->id, $start, $end) : null,

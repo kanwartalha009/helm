@@ -26,6 +26,9 @@ use Google\Ads\GoogleAds\V24\Enums\DeviceEnum\Device;
  */
 final class ReportsFetcher
 {
+    /** geo_target_constant country id → ISO-2 code, resolved once per run. */
+    private array $geoCountryCache = [];
+
     public function __construct(
         private readonly GoogleAdsClient $client,
         private readonly FxService $fx,
@@ -215,24 +218,21 @@ final class ReportsFetcher
     }
 
     /**
-     * Daily DEVICE breakdown for a date range → flat rows for
-     * meta_breakdown_daily[platform=google, breakdown_type=device]. GAQL from
-     * `campaign` with segments.device + segments.date, aggregated per (day,
-     * device) across the brand's customers (native money, or USD when the
-     * customers span currencies — same resolveMoney() as the account pull). Powers
-     * the Google Overview's device donut/detail.
+     * Daily breakdown for a date range → flat rows for
+     * meta_breakdown_daily[platform=google, breakdown_type=$dimension], aggregated
+     * per (day, segment) across the brand's customers (native money, or USD when
+     * the customers span currencies — same resolveMoney() as the account pull).
      *
-     * Only `device` is implemented. Geo is deliberately NOT built: for accounts
-     * running per-country campaigns (the norm here) a country breakdown duplicates
-     * the campaign table, and it would need geo_target_constant name resolution —
-     * cost without value. Add a 'country' branch only if a buyer runs single
-     * global campaigns.
+     *  - `device`  → segments.device on `campaign` (2→'MOBILE' etc.).
+     *  - `country` → geographic_view.country_criterion_id (LOCATION_OF_PRESENCE =
+     *    where the buyer physically is, which can differ from the campaign's
+     *    target country), resolved to an ISO-2 code via geo_target_constant.
      *
      * @return array<int, array<string, mixed>>
      */
     public function fetchBreakdownRange(PlatformConnection $conn, string $dimension, CarbonImmutable $from, CarbonImmutable $to): array
     {
-        if ($dimension !== 'device') {
+        if (! in_array($dimension, ['device', 'country'], true)) {
             return [];
         }
         $customerIds = $this->customerIdsFor($conn);
@@ -240,30 +240,44 @@ final class ReportsFetcher
             return [];
         }
         $baseCurrency = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+        $countryMap   = $dimension === 'country' ? $this->countryConstants($customerIds[0]) : [];
 
-        $gaql = "SELECT segments.date, segments.device, customer.currency_code, "
-            . "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value "
-            . "FROM campaign WHERE segments.date BETWEEN '{$from->toDateString()}' AND '{$to->toDateString()}'";
+        $gaql = $dimension === 'device'
+            ? "SELECT segments.date, segments.device, customer.currency_code, "
+                . "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value "
+                . "FROM campaign WHERE segments.date BETWEEN '{$from->toDateString()}' AND '{$to->toDateString()}'"
+            : "SELECT segments.date, geographic_view.country_criterion_id, customer.currency_code, "
+                . "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value "
+                . "FROM geographic_view WHERE segments.date BETWEEN '{$from->toDateString()}' AND '{$to->toDateString()}' "
+                . "AND geographic_view.location_type = 'LOCATION_OF_PRESENCE'";
 
-        // (date|device) => running per-currency totals + counts across customers.
+        // (date|segment) => running per-currency totals + counts across customers.
         $agg = [];
         foreach ($customerIds as $customerId) {
             foreach ($this->client->search($customerId, $gaql) as $row) {
-                $metrics  = $row->getMetrics();
-                $segments = $row->getSegments();
-                if ($metrics === null || $segments === null) {
+                $metrics = $row->getMetrics();
+                if ($metrics === null) {
                     continue;
                 }
-                $day = (string) $segments->getDate();
+                $day = (string) ($row->getSegments()?->getDate() ?? '');
                 if ($day === '') {
                     continue;
                 }
-                // Version-correct enum decode (SDK is V24): 2 → 'MOBILE' etc.
-                $device = strtolower((string) Device::name($segments->getDevice()));
-                $ccy    = strtoupper((string) ($row->getCustomer()?->getCurrencyCode() ?: $baseCurrency));
-                $slot   = $day . '|' . $device;
 
-                $agg[$slot] ??= ['date' => $day, 'device' => $device, 'impressions' => 0, 'clicks' => 0, 'conversions' => 0.0, 'spendByCcy' => [], 'valueByCcy' => []];
+                if ($dimension === 'device') {
+                    // Version-correct enum decode (SDK is V24): 2 → 'MOBILE' etc.
+                    $key   = strtolower((string) Device::name($row->getSegments()->getDevice()));
+                    $label = $this->deviceLabel($key);
+                } else {
+                    $cid   = (int) ($row->getGeographicView()?->getCountryCriterionId() ?? 0);
+                    $key   = $countryMap[$cid] ?? 'unknown';
+                    $label = $key; // ISO-2; the frontend maps it to a country name
+                }
+
+                $ccy  = strtoupper((string) ($row->getCustomer()?->getCurrencyCode() ?: $baseCurrency));
+                $slot = $day . '|' . $key;
+
+                $agg[$slot] ??= ['date' => $day, 'seg' => $key, 'label' => $label, 'impressions' => 0, 'clicks' => 0, 'conversions' => 0.0, 'spendByCcy' => [], 'valueByCcy' => []];
                 $agg[$slot]['impressions'] += (int) $metrics->getImpressions();
                 $agg[$slot]['clicks']      += (int) $metrics->getClicks();
                 $agg[$slot]['conversions'] += (float) $metrics->getConversions();
@@ -278,8 +292,8 @@ final class ReportsFetcher
             [$ccy, $spend, $value] = $this->resolveMoney($a['spendByCcy'], $a['valueByCcy'], $baseCurrency, $date);
             $out[] = [
                 'date'             => $a['date'],
-                'segment_key'      => $a['device'],
-                'segment_label'    => $this->deviceLabel($a['device']),
+                'segment_key'      => $a['seg'],
+                'segment_label'    => $a['label'],
                 'spend'            => round($spend, 2),
                 'impressions'      => $a['impressions'],
                 'clicks'           => $a['clicks'],
@@ -302,6 +316,40 @@ final class ReportsFetcher
             'connected_tv' => 'Connected TV',
             default        => ucfirst(str_replace('_', ' ', $key)), // other / unknown
         };
+    }
+
+    /**
+     * geo_target_constant country_criterion_id → ISO-2 code map (e.g. 2840→'US',
+     * 2724→'ES'). ~250 rows, so it's resolved once and cached on the instance for
+     * the whole sync/backfill run. Country constants are global; any customer id
+     * can query them.
+     *
+     * @return array<int, string>
+     */
+    private function countryConstants(string $customerId): array
+    {
+        if ($this->geoCountryCache !== []) {
+            return $this->geoCountryCache;
+        }
+
+        $gaql = "SELECT geo_target_constant.id, geo_target_constant.country_code "
+            . "FROM geo_target_constant WHERE geo_target_constant.target_type = 'Country' "
+            . "AND geo_target_constant.status = 'ENABLED'";
+
+        $map = [];
+        foreach ($this->client->search($customerId, $gaql) as $row) {
+            $g = $row->getGeoTargetConstant();
+            if ($g === null) {
+                continue;
+            }
+            $id   = (int) $g->getId();
+            $code = strtoupper((string) $g->getCountryCode());
+            if ($id > 0 && $code !== '') {
+                $map[$id] = $code;
+            }
+        }
+
+        return $this->geoCountryCache = $map;
     }
 
     /**

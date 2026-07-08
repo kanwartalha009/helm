@@ -20,21 +20,21 @@ use Throwable;
  * fills history. Additive upsert keyed on (brand, platform, date, type, segment),
  * best-effort per window (a failed chunk stops that brand and can be re-run).
  *
- * Only `device` exists today — geo is deferred (see ReportsFetcher).
+ * Axes: `device` + `country` (geographic buyer location, LOCATION_OF_PRESENCE).
  *
- *   php artisan google:backfill-breakdown                            # all active Google brands
- *   php artisan google:backfill-breakdown nude-project               # one brand
+ *   php artisan google:backfill-breakdown                            # all active Google brands, both axes
+ *   php artisan google:backfill-breakdown nude-project --type=country
  *   php artisan google:backfill-breakdown nude-project --since=2026-06-01
  */
 class GoogleBackfillBreakdownCommand extends Command
 {
     protected $signature = 'google:backfill-breakdown '
         . '{brand? : slug or id; omit for all active Google brands} '
-        . '{--type=device : device (only axis today)} '
+        . '{--type=all : device|country|all} '
         . '{--since=2026-05-01 : first day to pull (Y-m-d)} '
         . '{--chunk-days=30 : days per fetch window}';
 
-    protected $description = 'Backfill Google device breakdowns into meta_breakdown_daily[platform=google] for the ads hub.';
+    protected $description = 'Backfill Google device + country breakdowns into meta_breakdown_daily[platform=google] for the ads hub.';
 
     public function handle(ReportsFetcher $google, FxService $fx): int
     {
@@ -45,9 +45,11 @@ class GoogleBackfillBreakdownCommand extends Command
             return self::FAILURE;
         }
 
-        $type = strtolower(trim((string) $this->option('type')));
-        if ($type !== 'device') {
-            $this->error('--type must be device (the only Google breakdown axis today).');
+        $allTypes = ['device', 'country'];
+        $typeOpt  = strtolower(trim((string) $this->option('type')));
+        $types    = $typeOpt === 'all' ? $allTypes : [$typeOpt];
+        if (array_diff($types, $allTypes) !== []) {
+            $this->error('--type must be one of: ' . implode(', ', $allTypes) . ', all.');
 
             return self::FAILURE;
         }
@@ -80,45 +82,47 @@ class GoogleBackfillBreakdownCommand extends Command
             $fallback = strtoupper((string) ($brand->base_currency ?: 'USD'));
             $fxCache  = [];
 
-            $rows   = 0;
-            $failed = false;
-            $cursor = $from;
-            while ($cursor->lessThanOrEqualTo($until)) {
-                $chunkEnd = $cursor->addDays($chunkDays - 1);
-                if ($chunkEnd->greaterThan($until)) {
-                    $chunkEnd = $until;
-                }
-
-                try {
-                    $fetched = $google->fetchBreakdownRange($conn, $type, $cursor, $chunkEnd);
-                } catch (Throwable $e) {
-                    $this->error("· {$brand->name} [{$type}] {$cursor->toDateString()}: {$e->getMessage()}");
-                    $failed = true;
-                    break;
-                }
-
-                if ($fetched !== []) {
-                    $records = $this->records($brand->id, $type, $fetched, $fallback, $fxCache, $fx);
-                    foreach (array_chunk($records, 500) as $chunk) {
-                        MetaBreakdownDaily::upsert(
-                            $chunk,
-                            ['brand_id', 'platform', 'date', 'breakdown_type', 'segment_key'],
-                            ['segment_label', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
-                        );
+            foreach ($types as $type) {
+                $rows   = 0;
+                $failed = false;
+                $cursor = $from;
+                while ($cursor->lessThanOrEqualTo($until)) {
+                    $chunkEnd = $cursor->addDays($chunkDays - 1);
+                    if ($chunkEnd->greaterThan($until)) {
+                        $chunkEnd = $until;
                     }
-                    $rows += count($records);
+
+                    try {
+                        $fetched = $google->fetchBreakdownRange($conn, $type, $cursor, $chunkEnd);
+                    } catch (Throwable $e) {
+                        $this->error("· {$brand->name} [{$type}] {$cursor->toDateString()}: {$e->getMessage()}");
+                        $failed = true;
+                        break;
+                    }
+
+                    if ($fetched !== []) {
+                        $records = $this->records($brand->id, $type, $fetched, $fallback, $fxCache, $fx);
+                        foreach (array_chunk($records, 500) as $chunk) {
+                            MetaBreakdownDaily::upsert(
+                                $chunk,
+                                ['brand_id', 'platform', 'date', 'breakdown_type', 'segment_key'],
+                                ['segment_label', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+                            );
+                        }
+                        $rows += count($records);
+                    }
+
+                    $cursor = $chunkEnd->addDay();
+                    usleep(150_000);
                 }
 
-                $cursor = $chunkEnd->addDay();
-                usleep(150_000);
+                if ($failed) {
+                    $this->warn("· {$brand->name} [{$type}]: stopped early — fix the cause and re-run (idempotent).");
+                } else {
+                    $this->info("· {$brand->name} [{$type}]: {$rows} breakdown-day rows backfilled.");
+                }
+                $total += $rows;
             }
-
-            if ($failed) {
-                $this->warn("· {$brand->name} [{$type}]: stopped early — fix the cause and re-run (idempotent).");
-            } else {
-                $this->info("· {$brand->name} [{$type}]: {$rows} breakdown-day rows backfilled.");
-            }
-            $total += $rows;
         }
 
         $this->info("Done. {$total} Google breakdown-day rows upserted.");

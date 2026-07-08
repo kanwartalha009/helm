@@ -147,7 +147,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
               </div>
             </div>
           ) : (
-            <div className="ads-empty">{data.platform === 'tiktok' ? (<>Country breakdown not synced yet. Run <code>tiktok:backfill-breakdown --type=country</code> for this brand.</>) : data.platform === 'meta' ? (<>Country breakdown not synced yet. Run <code>meta:backfill-breakdown country</code> for this brand.</>) : 'Country performance is per campaign for Google — see the campaign breakdown below.'}</div>
+            <div className="ads-empty">{data.platform === 'tiktok' ? (<>Country breakdown not synced yet. Run <code>tiktok:backfill-breakdown --type=country</code> for this brand.</>) : data.platform === 'meta' ? (<>Country breakdown not synced yet. Run <code>meta:backfill-breakdown country</code> for this brand.</>) : (<>Country breakdown not synced yet. Run <code>google:backfill-breakdown --type=country</code> for this brand.</>)}</div>
           )}
         </div>
 
@@ -539,7 +539,7 @@ function BrandSplit({ bd, currency, from, to }: { bd: AdsByCountry; currency: st
     <div className="ads-panel">
       <div className="ads-ph"><h3>Brand vs non-brand</h3></div>
       <div className="ads-psub">Where revenue actually comes from · {rangeLabel(from, to)}</div>
-      <div className="abrk">
+      <div className="abrk abrk-wide">
         <div className="abrk-row abrk-head">
           <span>Segment</span>
           <span />

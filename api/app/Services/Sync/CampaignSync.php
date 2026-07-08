@@ -169,14 +169,14 @@ final class CampaignSync
     }
 
     /**
-     * Google device breakdown for one day → meta_breakdown_daily[platform=google].
-     * Best-effort, mirrors the Meta/TikTok breakdown syncs. Only `device` is
-     * supported (geo deferred — see ReportsFetcher::fetchBreakdownRange); an
-     * unknown type is a no-op rather than an error.
+     * Google device/country breakdown for one day → meta_breakdown_daily[platform=
+     * google]. Best-effort, mirrors the Meta/TikTok breakdown syncs. `country` is
+     * geographic buyer location (LOCATION_OF_PRESENCE); an unknown type is a no-op
+     * rather than an error.
      */
     public function syncGoogleBreakdown(PlatformConnection $conn, CarbonImmutable $date, string $type): int
     {
-        if ($conn->platform !== 'google' || ! in_array($type, ['device'], true)) {
+        if ($conn->platform !== 'google' || ! in_array($type, ['device', 'country'], true)) {
             return 0;
         }
 

@@ -161,6 +161,9 @@
 .abrk-val { font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
 .abrk-pct { font-size: 12px; text-align: right; color: var(--a-sec); font-variant-numeric: tabular-nums; }
 .abrk-roas { font-size: 12.5px; text-align: right; color: var(--a-sec); font-variant-numeric: tabular-nums; }
+/* Wider label column for full-width panels with longer segment names
+   (e.g. brand split's "Performance Max (mixed)") so they never truncate. */
+.abrk-wide .abrk-row { grid-template-columns: 180px 1fr 80px 48px 58px; }
 
 /* Gender split — 100% stacked spend bar + legend */
 .agender-bar { display: flex; height: 16px; border-radius: 5px; overflow: hidden; margin-top: 8px; background: var(--a-subtle); }
