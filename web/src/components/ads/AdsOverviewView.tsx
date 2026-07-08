@@ -8,9 +8,11 @@ import type {
   AdsByDevice,
   AdsCampaignRow,
   AdsFunnelStep,
+  AdsIssues,
   AdsOverviewResponse,
   AdsPeriod,
   AdsPlatform,
+  AdsSignal,
   AdsSummary,
   AdsTrendPoint,
 } from '@/types/ads';
@@ -32,7 +34,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
   // platform's own Ads Manager (what the agency's client sees) — we label the
   // basis rather than force one window. Blended ROAS is the cross-platform truth.
   const attributionNote = data.platform === 'meta' ? '7-day click' : data.platform === 'tiktok' ? 'account attribution' : null;
-  const [drill, setDrill] = useState<{ id: string; name: string } | null>(null);
+  const [drill, setDrill] = useState<{ id: string; name: string; signal: AdsSignal | null; signalReason: string | null } | null>(null);
   const [showAllRegions, setShowAllRegions] = useState(false);
   const [showAllCampaigns, setShowAllCampaigns] = useState(false);
 
@@ -81,12 +83,11 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
           <div className="atrend-head">
             <div>
               <div className="ads-ph"><h3>Performance Trends</h3><span className="ads-chip">View Trends</span></div>
-              <div className="ads-psub">Link Clicks, Impressions and Ad Spend</div>
+              <div className="ads-psub">Link clicks and impressions</div>
             </div>
             <div className="atrend-legend">
               <span><i style={{ background: '#2563EB' }} />Link Clicks</span>
               <span><i style={{ background: '#0EA5B7' }} />Impressions</span>
-              <span><i style={{ background: '#22C55E' }} />Ads Spend</span>
             </div>
           </div>
           <TrendChart trend={data.trend} summary={s} currency={currency} />
@@ -218,6 +219,11 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
         <ChannelMix bd={data.byChannel} currency={currency} from={data.from} to={data.to} />
       )}
 
+      {/* Issues & fixes — deterministic waste/scale flags vs the account's own efficiency */}
+      {data.issues.hasData && (
+        <AccountIssues issues={data.issues} currency={currency} from={data.from} to={data.to} />
+      )}
+
       {/* Campaign analysis */}
       <div className="ads-panel">
         <div className="acamp-head">
@@ -228,7 +234,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
         </div>
         {data.campaigns.length > 0 ? (
           <>
-            <CampaignTable rows={showAllCampaigns ? data.campaigns : data.campaigns.slice(0, 10)} money={money} unit={unit} onView={(id, name) => setDrill({ id, name })} />
+            <CampaignTable rows={showAllCampaigns ? data.campaigns : data.campaigns.slice(0, 10)} money={money} unit={unit} onView={(c) => setDrill({ id: c.id, name: c.name, signal: c.signal, signalReason: c.signalReason })} />
             {data.campaigns.length > 10 && (
               <div className="ads-viewall">
                 <button type="button" onClick={() => setShowAllCampaigns((v) => !v)}>
@@ -301,21 +307,20 @@ function TrendChart({ trend, summary, currency }: { trend: AdsTrendPoint[]; summ
   const top = 10;
   const bot = 200;
 
-  // Right axis = Impressions (millions); left axis = Link clicks (thousands).
-  // Ad spend (€, usually 20-40x smaller than clicks) gets its OWN scale — on the
-  // shared clicks axis it flatlines, which reads as "spend is broken". Its
-  // absolute total lives in the stat row below; here we show its trend SHAPE.
+  // Two honest, labeled axes: left = Link clicks (thousands), right = Impressions
+  // (hundreds of thousands). Ad spend is deliberately NOT a line here — it's
+  // ~20-40× smaller than clicks (€ hundreds/day), so it shares neither axis;
+  // plotting it forced a choice between flatlining and (worse) normalizing it to
+  // its own hidden scale, where it read as the BIGGEST line. Spend's value + trend
+  // live in the stat row below and the KPI cards above.
   const rightStep = niceStep(Math.max(1, ...trend.map((t) => t.impressions)) / 3);
   const leftStep = niceStep(Math.max(1, ...trend.map((t) => t.clicks)) / 3);
-  const spendStep = niceStep(Math.max(1, ...trend.map((t) => t.spend)) / 3);
   const rightMax = rightStep * 3;
   const leftMax = leftStep * 3;
-  const spendMax = spendStep * 3;
 
   const x = (i: number) => (i / (trend.length - 1)) * W;
   const yL = (v: number) => bot - (v / leftMax) * (bot - top);
   const yR = (v: number) => bot - (v / rightMax) * (bot - top);
-  const ySpend = (v: number) => bot - (v / spendMax) * (bot - top);
   const line = (acc: (t: AdsTrendPoint) => number, y: (v: number) => number) =>
     trend.map((t, i) => `${x(i).toFixed(1)},${y(acc(t)).toFixed(1)}`).join(' ');
 
@@ -333,7 +338,6 @@ function TrendChart({ trend, summary, currency }: { trend: AdsTrendPoint[]; summ
             <line key={i} x1={0} y1={gy} x2={W} y2={gy} stroke="#E7E5E4" strokeWidth={1} strokeDasharray={i === 0 || i === 3 ? undefined : '2 6'} />
           ))}
           <polyline points={line((t) => t.impressions, yR)} fill="none" stroke="#0EA5B7" strokeWidth={1.8} strokeLinejoin="round" />
-          <polyline points={line((t) => t.spend, ySpend)} fill="none" stroke="#22C55E" strokeWidth={1.8} strokeLinejoin="round" />
           <polyline points={line((t) => t.clicks, yL)} fill="none" stroke="#2563EB" strokeWidth={2} strokeLinejoin="round" />
         </svg>
         <div className="atrend-axis r">{rightTicks.map((v, i) => <span key={i}>{axisFmt(v)}</span>)}</div>
@@ -472,7 +476,7 @@ function DeviceDonut({ device }: { device: AdsByDevice }) {
 
 /* ---- Campaign table -------------------------------------------------- */
 
-function CampaignTable({ rows, money, unit, onView }: { rows: AdsCampaignRow[]; money: (v: number | null) => string; unit: (v: number | null) => string; onView: (id: string, name: string) => void }) {
+function CampaignTable({ rows, money, unit, onView }: { rows: AdsCampaignRow[]; money: (v: number | null) => string; unit: (v: number | null) => string; onView: (c: AdsCampaignRow) => void }) {
   const maxSpend = Math.max(1, ...rows.map((r) => r.spend));
   return (
     <table className="ads-tbl acamp-tbl">
@@ -491,7 +495,7 @@ function CampaignTable({ rows, money, unit, onView }: { rows: AdsCampaignRow[]; 
       <tbody>
         {rows.map((r) => (
           <tr key={r.id}>
-            <td className="l acamp-name">{r.name}</td>
+            <td className="l acamp-name">{r.name}{r.signal && <> <SignalBadge signal={r.signal} /></>}</td>
             <td className="l">
               <span className="acamp-barcell">
                 <span className="acamp-num">{money(r.spend)}</span>
@@ -503,7 +507,7 @@ function CampaignTable({ rows, money, unit, onView }: { rows: AdsCampaignRow[]; 
             <td className="num">{formatNumber(r.purchases)}</td>
             <td className="num">{unit(r.cpa)}</td>
             <td className="num">{r.ctr != null ? `${r.ctr}%` : '—'}</td>
-            <td className="l"><button type="button" className="acamp-view" onClick={() => onView(r.id, r.name)}>View →</button></td>
+            <td className="l"><button type="button" className="acamp-view" onClick={() => onView(r)}>View →</button></td>
           </tr>
         ))}
       </tbody>
@@ -522,6 +526,63 @@ function IconBag() { return <svg viewBox="0 0 24 24" width="15" height="15" fill
 function shortDate(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+/* ---- Issues & fixes -------------------------------------------------- */
+
+function SignalBadge({ signal }: { signal: AdsSignal }) {
+  const label = signal === 'scale' ? 'Scale' : signal === 'cut' ? 'Review' : 'Watch';
+  return <span className={`asig asig-${signal}`}>{label}</span>;
+}
+
+// Account-level "issues & fixes": the per-campaign signals aggregated into a
+// wasted-spend headline + a Review/pause column and a Double-down column. The
+// caption carries the honest limits (tracked conversions not margin; spend
+// floor; brand excluded from scale) so the guardrails ship with the advice.
+function AccountIssues({ issues, currency, from, to }: { issues: AdsIssues; currency: string; from: string; to: string }) {
+  const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+  return (
+    <div className="ads-panel">
+      <div className="ads-ph"><h3>Issues &amp; fixes</h3></div>
+      <div className="ads-psub">What to review this period · {rangeLabel(from, to)}</div>
+
+      {issues.wastedSpend > 0 && (
+        <div className="aissue-headline">
+          <span className="aissue-amount">{money(issues.wastedSpend)}</span>
+          <span className="aissue-cap">on {issues.cutCount} campaign{issues.cutCount === 1 ? '' : 's'} with enough spend to judge but little or no return</span>
+        </div>
+      )}
+
+      <div className="aissue-cols">
+        {issues.cut.length > 0 && (
+          <div className="aissue-col">
+            <div className="aissue-h"><SignalBadge signal="cut" /> Review / pause</div>
+            {issues.cut.map((c) => (
+              <div className="aissue-row" key={c.id}>
+                <div className="aissue-name" title={c.name}>{c.name}</div>
+                <div className="aissue-why">{c.reason}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        {issues.scale.length > 0 && (
+          <div className="aissue-col">
+            <div className="aissue-h"><SignalBadge signal="scale" /> Double down</div>
+            {issues.scale.map((c) => (
+              <div className="aissue-row" key={c.id}>
+                <div className="aissue-name" title={c.name}>{c.name}</div>
+                <div className="aissue-why">{c.reason}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="ads-psub" style={{ margin: '14px 0 0' }}>
+        Flags compare each campaign to your own account average using tracked conversions — not margin, so confirm against your break-even. Only campaigns with enough spend to judge are shown; brand campaigns are excluded from scale suggestions.
+      </div>
+    </div>
+  );
 }
 
 // Google-only brand-vs-non-brand incrementality lens. The bar is share of

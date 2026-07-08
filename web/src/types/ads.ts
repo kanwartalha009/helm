@@ -90,6 +90,10 @@ export interface AdsByDevice {
   rows: AdsDeviceRow[];
 }
 
+// Deterministic per-campaign signal (judged vs the account's own efficiency,
+// with a spend floor). null = not enough spend to judge, or performing normally.
+export type AdsSignal = 'scale' | 'cut' | 'watch';
+
 export interface AdsCampaignRow {
   id: string;
   name: string;
@@ -103,6 +107,28 @@ export interface AdsCampaignRow {
   cpa: number | null;
   ctr: number | null;
   deltaImpressions: number | null;
+  signal: AdsSignal | null;
+  signalReason: string | null;
+}
+
+export interface AdsIssueCampaign {
+  id: string;
+  name: string;
+  spend: number;
+  roas: number | null;
+  purchases: number;
+  reason: string | null;
+}
+
+// Account "issues & fixes" — cut candidates (with wasted spend), watch, scale.
+export interface AdsIssues {
+  hasData: boolean;
+  wastedSpend: number;
+  cutCount: number;
+  scaleCount: number;
+  cut: AdsIssueCampaign[];
+  watch: AdsIssueCampaign[];
+  scale: AdsIssueCampaign[];
 }
 
 export interface AdsOverviewResponse {
@@ -133,6 +159,7 @@ export interface AdsOverviewResponse {
   tiktokNative: AdsTikTokNative | null; // TikTok-only video + social engagement
   metaNative: AdsMetaNative | null; // Meta-only video completion + social engagement
   campaigns: AdsCampaignRow[];
+  issues: AdsIssues; // deterministic "issues & fixes" from per-campaign signals
 }
 
 // TikTok-native engagement (video completion + social) — TikTok only.

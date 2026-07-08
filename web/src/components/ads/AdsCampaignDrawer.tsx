@@ -1,7 +1,7 @@
 import { Drawer } from '@/components/ui';
 import { useAdsCampaign } from '@/hooks/useAdsCampaign';
 import { formatMoney, formatNumber, formatRoas } from '@/lib/formatters';
-import type { AdsPeriod, AdsPlatform, AdsTrendPoint } from '@/types/ads';
+import type { AdsPeriod, AdsPlatform, AdsSignal, AdsTrendPoint } from '@/types/ads';
 import '@/styles/ads.css';
 
 /**
@@ -20,7 +20,7 @@ export function AdsCampaignDrawer({
   slug?: string;
   period: AdsPeriod;
   platform: AdsPlatform;
-  campaign: { id: string; name: string } | null;
+  campaign: { id: string; name: string; signal?: AdsSignal | null; signalReason?: string | null } | null;
   onClose: () => void;
 }) {
   const open = campaign != null;
@@ -33,6 +33,12 @@ export function AdsCampaignDrawer({
   return (
     <Drawer open={open} onClose={onClose} size="lg" title={campaign?.name ?? 'Campaign'}>
       <div className="ads-root">
+        {campaign?.signal && campaign.signalReason && (
+          <div className={`adrawer-sig adrawer-sig-${campaign.signal}`}>
+            <span className={`asig asig-${campaign.signal}`}>{campaign.signal === 'scale' ? 'Scale' : campaign.signal === 'cut' ? 'Review' : 'Watch'}</span>
+            <span className="adrawer-sig-why">{campaign.signalReason}</span>
+          </div>
+        )}
         {q.isError ? (
           <div className="ads-empty">Couldn’t load this campaign. Try refreshing.</div>
         ) : !d && q.isLoading ? (

@@ -38,6 +38,11 @@ final class AdsOverviewQuery
      *  a top-N with a "View all" that reveals the rest up to this cap). */
     private const MAX_COUNTRY_ROWS = 30;
 
+    /** Small-sample guard for campaign signals: only judge a campaign once its
+     *  spend would be expected to yield at least this many sales at the account's
+     *  average CPA. Below it, no opinion — so tiny campaigns are never flagged. */
+    private const SIGNAL_MIN_EXPECTED = 8.0;
+
     /**
      * @param array<string, mixed> $params  period|from|to|currency
      * @return array<string, mixed>
@@ -67,6 +72,9 @@ final class AdsOverviewQuery
         // this set while age-gender / placement / audience stay Meta+TikTok.
         $geoDeviceable = $breakdownable || $platform === 'google';
         $ag = $breakdownable ? $this->ageGenderBreakdowns((int) $brand->id, $start, $end, $money, $platform) : null;
+        // Campaigns computed once — reused for the table AND the account "issues &
+        // fixes" summary (per-campaign signals aggregated).
+        $campaigns = $this->campaigns((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money);
 
         return [
             'brand' => [
@@ -114,7 +122,8 @@ final class AdsOverviewQuery
             'byBrandType'       => $platform === 'google' ? $this->brandSplit((int) $brand->id, $start, $end, $money) : $this->notApplicable(),
             'tiktokNative'      => $platform === 'tiktok' ? $this->tiktokNative((int) $brand->id, $start, $end) : null,
             'metaNative'        => $platform === 'meta' ? $this->metaNative((int) $brand->id, $start, $end) : null,
-            'campaigns'         => $this->campaigns((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money),
+            'campaigns'         => $campaigns,
+            'issues'            => $this->buildIssues($campaigns),
         ];
     }
 
@@ -831,13 +840,33 @@ final class AdsOverviewQuery
         $cur  = $agg($start, $end);
         $prev = $agg($priorStart, $priorEnd);
 
-        return $cur->map(function ($r) use ($prev) {
+        // Account baselines (this platform + window) — every per-campaign signal is
+        // judged against the account's OWN efficiency, never an arbitrary number.
+        $accSpend = 0.0;
+        $accRev   = 0.0;
+        $accPurch = 0;
+        foreach ($cur as $r) {
+            $accSpend += (float) $r->spend;
+            $accRev   += (float) $r->revenue;
+            $accPurch += (int) $r->purchases;
+        }
+        $accRoas = $accSpend > 0 ? $accRev / $accSpend : null;
+        $accCpa  = $accPurch > 0 ? $accSpend / $accPurch : null;
+
+        return $cur->map(function ($r) use ($prev, $platform, $accRoas, $accCpa) {
             $spend = round((float) $r->spend, 2);
             $rev   = round((float) $r->revenue, 2);
             $purch = (int) $r->purchases;
             $impr  = (int) $r->impressions;
             $clk   = (int) $r->clicks;
             $priorImpr = (int) ($prev[$r->campaign_id]->impressions ?? 0);
+            $roas  = $spend > 0 ? round($rev / $spend, 2) : null;
+
+            // "scale" is suppressed for brand campaigns on Google — their ROAS is
+            // inflated by non-incremental brand demand. Other platforms have no
+            // brand-search analogue, so nothing is excluded there.
+            $brandExcluded = $platform === 'google' && $this->isBrandCampaign(strtoupper((string) ($r->campaign_name ?? '')));
+            [$signal, $reason] = $this->campaignSignal($spend, $roas, $purch, $accRoas, $accCpa, $brandExcluded);
 
             return [
                 'id'               => (string) $r->campaign_id,
@@ -848,12 +877,95 @@ final class AdsOverviewQuery
                 'purchases'        => $purch,
                 'impressions'      => $impr,
                 'clicks'           => $clk,
-                'roas'             => $spend > 0 ? round($rev / $spend, 2) : null,
+                'roas'             => $roas,
                 'cpa'              => $purch > 0 ? round($spend / $purch, 2) : null,
                 'ctr'              => $impr > 0 ? round($clk / $impr * 100, 2) : null,
                 'deltaImpressions' => $this->pctDelta((float) $priorImpr, (float) $impr),
+                'signal'           => $signal,
+                'signalReason'     => $reason,
             ];
         })->sortByDesc('spend')->values()->all();
+    }
+
+    /**
+     * Deterministic per-campaign signal, judged vs the account's OWN window
+     * efficiency. The expected-conversions floor (spend ÷ account CPA ≥
+     * SIGNAL_MIN_EXPECTED) is the small-sample guard — below it we return no
+     * opinion at all. NOT margin-aware: "cut" means far below YOUR average return,
+     * not proven-unprofitable (the UI says so). "scale" is suppressed for brand.
+     *
+     * @return array{0: ?string, 1: ?string} [signal, reason]
+     */
+    private function campaignSignal(float $spend, ?float $roas, int $purchases, ?float $accRoas, ?float $accCpa, bool $brandExcluded): array
+    {
+        if ($accCpa === null || $accCpa <= 0 || $accRoas === null || $accRoas <= 0) {
+            return [null, null];
+        }
+        $expected = $spend / $accCpa;
+        if ($expected < self::SIGNAL_MIN_EXPECTED) {
+            return [null, null]; // not enough spend to judge — no opinion, by design
+        }
+        $exp = (int) round($expected);
+
+        if ($purchases === 0) {
+            return ['cut', "Enough spend to expect ~{$exp} sales, but none converted — consider pausing."];
+        }
+        if ($roas !== null && $roas < 0.4 * $accRoas) {
+            return ['cut', 'ROAS ' . $this->roasLabel($roas) . ' — far below your ' . $this->roasLabel($accRoas) . ' average; consider pausing or reworking.'];
+        }
+        if ($roas !== null && $roas < 0.7 * $accRoas) {
+            return ['watch', 'ROAS ' . $this->roasLabel($roas) . ' — under your ' . $this->roasLabel($accRoas) . ' average; keep an eye on it.'];
+        }
+        if ($roas !== null && $roas >= 1.5 * $accRoas && ! $brandExcluded) {
+            return ['scale', 'ROAS ' . $this->roasLabel($roas) . ' — well above your ' . $this->roasLabel($accRoas) . ' average; room to scale.'];
+        }
+
+        return [null, null];
+    }
+
+    private function roasLabel(float $v): string
+    {
+        return ($v >= 10 ? (string) round($v) : number_format($v, 1)) . '×';
+    }
+
+    /**
+     * Account "issues & fixes" summary from the per-campaign signals: wasted spend
+     * (the cut candidates) + the specific campaigns to review / watch / scale.
+     * Deterministic; the honest caveats (tracked-conversion basis, brand excluded
+     * from scale, spend floor) live in the UI caption. Rows arrive spend-sorted.
+     *
+     * @param array<int, array<string, mixed>> $campaigns
+     * @return array<string, mixed>
+     */
+    private function buildIssues(array $campaigns): array
+    {
+        $cut = $watch = $scale = [];
+        $wasted = 0.0;
+        foreach ($campaigns as $c) {
+            switch ($c['signal'] ?? null) {
+                case 'cut':   $wasted += (float) $c['spend']; $cut[] = $c; break;
+                case 'watch': $watch[] = $c; break;
+                case 'scale': $scale[] = $c; break;
+            }
+        }
+        $pick = static fn (array $rows): array => array_map(static fn ($c) => [
+            'id'        => $c['id'],
+            'name'      => $c['name'],
+            'spend'     => $c['spend'],
+            'roas'      => $c['roas'],
+            'purchases' => $c['purchases'],
+            'reason'    => $c['signalReason'],
+        ], array_slice($rows, 0, 6));
+
+        return [
+            'hasData'     => $cut !== [] || $watch !== [] || $scale !== [],
+            'wastedSpend' => round($wasted, 2),
+            'cutCount'    => count($cut),
+            'scaleCount'  => count($scale),
+            'cut'         => $pick($cut),
+            'watch'       => $pick($watch),
+            'scale'       => $pick($scale),
+        ];
     }
 
     /**
