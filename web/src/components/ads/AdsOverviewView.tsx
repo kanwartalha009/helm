@@ -192,7 +192,7 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
           <div className="ads-psub">Video completion &amp; social · {rangeLabel(data.from, data.to)}</div>
           <div className="ads-eff">
             <EffStat label="Video plays" value={formatNumber(data.metaNative.video.plays)} />
-            <EffStat label="2-sec plays" value={formatNumber(data.metaNative.video.watched2s)} />
+            <EffStat label="3-sec plays" value={formatNumber(data.metaNative.video.watched3s)} />
             <EffStat label="ThruPlays" value={formatNumber(data.metaNative.video.thruplays)} />
             <EffStat label="Completed" value={formatNumber(data.metaNative.video.p100)} />
             <EffStat label="Completion" value={data.metaNative.video.completionRate != null ? `${data.metaNative.video.completionRate}%` : '—'} />

@@ -44,16 +44,19 @@ final class InsightsFetcher
     /**
      * Video-watch insight fields (each a [{action_type,value}] array) → the flat
      * metadata['meta'] key it stores as. Feeds the "Meta engagement" panel. Meta
-     * has no "6-sec" metric — ThruPlay is its deep-watch equivalent.
+     * has no "6-sec" metric — ThruPlay is its deep-watch equivalent. The 2-second
+     * continuous field (video_continuous_2_sec_watched_actions) does NOT populate
+     * at account level for this account (returned 0 against 3.1M plays), so the
+     * hook metric comes from the `actions` array instead: video_view = Meta's
+     * standard 3-second video plays (same numerator Helm uses for Thumbstop).
      */
     private const VIDEO_ENGAGEMENT_FIELDS = [
-        'video_play_actions'                     => 'video_play_actions',
-        'video_continuous_2_sec_watched_actions' => 'video_2s',
-        'video_thruplay_watched_actions'         => 'thruplays',
-        'video_p25_watched_actions'              => 'video_p25',
-        'video_p50_watched_actions'              => 'video_p50',
-        'video_p75_watched_actions'              => 'video_p75',
-        'video_p100_watched_actions'             => 'video_p100',
+        'video_play_actions'         => 'video_play_actions',
+        'video_thruplay_watched_actions' => 'thruplays',
+        'video_p25_watched_actions'  => 'video_p25',
+        'video_p50_watched_actions'  => 'video_p50',
+        'video_p75_watched_actions'  => 'video_p75',
+        'video_p100_watched_actions' => 'video_p100',
     ];
 
     /**
@@ -153,6 +156,9 @@ final class InsightsFetcher
                 foreach (self::SOCIAL_ACTION_MAP as $key => $type) {
                     $acc[$key] = ($acc[$key] ?? 0.0) + self::plainActionTotal($row['actions'] ?? [], [$type]);
                 }
+                // 3-sec video plays — Meta's hook metric, from the actions array
+                // (video_continuous_2_sec_watched_actions returns empty here).
+                $acc['video_3s'] = ($acc['video_3s'] ?? 0.0) + self::plainActionTotal($row['actions'] ?? [], ['video_view']);
                 $byDay[$day] = $acc;
             }
         }

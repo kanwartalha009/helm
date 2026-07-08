@@ -162,7 +162,7 @@ export interface AdsMetaNative {
   hasData: boolean;
   video: {
     plays: number;
-    watched2s: number;
+    watched3s: number; // Meta's 3-sec video plays (hook metric); 2-sec doesn't populate
     thruplays: number;
     p25: number;
     p50: number;

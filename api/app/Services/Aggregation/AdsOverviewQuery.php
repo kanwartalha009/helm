@@ -586,7 +586,7 @@ final class AdsOverviewQuery
             'hasData' => true,
             'video'   => [
                 'plays'          => $g('video_play_actions'),
-                'watched2s'      => $g('video_2s'),
+                'watched3s'      => $g('video_3s'),
                 'thruplays'      => $g('thruplays'),
                 'p25'            => $g('video_p25'),
                 'p50'            => $g('video_p50'),
