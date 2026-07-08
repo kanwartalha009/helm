@@ -111,26 +111,6 @@ export interface AdsCampaignRow {
   signalReason: string | null;
 }
 
-export interface AdsIssueCampaign {
-  id: string;
-  name: string;
-  spend: number;
-  roas: number | null;
-  purchases: number;
-  reason: string | null;
-}
-
-// Account "issues & fixes" — cut candidates (with wasted spend), watch, scale.
-export interface AdsIssues {
-  hasData: boolean;
-  wastedSpend: number;
-  cutCount: number;
-  scaleCount: number;
-  cut: AdsIssueCampaign[];
-  watch: AdsIssueCampaign[];
-  scale: AdsIssueCampaign[];
-}
-
 export interface AdsOverviewResponse {
   brand: AdsBrand;
   platform: string; // 'meta'
@@ -159,7 +139,6 @@ export interface AdsOverviewResponse {
   tiktokNative: AdsTikTokNative | null; // TikTok-only video + social engagement
   metaNative: AdsMetaNative | null; // Meta-only video completion + social engagement
   campaigns: AdsCampaignRow[];
-  issues: AdsIssues; // deterministic "issues & fixes" from per-campaign signals
 }
 
 // TikTok-native engagement (video completion + social) — TikTok only.

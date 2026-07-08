@@ -59,7 +59,7 @@ export function AdsCampaignDrawer({
             </div>
             <div className="ads-panel">
               <div className="ads-ph"><h3>Daily trend</h3></div>
-              <div className="ads-psub">Revenue, spend and impressions · {d.from} – {d.to}</div>
+              <div className="ads-psub">Revenue and impressions · {d.from} – {d.to}</div>
               <TrendMini trend={d.trend} currency={currency} />
             </div>
           </>
@@ -109,9 +109,10 @@ function TrendMini({ trend, currency }: { trend: AdsTrendPoint[]; currency: stri
   }
   const W = 900, top = 10, bot = 180;
 
-  // Left axis = revenue + spend (money); right axis = impressions. Nice round
-  // steps so both axes read cleanly.
-  const leftStep = niceStep(Math.max(1, ...trend.map((t) => Math.max(t.revenue, t.spend))) / 3);
+  // Left axis = revenue (money); right axis = impressions. Spend is NOT a line
+  // here — it's ~10× smaller than revenue so on the shared money axis it just
+  // flatlines; its trend already lives in the Spend KPI sparkline above.
+  const leftStep = niceStep(Math.max(1, ...trend.map((t) => t.revenue)) / 3);
   const rightStep = niceStep(Math.max(1, ...trend.map((t) => t.impressions)) / 3);
   const leftMax = leftStep * 3, rightMax = rightStep * 3;
 
@@ -131,7 +132,6 @@ function TrendMini({ trend, currency }: { trend: AdsTrendPoint[]; currency: stri
     <>
       <div className="atrend-legend" style={{ marginBottom: 6 }}>
         <span><i style={{ background: '#2563EB' }} />Revenue</span>
-        <span><i style={{ background: '#22C55E' }} />Spend</span>
         <span><i style={{ background: '#0EA5B7' }} />Impressions</span>
       </div>
       <div className="atrend-chart">
@@ -141,13 +141,12 @@ function TrendMini({ trend, currency }: { trend: AdsTrendPoint[]; currency: stri
             <line key={i} x1={0} y1={gy} x2={W} y2={gy} stroke="#E7E5E4" strokeWidth={1} strokeDasharray={i === 0 || i === 3 ? undefined : '2 6'} />
           ))}
           <polyline points={line((t) => t.impressions, yR)} fill="none" stroke="#0EA5B7" strokeWidth={1.8} strokeLinejoin="round" />
-          <polyline points={line((t) => t.spend, yL)} fill="none" stroke="#22C55E" strokeWidth={1.8} strokeLinejoin="round" />
           <polyline points={line((t) => t.revenue, yL)} fill="none" stroke="#2563EB" strokeWidth={2} strokeLinejoin="round" />
         </svg>
         <div className="atrend-axis r">{rightTicks.map((v, i) => <span key={i}>{axisFmt(v)}</span>)}</div>
       </div>
       <div className="atrend-x">{xTicks.map((d, i) => <span key={i}>{d}</span>)}</div>
-      <div className="ads-psub" style={{ marginTop: 8, fontSize: 11 }}>Left axis: revenue &amp; spend · Right axis: impressions</div>
+      <div className="ads-psub" style={{ marginTop: 8, fontSize: 11 }}>Left axis: revenue · Right axis: impressions</div>
     </>
   );
 }

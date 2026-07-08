@@ -133,7 +133,7 @@ export interface ReportContent {
 }
 
 export interface OverallPerformanceReportData {
-  reportType: string;
+  reportType: 'overall-performance';
   brand: { name: string; slug: string; baseCurrency: string; timezone: string };
   currency: string;
   period: { label: string; start: string; end: string };
@@ -159,6 +159,79 @@ export interface OverallPerformanceReportData {
   content?: ReportContent | null;
   shared?: boolean;
 }
+
+// ── Monthly client report (agency → store owner) ────────────────────────────
+// Month-over-month heatmap sections; each carries a readiness status so the doc
+// renders the whole plan and lights sections up as their data lands.
+export interface MonthlySeriesRow {
+  key: string;
+  label: string;
+  byMonth: Record<string, number>; // Y-m => revenue
+  total: number;
+  yoyTotal: number;
+  deltaYoY: number | null;
+  orders: number;
+  share?: number | null; // 0–1, top rows only
+}
+
+export interface MonthlySeriesData {
+  months: string[]; // Y-m, chronological
+  rows: MonthlySeriesRow[];
+  other: { total: number; share: number | null; count: number } | null;
+  total: number;
+}
+
+export type MonthlySectionStatus = 'ready' | 'coming' | 'needs_source' | 'no_data';
+
+export interface MonthlyReportSection {
+  status: MonthlySectionStatus;
+  data?: MonthlySeriesData;
+  note?: string;
+}
+
+export interface MonthlyKpi {
+  value: number | null;
+  previous: number | null;
+  deltaPct: number | null;
+  deltaAbs: number | null;
+}
+
+export interface MonthlyReportData {
+  reportType: 'monthly';
+  brand: { name: string; slug: string; baseCurrency: string; timezone: string };
+  currency: string;
+  month: { label: string; start: string; end: string };
+  comparison: { mom: string; yoy: string };
+  overall: {
+    blendedRoas: MonthlyKpi;
+    revenue: MonthlyKpi;
+    adSpend: MonthlyKpi;
+    newCustomerRoas: MonthlyKpi | null;
+    acquisitionYoY: MonthlyKpi | null;
+  };
+  sections: {
+    countryRevenue: MonthlyReportSection;
+    categories: MonthlyReportSection;
+    bestSellers: MonthlyReportSection;
+    roasByCountry: MonthlyReportSection;
+    gender: MonthlyReportSection;
+    market: MonthlyReportSection;
+    placement: MonthlyReportSection;
+    landingSellers: MonthlyReportSection;
+    newVsExisting: MonthlyReportSection;
+    funnelCountry: MonthlyReportSection;
+    funnelLanding: MonthlyReportSection;
+  };
+  branding: ReportBranding;
+  content?: ReportContent | null;
+  shared?: boolean;
+  // Monthly report is inherently the last complete month, so it has no freshness
+  // gate — kept optional so the view pages can read it across the report union.
+  freshness?: { upToDate: boolean; lastSynced: string | null; staleDays: number; windowEnd: string };
+}
+
+// The report pages accept any report type; they branch on `reportType`.
+export type AnyReportData = OverallPerformanceReportData | MonthlyReportData;
 
 export interface ReportFiltersInput {
   period: 'last7' | 'last30' | 'mtd';

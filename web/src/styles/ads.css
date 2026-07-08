@@ -171,25 +171,12 @@
 .asig-cut { color: #B42318; background: #FEF3F2; }
 .asig-watch { color: #B54708; background: #FFFAEB; }
 
-/* Issues & fixes panel */
-.aissue-headline { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 6px 0 16px; }
-.aissue-amount { font-size: 22px; font-weight: 650; color: #B42318; font-variant-numeric: tabular-nums; }
-.aissue-cap { font-size: 12.5px; color: var(--a-sec); }
-.aissue-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
-.aissue-col { display: flex; flex-direction: column; gap: 9px; }
-.aissue-h { font-size: 12px; font-weight: 600; color: var(--a-ink); display: flex; align-items: center; gap: 7px; margin-bottom: 2px; }
-.aissue-row { border-left: 2px solid var(--a-border); padding: 1px 0 1px 10px; }
-.aissue-name { font-size: 12.5px; color: var(--a-ink); font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.aissue-why { font-size: 12px; color: var(--a-sec); margin-top: 1px; }
-
 /* Campaign drawer suggestion card */
 .adrawer-sig { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--a-border); margin-bottom: 14px; }
 .adrawer-sig-cut { background: #FEF3F2; border-color: #FEE4E2; }
 .adrawer-sig-scale { background: #ECFDF3; border-color: #D1FADF; }
 .adrawer-sig-watch { background: #FFFAEB; border-color: #FEF0C7; }
 .adrawer-sig-why { font-size: 12.5px; color: var(--a-ink); }
-
-@media (max-width: 720px) { .aissue-cols { grid-template-columns: 1fr; } }
 
 /* Gender split — 100% stacked spend bar + legend */
 .agender-bar { display: flex; height: 16px; border-radius: 5px; overflow: hidden; margin-top: 8px; background: var(--a-subtle); }

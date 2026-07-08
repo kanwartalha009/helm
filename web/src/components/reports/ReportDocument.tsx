@@ -667,7 +667,7 @@ function StrategySection({
   );
 }
 
-const REPORT_CSS = `
+export const REPORT_CSS = `
 .rpt{--ink:#161514;--ink-2:#45433f;--ink-3:#7a766f;--ink-4:#a8a39a;--line:#e7e4dd;--line-2:#d6d2c8;
   --paper:#fff;--bg:#f7f6f3;--red:#bb2d2d;--red-bg:#fbf1f0;--red-line:#eecac6;--green:#1f7a48;--green-bg:#eef8f1;--green-line:#bfe0c8;
   --amber:#a8730a;--amber-bg:#fbf5e8;--amber-line:#ecdcb4;--blue:#1f5fa6;--blue-bg:#eef4fb;--blue-line:#c4d8ef;

@@ -14,5 +14,6 @@ declare(strict_types=1);
 return [
     'types' => [
         'overall-performance' => \App\Reports\OverallPerformance\OverallPerformanceReport::class,
+        'monthly'             => \App\Reports\Monthly\MonthlyReport::class,
     ],
 ];

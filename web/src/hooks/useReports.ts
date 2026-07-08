@@ -2,7 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { toast } from '@/stores/toastStore';
 import type {
-  OverallPerformanceReportData,
+  AnyReportData,
   ReportFiltersInput,
   ReportTypeItem,
 } from '@/types/reports';
@@ -29,7 +29,7 @@ export function useReport(
     queryKey: ['report', slug, type, filters.period, filters.compare],
     enabled: !!slug && !!type,
     queryFn: async () => {
-      const { data } = await api.get<OverallPerformanceReportData>(
+      const { data } = await api.get<AnyReportData>(
         `/brands/${slug}/reports/${type}`,
         { params: { period: filters.period, compare: filters.compare } },
       );
@@ -45,7 +45,7 @@ export function usePublicReport(token: string | undefined) {
     enabled: !!token,
     retry: false,
     queryFn: async () => {
-      const { data } = await api.get<OverallPerformanceReportData>(`/r/${token}`);
+      const { data } = await api.get<AnyReportData>(`/r/${token}`);
       return data;
     },
   });

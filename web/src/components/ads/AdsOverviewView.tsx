@@ -8,7 +8,6 @@ import type {
   AdsByDevice,
   AdsCampaignRow,
   AdsFunnelStep,
-  AdsIssues,
   AdsOverviewResponse,
   AdsPeriod,
   AdsPlatform,
@@ -217,11 +216,6 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
       {/* Google channel mix — PMax / Search·Brand / Search·Generic / Shopping (Google only) */}
       {data.byChannel.hasData && (
         <ChannelMix bd={data.byChannel} currency={currency} from={data.from} to={data.to} />
-      )}
-
-      {/* Issues & fixes — deterministic waste/scale flags vs the account's own efficiency */}
-      {data.issues.hasData && (
-        <AccountIssues issues={data.issues} currency={currency} from={data.from} to={data.to} />
       )}
 
       {/* Campaign analysis */}
@@ -533,56 +527,6 @@ function shortDate(iso: string): string {
 function SignalBadge({ signal }: { signal: AdsSignal }) {
   const label = signal === 'scale' ? 'Scale' : signal === 'cut' ? 'Review' : 'Watch';
   return <span className={`asig asig-${signal}`}>{label}</span>;
-}
-
-// Account-level "issues & fixes": the per-campaign signals aggregated into a
-// wasted-spend headline + a Review/pause column and a Double-down column. The
-// caption carries the honest limits (tracked conversions not margin; spend
-// floor; brand excluded from scale) so the guardrails ship with the advice.
-function AccountIssues({ issues, currency, from, to }: { issues: AdsIssues; currency: string; from: string; to: string }) {
-  const money = (v: number | null) => formatMoney(v, currency, { whole: true });
-  return (
-    <div className="ads-panel">
-      <div className="ads-ph"><h3>Issues &amp; fixes</h3></div>
-      <div className="ads-psub">What to review this period · {rangeLabel(from, to)}</div>
-
-      {issues.wastedSpend > 0 && (
-        <div className="aissue-headline">
-          <span className="aissue-amount">{money(issues.wastedSpend)}</span>
-          <span className="aissue-cap">on {issues.cutCount} campaign{issues.cutCount === 1 ? '' : 's'} with enough spend to judge but little or no return</span>
-        </div>
-      )}
-
-      <div className="aissue-cols">
-        {issues.cut.length > 0 && (
-          <div className="aissue-col">
-            <div className="aissue-h"><SignalBadge signal="cut" /> Review / pause</div>
-            {issues.cut.map((c) => (
-              <div className="aissue-row" key={c.id}>
-                <div className="aissue-name" title={c.name}>{c.name}</div>
-                <div className="aissue-why">{c.reason}</div>
-              </div>
-            ))}
-          </div>
-        )}
-        {issues.scale.length > 0 && (
-          <div className="aissue-col">
-            <div className="aissue-h"><SignalBadge signal="scale" /> Double down</div>
-            {issues.scale.map((c) => (
-              <div className="aissue-row" key={c.id}>
-                <div className="aissue-name" title={c.name}>{c.name}</div>
-                <div className="aissue-why">{c.reason}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="ads-psub" style={{ margin: '14px 0 0' }}>
-        Flags compare each campaign to your own account average using tracked conversions — not margin, so confirm against your break-even. Only campaigns with enough spend to judge are shown; brand campaigns are excluded from scale suggestions.
-      </div>
-    </div>
-  );
 }
 
 // Google-only brand-vs-non-brand incrementality lens. The bar is share of

@@ -72,8 +72,9 @@ final class AdsOverviewQuery
         // this set while age-gender / placement / audience stay Meta+TikTok.
         $geoDeviceable = $breakdownable || $platform === 'google';
         $ag = $breakdownable ? $this->ageGenderBreakdowns((int) $brand->id, $start, $end, $money, $platform) : null;
-        // Campaigns computed once — reused for the table AND the account "issues &
-        // fixes" summary (per-campaign signals aggregated).
+        // Campaign table rows — each carries a per-campaign signal (badge + drawer
+        // suggestion). The account-level "issues" rollup was removed (redundant
+        // with the per-campaign badge + drawer comment).
         $campaigns = $this->campaigns((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money);
 
         return [
@@ -123,7 +124,6 @@ final class AdsOverviewQuery
             'tiktokNative'      => $platform === 'tiktok' ? $this->tiktokNative((int) $brand->id, $start, $end) : null,
             'metaNative'        => $platform === 'meta' ? $this->metaNative((int) $brand->id, $start, $end) : null,
             'campaigns'         => $campaigns,
-            'issues'            => $this->buildIssues($campaigns),
         ];
     }
 
@@ -926,46 +926,6 @@ final class AdsOverviewQuery
     private function roasLabel(float $v): string
     {
         return ($v >= 10 ? (string) round($v) : number_format($v, 1)) . '×';
-    }
-
-    /**
-     * Account "issues & fixes" summary from the per-campaign signals: wasted spend
-     * (the cut candidates) + the specific campaigns to review / watch / scale.
-     * Deterministic; the honest caveats (tracked-conversion basis, brand excluded
-     * from scale, spend floor) live in the UI caption. Rows arrive spend-sorted.
-     *
-     * @param array<int, array<string, mixed>> $campaigns
-     * @return array<string, mixed>
-     */
-    private function buildIssues(array $campaigns): array
-    {
-        $cut = $watch = $scale = [];
-        $wasted = 0.0;
-        foreach ($campaigns as $c) {
-            switch ($c['signal'] ?? null) {
-                case 'cut':   $wasted += (float) $c['spend']; $cut[] = $c; break;
-                case 'watch': $watch[] = $c; break;
-                case 'scale': $scale[] = $c; break;
-            }
-        }
-        $pick = static fn (array $rows): array => array_map(static fn ($c) => [
-            'id'        => $c['id'],
-            'name'      => $c['name'],
-            'spend'     => $c['spend'],
-            'roas'      => $c['roas'],
-            'purchases' => $c['purchases'],
-            'reason'    => $c['signalReason'],
-        ], array_slice($rows, 0, 6));
-
-        return [
-            'hasData'     => $cut !== [] || $watch !== [] || $scale !== [],
-            'wastedSpend' => round($wasted, 2),
-            'cutCount'    => count($cut),
-            'scaleCount'  => count($scale),
-            'cut'         => $pick($cut),
-            'watch'       => $pick($watch),
-            'scale'       => $pick($scale),
-        ];
     }
 
     /**

@@ -1,5 +1,6 @@
 import { useParams } from 'react-router-dom';
 import { ReportDocument } from '@/components/reports/ReportDocument';
+import { MonthlyReportDocument } from '@/components/reports/MonthlyReportDocument';
 import { usePublicReport } from '@/hooks/useReports';
 
 /**
@@ -68,6 +69,8 @@ export function PublicReportPage() {
               you partial numbers. Please check this link again shortly.
             </p>
           </div>
+        ) : data.reportType === 'monthly' ? (
+          <MonthlyReportDocument data={data} editable={false} />
         ) : (
           <ReportDocument data={data} editable={false} />
         ))}

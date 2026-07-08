@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { Button, Card, Segmented } from '@/components/ui';
 import { ReportDocument } from '@/components/reports/ReportDocument';
+import { MonthlyReportDocument } from '@/components/reports/MonthlyReportDocument';
 import { useCreateShare, useReport } from '@/hooks/useReports';
 import { useTriggerSync } from '@/hooks/useBrands';
 import { toast } from '@/stores/toastStore';
@@ -106,6 +107,8 @@ export function ReportViewPage() {
             onSync={onSyncAndRefresh}
             onShowAnyway={() => setShowAnyway(true)}
           />
+        ) : data.reportType === 'monthly' ? (
+          <MonthlyReportDocument data={data} editable onCommentaryChange={setCommentary} />
         ) : (
           <ReportDocument data={data} editable onCommentaryChange={setCommentary} />
         ))}
