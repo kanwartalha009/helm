@@ -183,6 +183,29 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
         </div>
       )}
 
+      {/* Meta-native engagement — video completion + social (Meta only). Labels
+          match Meta's real metrics: ThruPlays (no 6-sec), Page likes (no follows),
+          and no profile-visit column (Meta reports none for ads). */}
+      {data.metaNative && (
+        <div className="ads-panel">
+          <div className="ads-ph"><h3>Meta engagement</h3></div>
+          <div className="ads-psub">Video completion &amp; social · {rangeLabel(data.from, data.to)}</div>
+          <div className="ads-eff">
+            <EffStat label="Video plays" value={formatNumber(data.metaNative.video.plays)} />
+            <EffStat label="2-sec plays" value={formatNumber(data.metaNative.video.watched2s)} />
+            <EffStat label="ThruPlays" value={formatNumber(data.metaNative.video.thruplays)} />
+            <EffStat label="Completed" value={formatNumber(data.metaNative.video.p100)} />
+            <EffStat label="Completion" value={data.metaNative.video.completionRate != null ? `${data.metaNative.video.completionRate}%` : '—'} />
+          </div>
+          <div className="ads-eff" style={{ marginTop: 10 }}>
+            <EffStat label="Likes" value={formatNumber(data.metaNative.social.likes)} />
+            <EffStat label="Comments" value={formatNumber(data.metaNative.social.comments)} />
+            <EffStat label="Shares" value={formatNumber(data.metaNative.social.shares)} />
+            <EffStat label="Page likes" value={formatNumber(data.metaNative.social.pageLikes)} />
+          </div>
+        </div>
+      )}
+
       {/* Campaign analysis */}
       <div className="ads-panel">
         <div className="acamp-head">

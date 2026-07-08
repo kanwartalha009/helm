@@ -41,6 +41,33 @@ final class InsightsFetcher
         'landing_page_view',
     ];
 
+    /**
+     * Video-watch insight fields (each a [{action_type,value}] array) → the flat
+     * metadata['meta'] key it stores as. Feeds the "Meta engagement" panel. Meta
+     * has no "6-sec" metric — ThruPlay is its deep-watch equivalent.
+     */
+    private const VIDEO_ENGAGEMENT_FIELDS = [
+        'video_play_actions'                     => 'video_play_actions',
+        'video_continuous_2_sec_watched_actions' => 'video_2s',
+        'video_thruplay_watched_actions'         => 'thruplays',
+        'video_p25_watched_actions'              => 'video_p25',
+        'video_p50_watched_actions'              => 'video_p50',
+        'video_p75_watched_actions'              => 'video_p75',
+        'video_p100_watched_actions'             => 'video_p100',
+    ];
+
+    /**
+     * Social engagement, read from the `actions` array. Meta's closest concept to
+     * a TikTok "follow" is a Page like; it reports no ad "profile visits", so that
+     * TikTok column is intentionally absent from the Meta panel.
+     */
+    private const SOCIAL_ACTION_MAP = [
+        'likes'      => 'post_reaction',
+        'comments'   => 'comment',
+        'shares'     => 'post',
+        'page_likes' => 'like',
+    ];
+
     public function __construct(
         private readonly MetaClient $client,
         private readonly FxService $fx,
@@ -77,7 +104,81 @@ final class InsightsFetcher
             $perAccount[] = self::mapInsightRow($body['data'][0] ?? [], $brandId, $date, $baseCurrency, $isComplete);
         }
 
-        return $this->blend($perAccount, $brandId, $date, $baseCurrency, $isComplete, $accountIds);
+        // Video + social engagement rides in metadata['meta'] via a SEPARATE
+        // best-effort call, so it can never break the spend/revenue row above.
+        $engagement = $this->fetchEngagement($accountIds, $date, $date)[$day] ?? [];
+
+        return $this->blend($perAccount, $brandId, $date, $baseCurrency, $isComplete, $accountIds, $engagement);
+    }
+
+    /**
+     * Isolated engagement pull (video completion + social) → day => flat
+     * name=>value map for daily_metrics.metadata['meta'], mirroring TikTok's
+     * fetchNative(). It is its OWN insights call with its OWN try/catch: a bad
+     * field or a transient error returns [] and NEVER touches spend/revenue.
+     * Video-watch fields are [{action_type,value}] arrays; social comes from the
+     * `actions` array. Engagement metrics aren't attribution-windowed, so no
+     * action_attribution_windows here (unlike the conversion call).
+     *
+     * @param array<int, string> $accountIds
+     * @return array<string, array<string, float>> keyed by Y-m-d
+     */
+    private function fetchEngagement(array $accountIds, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $fields = implode(',', array_keys(self::VIDEO_ENGAGEMENT_FIELDS)) . ',actions';
+
+        $byDay = [];
+        foreach ($accountIds as $accountId) {
+            try {
+                $rows = $this->client->paged(self::normalizeAccountId($accountId) . '/insights', [
+                    'level'          => 'account',
+                    'fields'         => $fields,
+                    'time_range'     => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
+                    'time_increment' => 1,
+                    'limit'          => 500,
+                ]);
+            } catch (\Throwable $e) {
+                continue; // best-effort — skip this account's engagement, keep the day
+            }
+
+            foreach ($rows as $row) {
+                $day = (string) ($row['date_start'] ?? '');
+                if ($day === '') {
+                    continue;
+                }
+                $acc = $byDay[$day] ?? [];
+                foreach (self::VIDEO_ENGAGEMENT_FIELDS as $field => $key) {
+                    $acc[$key] = ($acc[$key] ?? 0.0) + self::sumActionField($row[$field] ?? null);
+                }
+                foreach (self::SOCIAL_ACTION_MAP as $key => $type) {
+                    $acc[$key] = ($acc[$key] ?? 0.0) + self::plainActionTotal($row['actions'] ?? [], [$type]);
+                }
+                $byDay[$day] = $acc;
+            }
+        }
+
+        return $byDay;
+    }
+
+    /**
+     * Sum the numeric `value` across a Meta action-array field such as
+     * video_p100_watched_actions = [{action_type, value}].
+     *
+     * @param mixed $field
+     */
+    private static function sumActionField($field): float
+    {
+        if (! is_array($field)) {
+            return 0.0;
+        }
+        $sum = 0.0;
+        foreach ($field as $entry) {
+            if (is_array($entry) && is_numeric($entry['value'] ?? null)) {
+                $sum += (float) $entry['value'];
+            }
+        }
+
+        return $sum;
     }
 
     /**
@@ -129,10 +230,14 @@ final class InsightsFetcher
             }
         }
 
+        // One ranged engagement pull for the whole window (best-effort) — sliced
+        // per day into the blend so the backfill fills metadata['meta'] history.
+        $engagementByDay = $this->fetchEngagement($accountIds, $from, $to);
+
         $out = [];
         foreach ($perDay as $day => $snaps) {
             $date      = CarbonImmutable::parse($day, $tz)->startOfDay();
-            $out[$day] = $this->blend($snaps, $brandId, $date, $baseCurrency, $date->lessThan($today), $accountIds);
+            $out[$day] = $this->blend($snaps, $brandId, $date, $baseCurrency, $date->lessThan($today), $accountIds, $engagementByDay[$day] ?? []);
         }
         ksort($out);
 
@@ -340,6 +445,7 @@ final class InsightsFetcher
         string $baseCurrency,
         bool $isComplete,
         array $accountIds,
+        array $engagement = [],
     ): MetricSnapshot {
         $impressions = 0;
         $clicks      = 0;
@@ -388,6 +494,14 @@ final class InsightsFetcher
             }
         }
 
+        $metadata = [
+            'attribution_window' => self::ATTRIBUTION_WINDOW,
+            'ad_account_ids'     => array_values(array_map([self::class, 'normalizeAccountId'], $accountIds)),
+        ];
+        if ($engagement !== []) {
+            $metadata['meta'] = $engagement; // video completion + social — see fetchEngagement
+        }
+
         return new MetricSnapshot(
             brandId: $brandId,
             platform: 'meta',
@@ -398,10 +512,7 @@ final class InsightsFetcher
             clicks: $clicks,
             conversions: $conversions,
             conversionValue: round($value, 2),
-            metadata: [
-                'attribution_window' => self::ATTRIBUTION_WINDOW,
-                'ad_account_ids'     => array_values(array_map([self::class, 'normalizeAccountId'], $accountIds)),
-            ],
+            metadata: $metadata,
             isComplete: $isComplete,
             reach: $reach,
             linkClicks: $linkClicks,

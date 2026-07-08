@@ -107,6 +107,7 @@ final class AdsOverviewQuery
             'byAudience'        => $isMeta ? $this->breakdown((int) $brand->id, 'audience', $start, $end, $money) : $this->notApplicable(),
             'byRegion'          => $breakdownable ? $this->regionRollup((int) $brand->id, $start, $end, $money, $platform) : $this->notApplicable(),
             'tiktokNative'      => $platform === 'tiktok' ? $this->tiktokNative((int) $brand->id, $start, $end) : null,
+            'metaNative'        => $platform === 'meta' ? $this->metaNative((int) $brand->id, $start, $end) : null,
             'campaigns'         => $this->campaigns((int) $brand->id, $platform, $start, $end, $priorStart, $priorEnd, $money),
         ];
     }
@@ -539,6 +540,65 @@ final class AdsOverviewQuery
                 'shares'        => $g('shares'),
                 'follows'       => $g('follows'),
                 'profileVisits' => $g('profile_visits'),
+            ],
+        ];
+    }
+
+    /**
+     * Meta-native engagement (video completion + social) summed from
+     * daily_metrics.metadata['meta'] over the window — the Meta twin of
+     * tiktokNative(). Null when nothing synced (→ the UI hides the panel). Meta
+     * has no 6-sec metric (ThruPlay is the deep-watch signal) and reports no ad
+     * profile-visit count, so those two TikTok fields are absent by design;
+     * "follows" maps to Page likes.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function metaNative(int $brandId, string $start, string $end): ?array
+    {
+        $metas = DailyMetric::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'meta')
+            ->whereBetween('date', [$start, $end])
+            ->pluck('metadata');
+
+        $sum = [];
+        foreach ($metas as $meta) {
+            $native = is_array($meta) ? ($meta['meta'] ?? null) : null;
+            if (! is_array($native)) {
+                continue;
+            }
+            foreach ($native as $k => $v) {
+                if (is_numeric($v)) {
+                    $sum[(string) $k] = ($sum[(string) $k] ?? 0) + (float) $v;
+                }
+            }
+        }
+
+        if ($sum === []) {
+            return null;
+        }
+
+        $plays = (float) ($sum['video_play_actions'] ?? 0);
+        $g     = static fn (string $k): int => (int) round((float) ($sum[$k] ?? 0));
+
+        return [
+            'hasData' => true,
+            'video'   => [
+                'plays'          => $g('video_play_actions'),
+                'watched2s'      => $g('video_2s'),
+                'thruplays'      => $g('thruplays'),
+                'p25'            => $g('video_p25'),
+                'p50'            => $g('video_p50'),
+                'p75'            => $g('video_p75'),
+                'p100'           => $g('video_p100'),
+                'completionRate' => $plays > 0 ? round(((float) ($sum['video_p100'] ?? 0)) / $plays * 100, 1) : null,
+            ],
+            'social'  => [
+                'likes'     => $g('likes'),
+                'comments'  => $g('comments'),
+                'shares'    => $g('shares'),
+                'pageLikes' => $g('page_likes'),
             ],
         ];
     }

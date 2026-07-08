@@ -129,6 +129,7 @@ export interface AdsOverviewResponse {
   byAudience: AdsByCountry; // ASC segment: new / engaged / existing / unknown
   byRegion: AdsByCountry; // country rolled up into regions (Europe, North America, …)
   tiktokNative: AdsTikTokNative | null; // TikTok-only video + social engagement
+  metaNative: AdsMetaNative | null; // Meta-only video completion + social engagement
   campaigns: AdsCampaignRow[];
 }
 
@@ -151,6 +152,29 @@ export interface AdsTikTokNative {
     shares: number;
     follows: number;
     profileVisits: number;
+  };
+}
+
+// Meta-native engagement (video completion + social) — Meta only. No "6-sec"
+// (ThruPlay is Meta's deep-watch signal) and no profile visits (Meta reports
+// none for ads); "follows" maps to Page likes.
+export interface AdsMetaNative {
+  hasData: boolean;
+  video: {
+    plays: number;
+    watched2s: number;
+    thruplays: number;
+    p25: number;
+    p50: number;
+    p75: number;
+    p100: number;
+    completionRate: number | null; // p100 ÷ plays %
+  };
+  social: {
+    likes: number;
+    comments: number;
+    shares: number;
+    pageLikes: number;
   };
 }
 
