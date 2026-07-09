@@ -334,6 +334,68 @@ final class InsightsFetcher
     }
 
     /**
+     * Per-segment TOTALS for [from, to] in ONE aggregated insights call per account
+     * (no time_increment), so Meta returns DEDUPLICATED reach for the whole window.
+     * Daily reach rows can't be summed into a monthly figure — a person reached on
+     * two days is one person, not two — so the monthly report pulls reach this way
+     * rather than from meta_breakdown_daily. Low-cardinality axes only (placement,
+     * age×gender); the high-cardinality daily path keeps its adaptive splitting.
+     * Values are native account currency; the caller converts to USD if it needs to.
+     * Reach is deduped within an account but summed across multiple accounts (rare).
+     *
+     * @param array<int, string> $breakdowns  e.g. ['publisher_platform','platform_position'] or ['age','gender']
+     * @return array<int, array<string, mixed>>  per segment: key/label/spend/impressions/clicks/reach/conversions/conversion_value/currency
+     */
+    public function fetchBreakdownTotals(PlatformConnection $conn, array $breakdowns, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $accountIds = $this->accountIdsFor($conn);
+        if ($accountIds === [] || $breakdowns === []) {
+            return [];
+        }
+
+        $fallbackCcy = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+
+        $acc = [];
+        foreach ($accountIds as $accountId) {
+            $rows = $this->client->paged(self::normalizeAccountId($accountId) . '/insights', [
+                'level'                           => 'account',
+                'fields'                          => 'spend,impressions,clicks,reach,actions,action_values,account_currency',
+                'breakdowns'                      => implode(',', $breakdowns),
+                'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
+                'time_range'                      => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
+                'use_account_attribution_setting' => 'false',
+                'limit'                           => 500,
+            ]);
+
+            foreach ($rows as $row) {
+                $parts = [];
+                foreach ($breakdowns as $b) {
+                    $v = $row[$b] ?? null;
+                    if ($v !== null && $v !== '') {
+                        $parts[] = (string) $v;
+                    }
+                }
+                $segment = $parts === [] ? 'unknown' : implode(' · ', $parts);
+
+                $acc[$segment] ??= [
+                    'key' => $segment, 'label' => $segment,
+                    'spend' => 0.0, 'impressions' => 0, 'clicks' => 0, 'reach' => 0,
+                    'conversions' => 0, 'conversion_value' => 0.0, 'currency' => $fallbackCcy,
+                ];
+                $acc[$segment]['spend']            += isset($row['spend']) ? round((float) $row['spend'], 2) : 0.0;
+                $acc[$segment]['impressions']      += (int) ($row['impressions'] ?? 0);
+                $acc[$segment]['clicks']           += (int) ($row['clicks'] ?? 0);
+                $acc[$segment]['reach']            += (int) ($row['reach'] ?? 0);
+                $acc[$segment]['conversions']      += (int) round(self::attributedTotal($row['actions'] ?? [], self::PURCHASE_ACTION_TYPES));
+                $acc[$segment]['conversion_value'] += round(self::attributedTotal($row['action_values'] ?? [], self::PURCHASE_ACTION_TYPES), 2);
+                $acc[$segment]['currency']          = strtoupper((string) ($row['account_currency'] ?? $fallbackCcy));
+            }
+        }
+
+        return array_values($acc);
+    }
+
+    /**
      * Pull one account's breakdown rows for [from, to], halving the window and
      * retrying on a transport failure. High-cardinality axes (country has 200+
      * values, placement dozens) over a long window make Meta's query slow enough

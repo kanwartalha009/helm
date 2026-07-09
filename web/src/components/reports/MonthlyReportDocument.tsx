@@ -118,8 +118,8 @@ export function MonthlyReportDocument({
 
       <div className="mrt-group"><span>Advertising</span></div>
       <SectionBlock num="05" title="ROAS by country" sub="Meta country spend ÷ commerce country revenue, shaded against blended ROAS." section={sections.roasByCountry} currency={currency} />
-      <SectionBlock num="06" title="Ad spend by placement" sub="Where the budget ran — Feed, Reels, Stories." section={sections.placement} currency={currency} />
-      <SectionBlock num="07" title="Ad spend by gender" sub="Audience concentration by gender." section={sections.gender} currency={currency} />
+      <SectionBlock num="06" title="Ad spend by placement" sub="Where the budget ran and how it performed — reach, ROAS and CPA by placement." section={sections.placement} currency={currency} />
+      <SectionBlock num="07" title="Ad spend by gender" sub="Spend, reach and ROAS by gender." section={sections.gender} currency={currency} />
       <SectionBlock num="08" title="Ad spend by landing page × best sellers" sub="Is the ad budget behind the winners?" section={sections.landingSellers} currency={currency} />
 
       <div className="mrt-group"><span>Customers</span></div>
@@ -294,41 +294,49 @@ function gradeCol(v: number | null, values: (number | null)[], dir: 'high' | 'lo
   return '';
 }
 
-// Single-month ad-spend-by-gender table (cost / efficiency / share).
+// Ad spend by gender — full performance (reach / frequency / efficiency / ROAS /
+// CPA / share). Reach + frequency appear only once the pull carries them.
 function GenderTable({ rows, currency }: { rows: MonthlyGenderRow[]; currency: string }) {
   const money = (v: number | null) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+  const rate = (v: number | null) => (v == null ? '—' : formatMoney(v, currency)); // CPM — show cents
+  const hasReach = rows.some((r) => r.reach != null);
   return (
-    <>
-      <div className="rpt-tbl-wrap">
-        <table className="rpt-tbl mrt-tbl">
-          <thead>
-            <tr>
-              <th>Gender</th>
-              <th className="r">Cost</th>
-              <th className="r">Clicks</th>
-              <th className="r">CPC</th>
-              <th className="r">CTR</th>
-              <th className="r">CPM</th>
-              <th className="r">Share</th>
+    <div className="rpt-tbl-wrap">
+      <table className="rpt-tbl mrt-tbl">
+        <thead>
+          <tr>
+            <th>Gender</th>
+            <th className="r">Cost</th>
+            {hasReach && <th className="r">Reach</th>}
+            {hasReach && <th className="r">Freq</th>}
+            <th className="r">Clicks</th>
+            <th className="r">CTR</th>
+            <th className="r">CPM</th>
+            <th className="r">Purch.</th>
+            <th className="r">ROAS</th>
+            <th className="r">CPA</th>
+            <th className="r">Share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label}>
+              <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
+              <td className="r">{money(r.cost)}</td>
+              {hasReach && <td className="r">{r.reach == null ? '—' : r.reach.toLocaleString()}</td>}
+              {hasReach && <td className="r">{r.freq == null ? '—' : r.freq.toFixed(2)}</td>}
+              <td className="r">{r.clicks.toLocaleString()}</td>
+              <td className={`r ${gradeCol(r.ctr, rows.map((x) => x.ctr), 'high')}`}>{r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`}</td>
+              <td className={`r ${gradeCol(r.cpm, rows.map((x) => x.cpm), 'low')}`}>{rate(r.cpm)}</td>
+              <td className="r">{r.purchases.toLocaleString()}</td>
+              <td className={`r ${gradeCol(r.roas, rows.map((x) => x.roas), 'high')}`}>{r.roas == null ? '—' : `${r.roas.toFixed(2)}×`}</td>
+              <td className={`r ${gradeCol(r.cpa, rows.map((x) => x.cpa), 'low')}`}>{money(r.cpa)}</td>
+              <td className="r">{r.share == null ? '—' : `${(r.share * 100).toFixed(0)}%`}</td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label}>
-                <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
-                <td className="r">{money(r.cost)}</td>
-                <td className="r">{r.clicks.toLocaleString()}</td>
-                <td className={`r ${gradeCol(r.cpc, rows.map((x) => x.cpc), 'low')}`}>{money(r.cpc)}</td>
-                <td className={`r ${gradeCol(r.ctr, rows.map((x) => x.ctr), 'high')}`}>{r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`}</td>
-                <td className={`r ${gradeCol(r.cpm, rows.map((x) => x.cpm), 'low')}`}>{money(r.cpm)}</td>
-                <td className="r">{r.share == null ? '—' : `${(r.share * 100).toFixed(0)}%`}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="rpt-cap">Reach &amp; frequency aren’t stored on breakdowns yet — they arrive when added to the Meta pull.</div>
-    </>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -367,46 +375,50 @@ function LandingTable({ rows, currency }: { rows: MonthlyLandingRow[]; currency:
   );
 }
 
-// Ad spend by placement (cost / reach / frequency / efficiency / share).
+// Ad spend by placement (cost / efficiency / share). Reach + frequency columns
+// only appear once the breakdown carries them — an empty column of dashes has no
+// place in a client report.
 function PlacementTable({ rows, currency }: { rows: MonthlyPlacementRow[]; currency: string }) {
   const money = (v: number | null) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+  const rate = (v: number | null) => (v == null ? '—' : formatMoney(v, currency)); // CPC/CPM are sub-euro — show cents
   const hasReach = rows.some((r) => r.reach != null);
   return (
-    <>
-      <div className="rpt-tbl-wrap">
-        <table className="rpt-tbl mrt-tbl">
-          <thead>
-            <tr>
-              <th>Placement</th>
-              <th className="r">Cost</th>
-              <th className="r">Reach</th>
-              <th className="r">Freq</th>
-              <th className="r">Clicks</th>
-              <th className="r">CPC</th>
-              <th className="r">CTR</th>
-              <th className="r">CPM</th>
-              <th className="r">Share</th>
+    <div className="rpt-tbl-wrap">
+      <table className="rpt-tbl mrt-tbl">
+        <thead>
+          <tr>
+            <th>Placement</th>
+            <th className="r">Cost</th>
+            {hasReach && <th className="r">Reach</th>}
+            {hasReach && <th className="r">Freq</th>}
+            <th className="r">Clicks</th>
+            <th className="r">CTR</th>
+            <th className="r">CPM</th>
+            <th className="r">Purch.</th>
+            <th className="r">ROAS</th>
+            <th className="r">CPA</th>
+            <th className="r">Share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label}>
+              <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
+              <td className="r">{money(r.cost)}</td>
+              {hasReach && <td className="r">{r.reach == null ? '—' : r.reach.toLocaleString()}</td>}
+              {hasReach && <td className="r">{r.freq == null ? '—' : r.freq.toFixed(2)}</td>}
+              <td className="r">{r.clicks.toLocaleString()}</td>
+              <td className={`r ${gradeCol(r.ctr, rows.map((x) => x.ctr), 'high')}`}>{r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`}</td>
+              <td className={`r ${gradeCol(r.cpm, rows.map((x) => x.cpm), 'low')}`}>{rate(r.cpm)}</td>
+              <td className="r">{r.purchases.toLocaleString()}</td>
+              <td className={`r ${gradeCol(r.roas, rows.map((x) => x.roas), 'high')}`}>{r.roas == null ? '—' : `${r.roas.toFixed(2)}×`}</td>
+              <td className={`r ${gradeCol(r.cpa, rows.map((x) => x.cpa), 'low')}`}>{money(r.cpa)}</td>
+              <td className="r">{r.share == null ? '—' : `${(r.share * 100).toFixed(0)}%`}</td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label}>
-                <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
-                <td className="r">{money(r.cost)}</td>
-                <td className="r">{r.reach == null ? '—' : r.reach.toLocaleString()}</td>
-                <td className="r">{r.freq == null ? '—' : r.freq.toFixed(2)}</td>
-                <td className="r">{r.clicks.toLocaleString()}</td>
-                <td className={`r ${gradeCol(r.cpc, rows.map((x) => x.cpc), 'low')}`}>{money(r.cpc)}</td>
-                <td className={`r ${gradeCol(r.ctr, rows.map((x) => x.ctr), 'high')}`}>{r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`}</td>
-                <td className={`r ${gradeCol(r.cpm, rows.map((x) => x.cpm), 'low')}`}>{money(r.cpm)}</td>
-                <td className="r">{r.share == null ? '—' : `${(r.share * 100).toFixed(0)}%`}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!hasReach && <div className="rpt-cap">Reach &amp; frequency populate after the next sync — the pull now captures reach; existing history shows “—” until re-synced.</div>}
-    </>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

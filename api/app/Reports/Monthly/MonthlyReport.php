@@ -12,10 +12,12 @@ use App\Models\MetaBreakdownDaily;
 use App\Models\PlatformConnection;
 use App\Models\ProductCatalog;
 use App\Models\ShopifyFunnelDaily;
+use App\Platforms\Meta\InsightsFetcher;
 use App\Platforms\Shopify\RevenueFetcher;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Contracts\ReportType;
 use App\Reports\Support\MonthlySeries;
+use App\Services\Currency\FxService;
 use App\Support\CountryCodes;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
@@ -51,6 +53,8 @@ final class MonthlyReport implements ReportType
     public function __construct(
         private readonly MonthlySeries $series,
         private readonly RevenueFetcher $revenue,
+        private readonly InsightsFetcher $insights,
+        private readonly FxService $fx,
     ) {}
 
     public function key(): string
@@ -132,9 +136,9 @@ final class MonthlyReport implements ReportType
                 'categories'     => $this->commerceSection('category', $brand->id, $months, $filters->usd, $limit),
                 'bestSellers'    => $this->commerceSection('product', $brand->id, $months, $filters->usd, $limit),
                 'market'         => $this->marketSection($brand->id, $months, $filters->usd),
-                'gender'         => $this->genderSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
+                'gender'         => $this->genderSection($brand, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'roasByCountry'  => $this->roasByCountrySection($brand->id, $months, $filters->usd),
-                'placement'      => $this->placementSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
+                'placement'      => $this->placementSection($brand, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'landingSellers' => $this->landingSellersSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString()),
                 'newVsExisting'  => $newVsExisting,
                 'funnelCountry'  => $this->funnelSection($brand->id, 'country', $monthStart->toDateString(), $monthEnd->toDateString()),
@@ -154,8 +158,16 @@ final class MonthlyReport implements ReportType
      */
     private function commerceSection(string $dimension, int $brandId, array $months, bool $usd, int $limit): array
     {
+        // Shopify product_type / product_title come back with inconsistent casing
+        // and stray whitespace ("T-shirt" vs "T-Shirt"), which otherwise split one
+        // category across two rows and manufacture €0 months. Fold case/space
+        // variants onto one canonical key (label keeps the first real spelling).
+        $keyMap = in_array($dimension, ['category', 'product'], true)
+            ? static fn (string $k): string => mb_strtolower(trim($k))
+            : null;
+
         try {
-            $data = $this->series->forDimension($brandId, $dimension, $months, $usd, $limit);
+            $data = $this->series->forDimension($brandId, $dimension, $months, $usd, $limit, null, [], $keyMap);
         } catch (Throwable $e) {
             Log::warning('monthly_report.section_failed', ['dimension' => $dimension, 'error' => $e->getMessage()]);
 
@@ -206,64 +218,60 @@ final class MonthlyReport implements ReportType
      *
      * @return array<string, mixed>
      */
-    private function genderSection(int $brandId, string $start, string $end, bool $usd): array
+    private function genderSection(Brand $brand, string $start, string $end, bool $usd): array
     {
-        $money = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+        $conn = $this->metaConnection($brand->id);
+        if ($conn === null) {
+            return ['status' => 'no_data'];
+        }
 
         try {
-            $rows = MetaBreakdownDaily::query()
-                ->where('brand_id', $brandId)
-                ->where('platform', 'meta')
-                ->where('breakdown_type', 'age_gender')
-                ->whereBetween('date', [$start, $end])
-                ->groupBy('segment_key')
-                ->selectRaw('segment_key,
-                    COALESCE(SUM(' . $money('spend') . '), 0) AS spend,
-                    COALESCE(SUM(impressions), 0) AS impressions,
-                    COALESCE(SUM(clicks), 0) AS clicks')
-                ->get();
+            $segments = $this->insights->fetchBreakdownTotals($conn, ['age', 'gender'], CarbonImmutable::parse($start), CarbonImmutable::parse($end));
         } catch (Throwable $e) {
             Log::warning('monthly_report.section_failed', ['dimension' => 'gender', 'error' => $e->getMessage()]);
 
             return ['status' => 'no_data'];
         }
 
-        if ($rows->isEmpty()) {
+        if ($segments === []) {
             return ['status' => 'no_data'];
         }
 
-        $acc = [];
-        foreach ($rows as $r) {
-            $g = $this->genderOf((string) $r->segment_key);
-            $acc[$g] ??= ['label' => ucfirst($g), 'cost' => 0.0, 'impressions' => 0, 'clicks' => 0];
-            $acc[$g]['cost']        += (float) $r->spend;
-            $acc[$g]['impressions'] += (int) $r->impressions;
-            $acc[$g]['clicks']      += (int) $r->clicks;
-        }
-
-        $totalCost = 0.0;
-        foreach ($acc as $a) {
-            $totalCost += $a['cost'];
-        }
-
-        $out = [];
-        foreach ($acc as $a) {
-            $cost = round($a['cost'], 2);
-            $impr = (int) $a['impressions'];
-            $clk  = (int) $a['clicks'];
-            $out[] = [
-                'label'  => $a['label'],
-                'cost'   => $cost,
-                'clicks' => $clk,
-                'cpc'    => $clk > 0 ? round($cost / $clk, 2) : null,
-                'ctr'    => $impr > 0 ? round($clk / $impr * 100, 2) : null,
-                'cpm'    => $impr > 0 ? round($cost / $impr * 1000, 2) : null,
-                'share'  => $totalCost > 0 ? round($cost / $totalCost, 4) : null,
+        // Fold age × gender onto the gender axis. Age buckets are disjoint, so a
+        // person lands in exactly one age×gender cell — summing the cells for a
+        // gender gives that gender's unique reach (correct, unlike summing days).
+        $folded = [];
+        foreach ($segments as $s) {
+            $g = $this->genderOf((string) $s['key']);
+            $folded[$g] ??= [
+                'key' => $g, 'label' => ucfirst($g),
+                'spend' => 0.0, 'impressions' => 0, 'clicks' => 0, 'reach' => 0,
+                'conversions' => 0, 'conversion_value' => 0.0,
             ];
+            $folded[$g]['spend']            += (float) $s['spend'];
+            $folded[$g]['impressions']      += (int) $s['impressions'];
+            $folded[$g]['clicks']           += (int) $s['clicks'];
+            $folded[$g]['reach']            += (int) $s['reach'];
+            $folded[$g]['conversions']      += (int) $s['conversions'];
+            $folded[$g]['conversion_value'] += (float) $s['conversion_value'];
         }
-        usort($out, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
 
-        return ['status' => 'ready', 'metrics' => $out];
+        $fx    = $this->monthFx($brand, $start, $usd);
+        $total = 0.0;
+        $rows  = [];
+        foreach ($folded as $s) {
+            $row    = $this->breakdownMetrics($s, $fx, 'gender');
+            $total += $row['cost'];
+            $rows[] = $row;
+        }
+        foreach ($rows as &$r) {
+            $r['share'] = $total > 0 ? round($r['cost'] / $total, 4) : null;
+        }
+        unset($r);
+
+        usort($rows, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
+
+        return ['status' => 'ready', 'metrics' => $rows];
     }
 
     /**
@@ -472,59 +480,110 @@ final class MonthlyReport implements ReportType
      *
      * @return array<string, mixed>
      */
-    private function placementSection(int $brandId, string $start, string $end, bool $usd): array
+    private function placementSection(Brand $brand, string $start, string $end, bool $usd): array
     {
-        $money = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+        $conn = $this->metaConnection($brand->id);
+        if ($conn === null) {
+            return ['status' => 'no_data'];
+        }
 
         try {
-            $rows = MetaBreakdownDaily::query()
-                ->where('brand_id', $brandId)
-                ->where('platform', 'meta')
-                ->where('breakdown_type', 'placement')
-                ->whereBetween('date', [$start, $end])
-                ->groupBy('segment_key', 'segment_label')
-                ->selectRaw('segment_key, MAX(segment_label) AS label,
-                    COALESCE(SUM(' . $money('spend') . '), 0) AS spend,
-                    COALESCE(SUM(impressions), 0) AS impressions,
-                    COALESCE(SUM(clicks), 0) AS clicks,
-                    COALESCE(SUM(reach), 0) AS reach')
-                ->get();
+            $segments = $this->insights->fetchBreakdownTotals(
+                $conn,
+                (array) config('meta_breakdowns.placement', ['publisher_platform', 'platform_position']),
+                CarbonImmutable::parse($start),
+                CarbonImmutable::parse($end),
+            );
         } catch (Throwable $e) {
             Log::warning('monthly_report.section_failed', ['dimension' => 'placement', 'error' => $e->getMessage()]);
 
             return ['status' => 'no_data'];
         }
 
-        if ($rows->isEmpty()) {
+        if ($segments === []) {
             return ['status' => 'no_data'];
         }
 
+        $fx    = $this->monthFx($brand, $start, $usd);
         $total = 0.0;
-        foreach ($rows as $r) {
-            $total += (float) $r->spend;
+        $rows  = [];
+        foreach ($segments as $s) {
+            $row    = $this->breakdownMetrics($s, $fx, 'placement');
+            $total += $row['cost'];
+            $rows[] = $row;
+        }
+        foreach ($rows as &$r) {
+            $r['share'] = $total > 0 ? round($r['cost'] / $total, 4) : null;
+        }
+        unset($r);
+
+        usort($rows, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
+
+        return ['status' => 'ready', 'placement' => array_slice($rows, 0, 10)];
+    }
+
+    /** The brand's active Meta connection (brand eager-loaded for currency), or null. */
+    private function metaConnection(int $brandId): ?PlatformConnection
+    {
+        return PlatformConnection::query()
+            ->with('brand')
+            ->where('brand_id', $brandId)
+            ->where('platform', 'meta')
+            ->where('status', 'active')
+            ->first();
+    }
+
+    /** Native → display-currency fx multiplier for the report month (1.0 in native mode). */
+    private function monthFx(Brand $brand, string $start, bool $usd): float
+    {
+        if (! $usd) {
+            return 1.0;
+        }
+        $rate = $this->fx->cachedToUsd((string) ($brand->base_currency ?: 'USD'), CarbonImmutable::parse($start));
+
+        return $rate ?: 1.0;
+    }
+
+    /**
+     * Shared placement/gender metric row from a fetchBreakdownTotals segment.
+     * $fx multiplies native money into display currency; cost metrics (CPC/CPM/CPA)
+     * and ROAS derive from the fx-adjusted cost/revenue so they're correct in either
+     * mode, while ratios (CTR/frequency) are currency-agnostic. The Advantage+
+     * unattributed placement bucket ("unknown" position) is relabelled honestly.
+     * `share` is filled by the caller once the section total is known.
+     *
+     * @param  array<string, mixed>  $s
+     * @return array<string, mixed>
+     */
+    private function breakdownMetrics(array $s, float $fx, string $kind): array
+    {
+        $cost  = round(((float) $s['spend']) * $fx, 2);
+        $impr  = (int) $s['impressions'];
+        $clk   = (int) $s['clicks'];
+        $reach = (int) $s['reach'];
+        $purch = (int) $s['conversions'];
+        $rev   = round(((float) $s['conversion_value']) * $fx, 2);
+
+        $raw   = (string) ($s['label'] ?: $s['key']);
+        $label = $kind === 'placement' ? $this->placementLabel($raw) : $raw;
+        if ($kind === 'placement' && mb_strtolower(trim($raw)) === 'unknown') {
+            $label = 'Automatic (Advantage+)';
         }
 
-        $out = [];
-        foreach ($rows as $r) {
-            $cost  = round((float) $r->spend, 2);
-            $impr  = (int) $r->impressions;
-            $clk   = (int) $r->clicks;
-            $reach = (int) $r->reach;
-            $out[] = [
-                'label'  => $this->placementLabel((string) ($r->label ?: $r->segment_key)),
-                'cost'   => $cost,
-                'reach'  => $reach > 0 ? $reach : null,
-                'freq'   => $reach > 0 ? round($impr / $reach, 2) : null,
-                'clicks' => $clk,
-                'cpc'    => $clk > 0 ? round($cost / $clk, 2) : null,
-                'ctr'    => $impr > 0 ? round($clk / $impr * 100, 2) : null,
-                'cpm'    => $impr > 0 ? round($cost / $impr * 1000, 2) : null,
-                'share'  => $total > 0 ? round($cost / $total, 4) : null,
-            ];
-        }
-        usort($out, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
-
-        return ['status' => 'ready', 'placement' => array_slice($out, 0, 10)];
+        return [
+            'label'     => $label,
+            'cost'      => $cost,
+            'reach'     => $reach > 0 ? $reach : null,
+            'freq'      => $reach > 0 ? round($impr / $reach, 2) : null,
+            'clicks'    => $clk,
+            'cpc'       => $clk > 0 ? round($cost / $clk, 2) : null,
+            'ctr'       => $impr > 0 ? round($clk / $impr * 100, 2) : null,
+            'cpm'       => $impr > 0 ? round($cost / $impr * 1000, 2) : null,
+            'purchases' => $purch,
+            'roas'      => $cost > 0 ? round($rev / $cost, 2) : null,
+            'cpa'       => $purch > 0 ? round($cost / $purch, 2) : null,
+            'share'     => null,
+        ];
     }
 
     /**

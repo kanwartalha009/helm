@@ -191,10 +191,15 @@ export type MonthlySectionStatus = 'ready' | 'coming' | 'needs_source' | 'no_dat
 export interface MonthlyGenderRow {
   label: string;
   cost: number;
+  reach: number | null;
+  freq: number | null;
   clicks: number;
   cpc: number | null;
   ctr: number | null;
   cpm: number | null;
+  purchases: number;
+  roas: number | null; // attributed revenue ÷ spend
+  cpa: number | null; // spend ÷ purchases
   share: number | null;
 }
 
@@ -236,6 +241,9 @@ export interface MonthlyPlacementRow {
   cpc: number | null;
   ctr: number | null;
   cpm: number | null;
+  purchases: number;
+  roas: number | null; // attributed revenue ÷ spend
+  cpa: number | null; // spend ÷ purchases
   share: number | null;
 }
 
