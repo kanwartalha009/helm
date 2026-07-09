@@ -683,7 +683,7 @@ export const REPORT_CSS = `
 .rpt-brand-sub{font-size:13px;color:var(--ink-3);margin-top:12px}
 .rpt-meta{text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-3);line-height:1.95;letter-spacing:.02em}
 .rpt-meta strong{color:var(--ink);font-weight:600;font-family:var(--sans)}
-.rpt-rule{height:3px;background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#000));border-radius:2px;margin:0 0 40px}
+.rpt-rule{height:2px;width:56px;background:var(--accent);border-radius:0;margin:0 0 38px}
 .rpt-sec{margin-bottom:48px}
 .rpt-sec-head{display:flex;align-items:baseline;gap:13px;margin-bottom:8px}
 .rpt-sec-num{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.1em;font-weight:600}
@@ -718,13 +718,13 @@ export const REPORT_CSS = `
 .rpt-mx-d{font-size:10.5px;color:var(--ink-3);line-height:1.5;margin-top:6px}
 .rpt-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:10px}
 .rpt-pill{font-size:9.5px;padding:3px 7px;border-radius:20px;font-weight:600;background:rgba(0,0,0,.05);color:var(--ink-2)}
-.rpt-tbl-wrap{background:var(--paper);border:1px solid var(--line);border-radius:13px;overflow:hidden}
+.rpt-tbl-wrap{background:transparent;border:none;border-radius:0;overflow:visible}
 .rpt-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
-.rpt-tbl thead tr{background:var(--ink);color:#fff}
-.rpt-tbl th{padding:12px 18px;text-align:left;font-size:9.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+.rpt-tbl thead tr{background:transparent;color:var(--ink-3)}
+.rpt-tbl th{padding:10px 16px 11px;text-align:left;font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);border-bottom:1.5px solid var(--ink)}
 .rpt-tbl th.r{text-align:right}
-.rpt-tbl td{padding:12px 18px;border-bottom:1px solid var(--line)}
-.rpt-tbl td.r{text-align:right;font-family:var(--mono);font-size:11.5px}
+.rpt-tbl td{padding:11px 16px;border-bottom:1px solid var(--line)}
+.rpt-tbl td.r{text-align:right;font-size:12px;font-variant-numeric:tabular-nums}
 .rpt-tbl td.name{font-weight:600}
 .rpt-tbl td.prior{color:var(--ink-3)}
 .rpt-tbl tbody tr:last-child td{border-bottom:1px solid var(--line)}

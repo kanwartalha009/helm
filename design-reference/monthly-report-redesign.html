@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Monthly report — redesign preview</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap');
+
+:root{
+  --ink:#1b1a17; --ink-2:#4a473f; --ink-3:#847e72; --ink-4:#aca594;
+  --paper:#fff; --bg:#f6f5f1; --line:#eceae2; --line-2:#ddd9cd;
+  --accent:#1f6f5c; --accent-2:#175544;
+  --pos:#1f7a4d; --neg:#b23b32;
+  --pos-1:#f2f7f3; --pos-2:#e3efe7; --pos-3:#d2e7da;
+  --neg-1:#fbf3f2; --neg-2:#f4e4e1; --neg-3:#eccfc9;
+  --display:'Fraunces',Georgia,serif; --sans:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased;padding:56px 24px}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1,"cv01" 1}
+.page{max-width:960px;margin:0 auto;background:var(--paper);border:1px solid var(--line);padding:64px 68px 48px}
+
+/* Masthead */
+.eyebrow{display:flex;align-items:center;gap:9px;font-size:11px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:20px}
+.eyebrow::before{content:'';width:22px;height:1.5px;background:var(--accent)}
+.mast{display:flex;justify-content:space-between;align-items:flex-end;gap:32px;padding-bottom:22px;border-bottom:1.5px solid var(--ink)}
+.mast h1{font-family:var(--display);font-size:52px;font-weight:600;line-height:.95;letter-spacing:-.02em;margin:0}
+.mast-sub{font-size:13px;color:var(--ink-3);margin-top:14px;max-width:46ch}
+.mast-meta{text-align:right;font-size:12px;color:var(--ink-3);line-height:2.1;white-space:nowrap}
+.mast-meta b{color:var(--ink);font-weight:600;font-family:var(--sans)}
+
+/* At a glance */
+.glance{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:34px 0 8px}
+.g-cell{padding:20px 22px}
+.g-cell + .g-cell{border-left:1px solid var(--line)}
+.g-l{font-size:11px;color:var(--ink-3);margin-bottom:12px;letter-spacing:.01em}
+.g-v{font-family:var(--display);font-size:34px;font-weight:600;line-height:1;letter-spacing:-.02em}
+.g-d{font-size:12px;margin-top:9px;font-weight:500}
+.g-note{font-size:11px;color:var(--ink-4);margin-top:7px}
+.up{color:var(--pos)} .down{color:var(--neg)}
+
+/* Targets + commentary */
+.targets{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin:16px 0 30px;font-size:12.5px;color:var(--ink-2)}
+.targets .t-l{font-size:11px;letter-spacing:.02em;color:var(--ink-3)}
+.targets input{width:64px;padding:5px 9px;border:1px solid var(--line-2);border-radius:6px;font-family:var(--sans);font-size:12.5px;color:var(--ink);background:var(--paper)}
+.comment{margin:0 0 6px;padding-left:16px;border-left:2px solid var(--accent)}
+.comment-l{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:9px}
+.comment p{margin:0;font-family:var(--display);font-size:16px;font-weight:400;line-height:1.65;color:var(--ink-2);font-style:italic}
+
+/* Group + section */
+.group{display:flex;align-items:center;gap:14px;margin:52px 0 26px}
+.group span{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.group::after{content:'';flex:1;height:1px;background:var(--line)}
+.sec{margin:0 0 40px}
+.sec-h{display:flex;align-items:baseline;gap:12px;margin-bottom:5px}
+.sec-n{font-size:12px;color:var(--ink-4);letter-spacing:.06em;font-variant-numeric:tabular-nums}
+.sec-h h2{font-family:var(--display);font-size:25px;font-weight:600;letter-spacing:-.01em;margin:0}
+.sec-sub{font-size:12.5px;color:var(--ink-3);margin:0 0 18px;max-width:70ch}
+
+/* Table */
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tbl thead th{padding:0 16px 10px;text-align:right;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);border-bottom:1.5px solid var(--ink)}
+.tbl thead th:first-child{text-align:left}
+.tbl td{padding:11px 16px;text-align:right;border-bottom:1px solid var(--line)}
+.tbl td:first-child{text-align:left;font-weight:500;color:var(--ink)}
+.tbl td.n{font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.tbl tbody tr:hover{background:#fcfbf9}
+.est{opacity:.5;font-weight:400}
+.muted{color:var(--ink-4)}
+.sub-lbl{font-size:10.5px;color:var(--ink-4);margin-top:1px}
+.tot td{border-top:1.5px solid var(--ink);border-bottom:none;font-weight:600;color:var(--ink);padding-top:12px}
+.tot td.n{color:var(--ink)}
+
+/* soft heat — background from base class, text colour scoped to table cells so it beats td.n */
+.p1{background:var(--pos-1)} .p2{background:var(--pos-2)} .p3{background:var(--pos-3);font-weight:600}
+.d1{background:var(--neg-1)} .d2{background:var(--neg-2)} .d3{background:var(--neg-3);font-weight:600}
+.tbl td.p2,.tbl td.p3{color:var(--pos)} .tbl td.d2,.tbl td.d3{color:var(--neg)}
+
+/* performance legend */
+.legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--ink-3);margin:26px 0 -6px}
+.legend .sw{width:22px;height:12px;border-radius:3px;display:inline-block;vertical-align:-2px}
+.legend b{color:var(--ink-2);font-weight:600}
+
+/* ribbon / caption / footer */
+.ribbon{display:flex;align-items:center;gap:13px;padding:13px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.ribbon .tag{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#8a6d1f;background:#f7efdb;padding:3px 9px;border-radius:5px}
+.ribbon .txt{font-size:12.5px;color:var(--ink-3)}
+.cap{font-size:11px;color:var(--ink-4);margin-top:11px;line-height:1.5;font-style:italic}
+.foot{display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid var(--line-2);padding-top:22px;margin-top:52px}
+.foot-brand{font-family:var(--display);font-size:21px;font-weight:600}
+.foot-powered{font-size:10.5px;color:var(--ink-4);margin-top:3px}
+.foot-note{font-size:10.5px;color:var(--ink-4);text-align:right;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="eyebrow">Monthly report · June 2026</div>
+  <div class="mast">
+    <div>
+      <h1>Nude Project</h1>
+      <div class="mast-sub">Online Store · EUR · figures before returns unless noted · prepared by Roasdriven</div>
+    </div>
+    <div class="mast-meta">
+      <div><b>Period</b>&nbsp;&nbsp;1–30 Jun 2026</div>
+      <div><b>Compared to</b>&nbsp;&nbsp;May 2026</div>
+      <div><b>Revenue</b>&nbsp;&nbsp;€3.17M</div>
+    </div>
+  </div>
+
+  <div class="glance">
+    <div class="g-cell">
+      <div class="g-l">Blended ROAS</div>
+      <div class="g-v num">15.98×</div>
+      <div class="g-d down">−7.31× vs May</div>
+    </div>
+    <div class="g-cell">
+      <div class="g-l">Revenue</div>
+      <div class="g-v num">€3.17M</div>
+      <div class="g-d down">−10.3% vs May</div>
+    </div>
+    <div class="g-cell">
+      <div class="g-l">Ad spend</div>
+      <div class="g-v num">€198K</div>
+      <div class="g-d up">+30.6% vs May</div>
+    </div>
+    <div class="g-cell">
+      <div class="g-l">ROAS · new customer</div>
+      <div class="g-v num">~7.7×</div>
+      <div class="g-note">estimate · new × AOV ÷ spend</div>
+    </div>
+  </div>
+
+  <div class="targets">
+    <span class="t-l">Targets</span>
+    <span>Blended ROAS <input value="14.0" /></span>
+    <span>New-customer ROAS <input value="8.0" /></span>
+  </div>
+
+  <div class="comment">
+    <div class="comment-l">Commentary</div>
+    <p>June held revenue near May’s level on higher spend — blended ROAS softened as we leaned into acquisition. Spain and Italy remain the engine; retention ticked up to 47%. Plan for July: hold spend, push the returning-customer flows.</p>
+  </div>
+
+  <div class="legend">
+    <span class="sw p2"></span><b>Ahead</b>
+    <span class="sw d2"></span><b>Behind</b>
+    <span style="margin-left:4px">Outcome columns are shaded by performance. Cost metrics (CAC, CPM) are shaded so <b>lower is greener</b>. Raw figures — counts, spend, share — stay unshaded.</span>
+  </div>
+
+  <div class="group"><span>Commerce</span></div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="sec-n">02</span><h2>Country revenue</h2></div>
+    <div class="sec-sub">Revenue by country, rolled to calendar months. Months before the commerce backfill show “—”, never €0.</div>
+    <table class="tbl">
+      <thead><tr>
+        <th>Country</th><th>Jan</th><th>Feb</th><th>Mar</th><th>Apr</th><th>May</th><th>Jun</th><th>Total</th><th>Share</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>Spain</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">€347.6K</td><td class="n p2">€596.9K</td><td class="n d2">€270.6K</td><td class="n">€1.22M</td><td class="n">17.8%</td></tr>
+        <tr><td>Italy</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">€309.1K</td><td class="n p2">€557.9K</td><td class="n d2">€251.1K</td><td class="n">€1.12M</td><td class="n">16.4%</td></tr>
+        <tr><td>United States</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">€286.2K</td><td class="n p1">€408.2K</td><td class="n d1">€218.1K</td><td class="n">€912.5K</td><td class="n">13.4%</td></tr>
+        <tr><td>Netherlands</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">€146.7K</td><td class="n p2">€363.4K</td><td class="n d2">€136.9K</td><td class="n">€647.0K</td><td class="n">9.5%</td></tr>
+        <tr><td>Portugal</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">€136.7K</td><td class="n p3">€263.8K</td><td class="n d2">€100.5K</td><td class="n">€501.0K</td><td class="n">7.3%</td></tr>
+        <tr><td>Germany</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">€125.8K</td><td class="n p1">€179.8K</td><td class="n d2">€86.1K</td><td class="n">€391.8K</td><td class="n">5.8%</td></tr>
+        <tr><td>France</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">€76.4K</td><td class="n p1">€112.9K</td><td class="n d1">€71.5K</td><td class="n">€260.8K</td><td class="n">3.8%</td></tr>
+        <tr><td>Mexico</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">€95.4K</td><td class="n p2">€115.9K</td><td class="n d3">€49.5K</td><td class="n">€260.7K</td><td class="n">3.8%</td></tr>
+        <tr><td>Other <span class="sub-lbl">94 more</span></td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">€1.51M</td><td class="n">22.1%</td></tr>
+        <tr class="tot"><td>Total</td><td></td><td></td><td></td><td></td><td></td><td></td><td class="n">€6.81M</td><td class="n">100%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="group"><span>Customers</span></div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="sec-n">04</span><h2>New vs existing customers</h2></div>
+    <div class="sec-sub">New vs returning counts, retention, CAC and blended ROAS by month.</div>
+    <table class="tbl">
+      <thead><tr>
+        <th>Month</th><th>New</th><th>Returning</th><th>Total</th><th>Ret.</th><th>Revenue</th><th>AOV</th><th>Spend</th><th>ROAS</th><th>ROAS·new<span class="est"> est</span></th><th>CAC</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>Jan 26</td><td class="n">11,146</td><td class="n">8,964</td><td class="n">20,110</td><td class="n p1">44.6%</td><td class="n">€2.54M</td><td class="n">€118</td><td class="n">€177K</td><td class="n d2">12.22×</td><td class="n d2">~7.41×</td><td class="n d2">€16</td></tr>
+        <tr><td>Feb 26</td><td class="n">6,703</td><td class="n">4,228</td><td class="n">10,931</td><td class="n">38.7%</td><td class="n">€1.47M</td><td class="n">€130</td><td class="n">€99K</td><td class="n d2">12.53×</td><td class="n">~8.77×</td><td class="n d2">€15</td></tr>
+        <tr><td>Mar 26</td><td class="n">9,045</td><td class="n">5,158</td><td class="n">14,203</td><td class="n d2">36.3%</td><td class="n">€1.84M</td><td class="n">€123</td><td class="n">€118K</td><td class="n d1">13.53×</td><td class="n p1">~9.46×</td><td class="n">€13</td></tr>
+        <tr><td>Apr 26</td><td class="n">9,907</td><td class="n">5,992</td><td class="n">15,899</td><td class="n d1">37.7%</td><td class="n">€2.16M</td><td class="n">€129</td><td class="n">€141K</td><td class="n">14.17×</td><td class="n">~9.07×</td><td class="n d1">€14</td></tr>
+        <tr><td>May 26</td><td class="n">14,990</td><td class="n">12,724</td><td class="n">27,714</td><td class="n p2">45.9%</td><td class="n">€3.53M</td><td class="n">€119</td><td class="n">€152K</td><td class="n p3">23.29×</td><td class="n p3">~11.74×</td><td class="n p3">€10</td></tr>
+        <tr><td>Jun 26</td><td class="n">14,965</td><td class="n">13,279</td><td class="n">28,244</td><td class="n p3">47.0%</td><td class="n">€3.17M</td><td class="n">€102</td><td class="n">€198K</td><td class="n p1">15.98×</td><td class="n d1">~7.69×</td><td class="n">€13</td></tr>
+      </tbody>
+    </table>
+    <div class="cap">ROAS·new is an estimate — new customers × AOV ÷ ad spend (uses blended AOV, so it runs slightly high).</div>
+  </div>
+
+  <div class="group"><span>Advertising</span></div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="sec-n">05</span><h2>Ad spend by placement</h2></div>
+    <div class="sec-sub">Where the budget ran across Meta — Feed, Reels, Stories.</div>
+    <table class="tbl">
+      <thead><tr>
+        <th>Placement</th><th>Cost</th><th>Reach</th><th>Freq.</th><th>Clicks</th><th>CTR</th><th>CPM</th><th>Share</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>Unknown</td><td class="n">€154,554</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">0</td><td class="n d3">0.00%</td><td class="n">€4</td><td class="n">59%</td></tr>
+        <tr><td>IG · Instagram Stories</td><td class="n">€47,388</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">146,236</td><td class="n d1">0.98%</td><td class="n p2">€3</td><td class="n">18%</td></tr>
+        <tr><td>IG · Feed</td><td class="n">€38,263</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">91,806</td><td class="n">1.12%</td><td class="n d2">€5</td><td class="n">15%</td></tr>
+        <tr><td>IG · Instagram Reels</td><td class="n">€14,487</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">67,260</td><td class="n p2">1.66%</td><td class="n">€4</td><td class="n">6%</td></tr>
+        <tr><td>FB · Feed</td><td class="n">€6,773</td><td class="n muted">—</td><td class="n muted">—</td><td class="n">36,352</td><td class="n p3">1.88%</td><td class="n">€4</td><td class="n">3%</td></tr>
+      </tbody>
+    </table>
+    <div class="cap">Reach and frequency populate after the next sync — the pull now captures reach; existing history shows “—” until re-synced.</div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="sec-n">03</span><h2>ROAS by country</h2></div>
+    <div class="sec-sub">Meta country spend ÷ commerce country revenue. ROAS is shaded against the section’s blended 12.4× — greener countries are the scaling opportunity, redder ones are leaking.</div>
+    <table class="tbl">
+      <thead><tr><th>Country</th><th>Meta spend</th><th>Share of spend</th><th>ROAS</th></tr></thead>
+      <tbody>
+        <tr><td>Portugal</td><td class="n">€15,092</td><td class="n">9.9%</td><td class="n p3">18.4×</td></tr>
+        <tr><td>Spain</td><td class="n">€32,603</td><td class="n">21.4%</td><td class="n p2">15.2×</td></tr>
+        <tr><td>Italy</td><td class="n">€27,387</td><td class="n">18.0%</td><td class="n p2">14.1×</td></tr>
+        <tr><td>France</td><td class="n">€12,220</td><td class="n">8.0%</td><td class="n p1">13.0×</td></tr>
+        <tr><td>Netherlands</td><td class="n">€17,899</td><td class="n">11.8%</td><td class="n">11.8×</td></tr>
+        <tr><td>United States</td><td class="n">€24,869</td><td class="n">16.3%</td><td class="n d2">9.3×</td></tr>
+        <tr><td>Germany</td><td class="n">€13,071</td><td class="n">8.6%</td><td class="n d3">7.1×</td></tr>
+        <tr><td>Mexico</td><td class="n">€8,967</td><td class="n">5.9%</td><td class="n d3">6.2×</td></tr>
+        <tr class="tot"><td>Blended</td><td class="n">€152,108</td><td class="n">100%</td><td class="n">12.4×</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="foot">
+    <div>
+      <div class="foot-brand">Roasdriven</div>
+      <div class="foot-powered">Powered by novasolution.ae</div>
+    </div>
+    <div class="foot-note">Nude Project · Monthly report · June 2026<br/>Generated 9 Jul 2026</div>
+  </div>
+
+</div>
+</body>
+</html>

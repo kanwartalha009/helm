@@ -104,15 +104,28 @@ export function MonthlyReportDocument({
 
       {/* Sections in the report's canonical order (mockup 1–11). Each renders a
           heat table when ready, or an honest status ribbon otherwise. */}
-      <SectionBlock num="01" title="Market revenue — month over month" sub="Revenue grouped into markets/tiers." section={sections.market} currency={currency} />
-      <SectionBlock num="02" title="Country revenue — month over month" sub="Revenue by country, rolled to calendar months." section={sections.countryRevenue} currency={currency} />
-      <SectionBlock num="03" title="ROAS by country — month over month" sub="Meta country spend ÷ commerce country revenue." section={sections.roasByCountry} currency={currency} />
-      <SectionBlock num="04" title="New vs existing customers" sub="New vs returning counts, retention, CAC and blended ROAS by month." section={sections.newVsExisting} currency={currency} />
-      <SectionBlock num="05" title="Ad spend by placement" sub="Where the budget ran — Feed, Reels, Stories." section={sections.placement} currency={currency} />
-      <SectionBlock num="06" title="Ad spend by gender" sub="Audience concentration by gender." section={sections.gender} currency={currency} />
-      <SectionBlock num="07" title="Best categories — month over month" sub="Revenue by product category, month over month." section={sections.categories} currency={currency} />
-      <SectionBlock num="08" title="Best sellers — month over month" sub="Top products by revenue, with stock context." section={sections.bestSellers} currency={currency} />
-      <SectionBlock num="09" title="Ad spend by landing page × best sellers" sub="Is the ad budget behind the winners?" section={sections.landingSellers} currency={currency} />
+      <div className="mrt-legend">
+        <span className="sw mrt-g2"></span><b>Ahead</b>
+        <span className="sw mrt-r2"></span><b>Behind</b>
+        <span>Outcome columns are shaded by performance; cost metrics (CAC, CPM) are shaded so lower is greener. Counts, spend and share stay unshaded.</span>
+      </div>
+
+      <div className="mrt-group"><span>Commerce</span></div>
+      <SectionBlock num="01" title="Market revenue" sub="Revenue grouped into markets and tiers, month over month." section={sections.market} currency={currency} />
+      <SectionBlock num="02" title="Country revenue" sub="Revenue by country, rolled to calendar months." section={sections.countryRevenue} currency={currency} />
+      <SectionBlock num="03" title="Best categories" sub="Revenue by product category, month over month." section={sections.categories} currency={currency} />
+      <SectionBlock num="04" title="Best sellers" sub="Top products by revenue, with stock context." section={sections.bestSellers} currency={currency} />
+
+      <div className="mrt-group"><span>Advertising</span></div>
+      <SectionBlock num="05" title="ROAS by country" sub="Meta country spend ÷ commerce country revenue, shaded against blended ROAS." section={sections.roasByCountry} currency={currency} />
+      <SectionBlock num="06" title="Ad spend by placement" sub="Where the budget ran — Feed, Reels, Stories." section={sections.placement} currency={currency} />
+      <SectionBlock num="07" title="Ad spend by gender" sub="Audience concentration by gender." section={sections.gender} currency={currency} />
+      <SectionBlock num="08" title="Ad spend by landing page × best sellers" sub="Is the ad budget behind the winners?" section={sections.landingSellers} currency={currency} />
+
+      <div className="mrt-group"><span>Customers</span></div>
+      <SectionBlock num="09" title="New vs existing customers" sub="New vs returning counts, retention, CAC and blended ROAS by month." section={sections.newVsExisting} currency={currency} />
+
+      <div className="mrt-group"><span>Web</span></div>
       <SectionBlock num="10" title="Web funnel by country" sub="Sessions → cart → checkout → purchase." section={sections.funnelCountry} currency={currency} />
       <SectionBlock num="11" title="Web funnel by landing path" sub="Which entry pages convert." section={sections.funnelLanding} currency={currency} />
 
@@ -259,6 +272,28 @@ function roasHeat(v: number | null, blended: number | null): string {
   return '';
 }
 
+// Grade an outcome value against the rest of its column, min–max normalised, and
+// return a heat class. `dir` flips it for cost metrics (CAC / CPM / CPC) where
+// LOWER is better — so a cheap CAC greens and an expensive one reds, never the
+// reverse. Only graded when the column has ≥3 comparable values and real spread.
+function gradeCol(v: number | null, values: (number | null)[], dir: 'high' | 'low' = 'high'): string {
+  if (v == null) return '';
+  const xs = values.filter((x): x is number => x != null && Number.isFinite(x));
+  if (xs.length < 3) return '';
+  const min = Math.min(...xs);
+  const max = Math.max(...xs);
+  if (max === min) return '';
+  let t = (v - min) / (max - min); // 0 = lowest value, 1 = highest value
+  if (dir === 'low') t = 1 - t; // invert: lowest value is best
+  if (t >= 0.82) return 'mrt-g3';
+  if (t >= 0.60) return 'mrt-g2';
+  if (t > 0.52) return 'mrt-g1';
+  if (t <= 0.18) return 'mrt-r3';
+  if (t <= 0.40) return 'mrt-r2';
+  if (t < 0.48) return 'mrt-r1';
+  return '';
+}
+
 // Single-month ad-spend-by-gender table (cost / efficiency / share).
 function GenderTable({ rows, currency }: { rows: MonthlyGenderRow[]; currency: string }) {
   const money = (v: number | null) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
@@ -283,9 +318,9 @@ function GenderTable({ rows, currency }: { rows: MonthlyGenderRow[]; currency: s
                 <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
                 <td className="r">{money(r.cost)}</td>
                 <td className="r">{r.clicks.toLocaleString()}</td>
-                <td className="r">{money(r.cpc)}</td>
-                <td className="r">{r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`}</td>
-                <td className="r">{money(r.cpm)}</td>
+                <td className={`r ${gradeCol(r.cpc, rows.map((x) => x.cpc), 'low')}`}>{money(r.cpc)}</td>
+                <td className={`r ${gradeCol(r.ctr, rows.map((x) => x.ctr), 'high')}`}>{r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`}</td>
+                <td className={`r ${gradeCol(r.cpm, rows.map((x) => x.cpm), 'low')}`}>{money(r.cpm)}</td>
                 <td className="r">{r.share == null ? '—' : `${(r.share * 100).toFixed(0)}%`}</td>
               </tr>
             ))}
@@ -320,7 +355,7 @@ function LandingTable({ rows, currency }: { rows: MonthlyLandingRow[]; currency:
               <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
               <td className="r">{money(r.spend)}</td>
               <td className="r">{money(r.revenue)}</td>
-              <td className="r">{r.roas == null ? '—' : `${r.roas.toFixed(1)}×`}</td>
+              <td className={`r ${gradeCol(r.roas, rows.map((x) => x.roas), 'high')}`}>{r.roas == null ? '—' : `${r.roas.toFixed(1)}×`}</td>
               <td className="r">{r.units.toLocaleString()}</td>
               <td className={`r ${r.stock > 0 && r.stock <= 20 ? 'mrt-r1' : ''}`}>{r.stock.toLocaleString()}</td>
               <td>{r.read}</td>
@@ -361,9 +396,9 @@ function PlacementTable({ rows, currency }: { rows: MonthlyPlacementRow[]; curre
                 <td className="r">{r.reach == null ? '—' : r.reach.toLocaleString()}</td>
                 <td className="r">{r.freq == null ? '—' : r.freq.toFixed(2)}</td>
                 <td className="r">{r.clicks.toLocaleString()}</td>
-                <td className="r">{money(r.cpc)}</td>
-                <td className="r">{r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`}</td>
-                <td className="r">{money(r.cpm)}</td>
+                <td className={`r ${gradeCol(r.cpc, rows.map((x) => x.cpc), 'low')}`}>{money(r.cpc)}</td>
+                <td className={`r ${gradeCol(r.ctr, rows.map((x) => x.ctr), 'high')}`}>{r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`}</td>
+                <td className={`r ${gradeCol(r.cpm, rows.map((x) => x.cpm), 'low')}`}>{money(r.cpm)}</td>
                 <td className="r">{r.share == null ? '—' : `${(r.share * 100).toFixed(0)}%`}</td>
               </tr>
             ))}
@@ -399,7 +434,7 @@ function FunnelTable({ rows }: { rows: MonthlyFunnelRow[] }) {
               <td className="r">{n(r.cart)}</td>
               <td className="r">{n(r.checkout)}</td>
               <td className="r">{n(r.purchase)}</td>
-              <td className="r">{r.cvr == null ? '—' : `${r.cvr.toFixed(2)}%`}</td>
+              <td className={`r ${gradeCol(r.cvr, rows.map((x) => x.cvr), 'high')}`}>{r.cvr == null ? '—' : `${r.cvr.toFixed(2)}%`}</td>
             </tr>
           ))}
         </tbody>
@@ -439,13 +474,13 @@ function NewVsExistingTable({ rows, currency }: { rows: MonthlyCustomerRow[]; cu
               <td className="r">{n(r.new)}</td>
               <td className="r">{n(r.returning)}</td>
               <td className="r">{n(r.total)}</td>
-              <td className="r">{r.retPct == null ? '—' : `${r.retPct.toFixed(1)}%`}</td>
+              <td className={`r ${gradeCol(r.retPct, rows.map((x) => x.retPct), 'high')}`}>{r.retPct == null ? '—' : `${r.retPct.toFixed(1)}%`}</td>
               <td className="r">{money(r.revenue)}</td>
               <td className="r">{money(r.aov)}</td>
               <td className="r">{money(r.spend)}</td>
-              <td className="r">{r.roas == null ? '—' : `${r.roas.toFixed(2)}×`}</td>
-              <td className="r">{r.roasNew == null ? '—' : `~${r.roasNew.toFixed(2)}×`}</td>
-              <td className="r">{money(r.cac)}</td>
+              <td className={`r ${gradeCol(r.roas, rows.map((x) => x.roas), 'high')}`}>{r.roas == null ? '—' : `${r.roas.toFixed(2)}×`}</td>
+              <td className={`r ${gradeCol(r.roasNew, rows.map((x) => x.roasNew), 'high')}`}>{r.roasNew == null ? '—' : `~${r.roasNew.toFixed(2)}×`}</td>
+              <td className={`r ${gradeCol(r.cac, rows.map((x) => x.cac), 'low')}`}>{money(r.cac)}</td>
             </tr>
           ))}
         </tbody>
@@ -516,16 +551,24 @@ function heatClass(cur: number, prev: number | null): string {
 }
 
 const MONTHLY_CSS = `
-.rpt .mrt-kpis-4{grid-template-columns:repeat(4,1fr)}
+.rpt .mrt-kpis-4{grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:22px}
+.rpt .mrt-kpis-4 .rpt-kpi{border:none;border-radius:0}
+.rpt .mrt-kpis-4 .rpt-kpi + .rpt-kpi{border-left:1px solid var(--line)}
 .rpt .mrt-kpis-4 .rpt-kpi-v{font-size:30px}
+.rpt .mrt-group{display:flex;align-items:center;gap:14px;margin:52px 0 26px}
+.rpt .mrt-group span{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);white-space:nowrap}
+.rpt .mrt-group::after{content:'';flex:1;height:1px;background:var(--line)}
+.rpt .mrt-legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--ink-3);margin:16px 0 30px}
+.rpt .mrt-legend .sw{width:20px;height:11px;border-radius:3px;display:inline-block}
+.rpt .mrt-legend b{color:var(--ink-2);font-weight:600}
 .rpt .mrt-targets{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:-8px 0 20px;padding:10px 16px;background:var(--paper);border:1px dashed var(--line-2);border-radius:10px;font-size:12px}
 .rpt .mrt-targets-l{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
 .rpt .mrt-targets label{display:inline-flex;align-items:center;gap:7px;color:var(--ink-2)}
 .rpt .mrt-targets input{width:66px;padding:4px 8px;border:1px solid var(--line-2);border-radius:6px;font-family:var(--mono);font-size:12px;background:var(--paper);color:var(--ink)}
 .rpt .mrt-tbl td.name{min-width:180px}
 .rpt .mrt-tbl td.r{font-size:11px}
-.rpt .mrt-g1{background:#EAF6EE} .rpt .mrt-g2{background:#CFEBD8;color:#14532D} .rpt .mrt-g3{background:#A7DCB8;color:#14532D;font-weight:600}
-.rpt .mrt-r1{background:#FCECEC} .rpt .mrt-r2{background:#F7D3D3;color:#7F1D1D} .rpt .mrt-r3{background:#EFB4B4;color:#7F1D1D;font-weight:600}
+.rpt .mrt-g1{background:#f2f7f3} .rpt .mrt-g2{background:#e3efe7;color:#1c6b45} .rpt .mrt-g3{background:#d2e7da;color:#1c6b45;font-weight:600}
+.rpt .mrt-r1{background:#fbf3f2} .rpt .mrt-r2{background:#f4e4e1;color:#a83a31} .rpt .mrt-r3{background:#eccfc9;color:#a83a31;font-weight:600}
 .rpt .mrt-ribbon{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 18px}
 .rpt .mrt-ribbon.blue{border-left:3px solid var(--blue)} .rpt .mrt-ribbon.amber{border-left:3px solid var(--amber)} .rpt .mrt-ribbon.grey{border-left:3px solid var(--ink-4)}
 .rpt .mrt-ribbon-tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}

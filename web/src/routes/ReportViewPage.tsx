@@ -36,6 +36,12 @@ export function ReportViewPage() {
 
   const stale = !!data?.freshness && !data.freshness.upToDate;
 
+  // The monthly report is inherently the last complete calendar month with MoM +
+  // YoY built in — its build() ignores period and compare, so those selectors are
+  // dead controls here. Hide them for monthly; keep them for overall-performance.
+  const isMonthly = type === 'monthly' || data?.reportType === 'monthly';
+  const monthLabel = data?.reportType === 'monthly' ? data.month.label : null;
+
   const onShare = () => {
     createShare.mutate(
       { filters, content: { commentary, targets } },
@@ -66,23 +72,28 @@ export function ReportViewPage() {
   return (
     <AppLayout title="Report">
       <div className="filter-bar mb-12" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <Segmented
-          options={[
-            { value: 'last7', label: 'Last 7 days' },
-            { value: 'last30', label: 'Last 30 days' },
-            { value: 'mtd', label: 'Month to date' },
-          ]}
-          value={period}
-          onChange={(v) => setPeriod(v as ReportFiltersInput['period'])}
-        />
-        <Segmented
-          options={[
-            { value: 'previous', label: 'vs previous' },
-            { value: 'last_year', label: 'vs last year' },
-          ]}
-          value={compare}
-          onChange={(v) => setCompare(v as ReportFiltersInput['compare'])}
-        />
+        {!isMonthly && (
+          <>
+            <Segmented
+              options={[
+                { value: 'last7', label: 'Last 7 days' },
+                { value: 'last30', label: 'Last 30 days' },
+                { value: 'mtd', label: 'Month to date' },
+              ]}
+              value={period}
+              onChange={(v) => setPeriod(v as ReportFiltersInput['period'])}
+            />
+            <Segmented
+              options={[
+                { value: 'previous', label: 'vs previous' },
+                { value: 'last_year', label: 'vs last year' },
+              ]}
+              value={compare}
+              onChange={(v) => setCompare(v as ReportFiltersInput['compare'])}
+            />
+          </>
+        )}
+        {isMonthly && monthLabel && <span className="muted text-sm">Last complete month · {monthLabel}</span>}
         <span style={{ flex: 1 }} />
         <Button variant="secondary" onClick={() => window.print()} disabled={!data || (stale && !showAnyway)}>
           Export PDF
