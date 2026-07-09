@@ -17,6 +17,11 @@ class ShopifyFunnelDaily extends Model
 {
     protected $table = 'shopify_funnel_daily';
 
+    // Freshness is tracked with `pulled_at`; the table has no created_at/updated_at
+    // (same shape as meta_breakdown_daily). Without this, Eloquent's upsert() injects
+    // those columns and MySQL rejects the insert (SQLSTATE 42S22).
+    public $timestamps = false;
+
     protected $guarded = [];
 
     protected $casts = [
