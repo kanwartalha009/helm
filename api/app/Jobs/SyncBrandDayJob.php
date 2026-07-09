@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Models\Brand;
+use App\Models\CommerceDailyMetric;
 use App\Models\DailyMetric;
 use App\Models\PlatformConnection;
 use App\Models\ShopifyFunnelDaily;
@@ -169,6 +170,14 @@ class SyncBrandDayJob implements ShouldQueue
             // best-effort — a funnel hiccup never fails the day's main sync.
             if ($this->platformConnection->platform === 'shopify') {
                 $this->syncShopifyFunnel($revenue, $this->platformConnection, $this->date);
+
+                // Shopify commerce by country / product / category into
+                // commerce_daily_metrics for the monthly report's §1/§2/§7/§8 and
+                // the overall-performance breakdowns. Without this the granular
+                // tables only ever hold whatever shopify:backfill-commerce last
+                // wrote, so months drift stale/€0; this keeps them fresh forward.
+                // Best-effort + self-guarded, like the funnel above.
+                $this->syncShopifyCommerce($revenue, $fx, $this->platformConnection, $this->date);
             }
         } catch (Throwable $e) {
             $log->update([
@@ -252,6 +261,73 @@ class SyncBrandDayJob implements ShouldQueue
                     $chunk,
                     ['brand_id', 'date', 'dimension', 'segment_key'],
                     ['segment_label', 'sessions', 'cart_additions', 'reached_checkout', 'completed_checkout', 'is_complete', 'pulled_at'],
+                );
+            }
+        }
+    }
+
+    /**
+     * Pull one day of Shopify commerce (revenue / orders / units / refunds) split
+     * by country, product and category into commerce_daily_metrics — the granular
+     * tables behind the monthly report's §1/§2/§7/§8 and the overall-performance
+     * breakdowns. Native revenue + the day's stored fx snapshot (spec rule 7), so
+     * reports show USD without converting at read time. Best-effort: each
+     * dimension self-guards so a ShopifyQL hiccup never touches the day's main
+     * sync (already succeeded). History is filled by shopify:backfill-commerce;
+     * this keeps it fresh going forward. Upsert key + update list match the
+     * backfill exactly, so the two paths are idempotent against each other.
+     */
+    private function syncShopifyCommerce(RevenueFetcher $revenue, FxService $fx, PlatformConnection $conn, CarbonImmutable $date): void
+    {
+        $day      = $date->toDateString();
+        $currency = (string) ($this->brand->base_currency ?: 'USD');
+        $fxRate   = $fx->cachedToUsd($currency, $date);
+
+        foreach (['country' => 'billing_country', 'product' => 'product_title', 'category' => 'product_type'] as $type => $dim) {
+            try {
+                $sales = $revenue->salesByDimensionRange($conn, $dim, $day, $day);
+            } catch (Throwable $e) {
+                Log::warning('sync.shopify_commerce.failed', [
+                    'brand_id'  => $conn->brand_id,
+                    'dimension' => $type,
+                    'date'      => $day,
+                    'error'     => $e->getMessage(),
+                ]);
+                continue;
+            }
+            if ($sales === []) {
+                continue;
+            }
+
+            $records = [];
+            foreach ($sales as $r) {
+                $key = trim((string) ($r['key'] ?? ''));
+                if ($key === '') {
+                    continue;
+                }
+                $records[] = [
+                    'brand_id'        => (int) $conn->brand_id,
+                    'date'            => $day,
+                    'dimension_type'  => $type,
+                    'dimension_key'   => mb_substr($key, 0, 191),
+                    'dimension_label' => mb_substr((string) ($r['label'] ?? $key), 0, 191),
+                    'orders'          => $r['orders'] ?? null,
+                    'units'           => $r['units'] ?? null,
+                    'net_sales'       => $r['net'] ?? null,
+                    'total_sales'     => $r['total'] ?? null,
+                    'refunds_amount'  => $r['refunds'] ?? null,
+                    'currency'        => $currency,
+                    'fx_rate_to_usd'  => $fxRate,
+                    'is_complete'     => true,
+                    'pulled_at'       => now(),
+                ];
+            }
+
+            foreach (array_chunk($records, 500) as $chunk) {
+                CommerceDailyMetric::upsert(
+                    $chunk,
+                    ['brand_id', 'date', 'dimension_type', 'dimension_key'],
+                    ['dimension_label', 'orders', 'units', 'net_sales', 'total_sales', 'refunds_amount', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                 );
             }
         }

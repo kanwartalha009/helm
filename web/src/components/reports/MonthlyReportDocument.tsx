@@ -74,7 +74,7 @@ export function MonthlyReportDocument({
           <Kpi label="Blended ROAS" value={formatRoas(overall.blendedRoas.value)} delta={<RatioDelta k={overall.blendedRoas} />} note={targetNote(overall.blendedRoas.value, tBlended)} />
           <Kpi label="Revenue" value={money(overall.revenue.value)} delta={<PctDelta k={overall.revenue} />} />
           <Kpi label="Ad spend" value={money(overall.adSpend.value)} delta={<PctDelta k={overall.adSpend} goodUp={false} />} />
-          <Kpi label="ROAS · new customer" value="—" note={tNewCust != null ? `Target ${tNewCust} · pending` : 'pending customer-type probe'} />
+          <Kpi label="ROAS · new customer" value="—" note={tNewCust != null ? `Target ${tNewCust} · not available` : 'Shopify has no new/returning revenue split'} />
         </div>
         {editable && (
           <div className="mrt-targets">
@@ -169,9 +169,10 @@ function MoMTable({ data, currency }: { data: MonthlySeriesData; currency: strin
             <tr key={r.key}>
               <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
               {months.map((m, i) => {
-                const v = r.byMonth[m] ?? 0;
-                const prev = i > 0 ? (r.byMonth[months[i - 1]] ?? 0) : null;
-                return <td className={`r ${heatClass(v, prev)}`} key={m}>{cell(v)}</td>;
+                const v = r.byMonth[m] ?? null;
+                const prev = i > 0 ? (r.byMonth[months[i - 1]] ?? null) : null;
+                const heat = v == null ? '' : heatClass(v, prev);
+                return <td className={`r ${heat}`} key={m}>{cell(v)}</td>;
               })}
               <td className="r"><b>{cell(r.total)}</b></td>
               <td className="r">{r.share == null ? '—' : `${(r.share * 100).toFixed(1)}%`}</td>

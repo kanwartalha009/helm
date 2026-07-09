@@ -169,7 +169,7 @@ export interface OverallPerformanceReportData {
 export interface MonthlySeriesRow {
   key: string;
   label: string;
-  byMonth: Record<string, number>; // Y-m => revenue
+  byMonth: Record<string, number | null>; // Y-m => revenue (null = month not synced → "—")
   total: number;
   yoyTotal: number;
   deltaYoY: number | null;

@@ -35,6 +35,7 @@ final class MonthlySeries
         int $limit = 8,
         ?array $groupMap = null,
         array $groupLabels = [],
+        ?callable $keyMap = null,
     ): ?array {
         if ($months === []) {
             return null;
@@ -44,9 +45,21 @@ final class MonthlySeries
         // earlier so each segment can carry a YoY figure in a single pull.
         $first = CarbonImmutable::parse($months[0] . '-01');
         $last  = CarbonImmutable::parse(end($months) . '-01')->endOfMonth();
-        $rows  = $this->aggregate($brandId, $dimensionType, $first->subYear()->toDateString(), $last->toDateString(), $usd);
+        $rows  = $this->aggregate($brandId, $dimensionType, $first->subYear()->toDateString(), $last->toDateString(), $usd, $keyMap);
         if ($rows === []) {
             return null;
+        }
+
+        // Which trailing months the brand actually has commerce rows for. A month
+        // absent from EVERY segment wasn't synced (backfill hasn't reached it) — so
+        // it renders as "—", never €0 (spec rule 9: missing ≠ zero). A month that
+        // IS synced but where a given segment has no row is a real zero for that
+        // segment and stays 0.
+        $syncedMonths = [];
+        foreach ($rows as $r) {
+            foreach (array_keys($r['byMonth']) as $ym) {
+                $syncedMonths[(string) $ym] = true;
+            }
         }
 
         // Optional fold: remap each key into a group (e.g. country → market/tier)
@@ -64,6 +77,10 @@ final class MonthlySeries
             $byMonth = [];
             $curTotal = 0.0;
             foreach ($months as $m) {
+                if (! isset($syncedMonths[$m])) {
+                    $byMonth[$m] = null; // unsynced month → "—"
+                    continue;
+                }
                 $v = round((float) ($r['byMonth'][$m] ?? 0), 2);
                 $byMonth[$m] = $v;
                 $curTotal   += $v;
@@ -126,9 +143,9 @@ final class MonthlySeries
      *
      * @return array<string, array{label: string, byMonth: array<string, float>, ordersTotal: int}>
      */
-    public function rawByMonth(int $brandId, string $dimensionType, string $start, string $end, bool $usd): array
+    public function rawByMonth(int $brandId, string $dimensionType, string $start, string $end, bool $usd, ?callable $keyMap = null): array
     {
-        return $this->aggregate($brandId, $dimensionType, $start, $end, $usd);
+        return $this->aggregate($brandId, $dimensionType, $start, $end, $usd, $keyMap);
     }
 
     /**
@@ -137,7 +154,7 @@ final class MonthlySeries
      *
      * @return array<string, array{label: string, byMonth: array<string, float>, ordersTotal: int}>
      */
-    private function aggregate(int $brandId, string $dimensionType, string $start, string $end, bool $usd): array
+    private function aggregate(int $brandId, string $dimensionType, string $start, string $end, bool $usd, ?callable $keyMap = null): array
     {
         $rev = $usd ? 'total_sales * COALESCE(fx_rate_to_usd, 1)' : 'total_sales';
 
@@ -162,6 +179,39 @@ final class MonthlySeries
             $out[$key] ??= ['label' => (string) ($r->label ?? $key), 'byMonth' => [], 'ordersTotal' => 0];
             $out[$key]['byMonth'][(string) $r->ym] = (float) $r->revenue;
             $out[$key]['ordersTotal']             += (int) $r->orders;
+        }
+
+        // Optional key canonicalisation (e.g. Shopify country NAME → ISO-2), so
+        // rows fold onto the same keys Meta spend and the region map use. Unmapped
+        // keys keep their original form (they still show; they just won't join).
+        if ($keyMap !== null) {
+            $out = $this->remapKeys($out, $keyMap);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Fold aggregate rows onto canonical keys via a callable (raw key → new key,
+     * or null to leave it untouched). Rows landing on the same key merge (byMonth
+     * summed, orders summed, first label kept). Used to reconcile Shopify country
+     * NAMES to the ISO-2 codes Meta + config/country_regions use.
+     *
+     * @param array<string, array{label: string, byMonth: array<string, float>, ordersTotal: int}> $rows
+     * @return array<string, array{label: string, byMonth: array<string, float>, ordersTotal: int}>
+     */
+    private function remapKeys(array $rows, callable $keyMap): array
+    {
+        $out = [];
+        foreach ($rows as $key => $r) {
+            $canonical = (string) ($keyMap((string) $key) ?? $key);
+            if (! isset($out[$canonical])) {
+                $out[$canonical] = ['label' => $r['label'], 'byMonth' => [], 'ordersTotal' => 0];
+            }
+            foreach ($r['byMonth'] as $ym => $v) {
+                $out[$canonical]['byMonth'][$ym] = ($out[$canonical]['byMonth'][$ym] ?? 0) + $v;
+            }
+            $out[$canonical]['ordersTotal'] += $r['ordersTotal'];
         }
 
         return $out;

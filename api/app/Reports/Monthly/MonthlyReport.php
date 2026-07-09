@@ -16,6 +16,7 @@ use App\Platforms\Shopify\RevenueFetcher;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Contracts\ReportType;
 use App\Reports\Support\MonthlySeries;
+use App\Support\CountryCodes;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -114,8 +115,8 @@ final class MonthlyReport implements ReportType
                 'blendedRoas'     => $this->kpi('ratio', $cur['roas'], $mom['roas']),
                 'revenue'         => $this->kpi('money', $cur['revenue'], $mom['revenue']),
                 'adSpend'         => $this->kpi('money', $cur['totalSpend'], $mom['totalSpend']),
-                'newCustomerRoas' => null, // pending customer-type probe
-                'acquisitionYoY'  => null, // pending customer-type probe
+                'newCustomerRoas' => null, // unavailable: Shopify sales has no new/returning revenue split
+                'acquisitionYoY'  => null, // unavailable: needs same-month-last-year new-customer counts
             ],
             // Each section carries a readiness status so the SPA renders the whole
             // report structure, lighting up sections as their data lands.
@@ -178,7 +179,9 @@ final class MonthlyReport implements ReportType
         }
 
         try {
-            $data = $this->series->forDimension($brandId, 'country', $months, $usd, 8, $map, $labels);
+            // Fold Shopify country NAMES → ISO-2 first, so the code-keyed region
+            // map matches instead of dumping everything into "Other".
+            $data = $this->series->forDimension($brandId, 'country', $months, $usd, 8, $map, $labels, CountryCodes::toIso2(...));
         } catch (Throwable $e) {
             Log::warning('monthly_report.section_failed', ['dimension' => 'market', 'error' => $e->getMessage()]);
 
@@ -272,7 +275,9 @@ final class MonthlyReport implements ReportType
         $end   = CarbonImmutable::parse(end($months) . '-01')->endOfMonth()->toDateString();
 
         try {
-            $rev   = $this->series->rawByMonth($brandId, 'country', $start, $end, $usd);
+            // Commerce revenue keyed by Shopify country NAME → normalise to ISO-2
+            // so it joins Meta spend (which is keyed by ISO-2 country code).
+            $rev   = $this->series->rawByMonth($brandId, 'country', $start, $end, $usd, CountryCodes::toIso2(...));
             $spend = $this->metaSpendByMonth($brandId, 'country', $start, $end, $usd);
         } catch (Throwable $e) {
             Log::warning('monthly_report.section_failed', ['dimension' => 'roasByCountry', 'error' => $e->getMessage()]);
@@ -303,7 +308,8 @@ final class MonthlyReport implements ReportType
             $totRevAll   += $tRev;
             $rows[] = [
                 'key'     => (string) $key,
-                'label'   => (string) $s['label'],
+                // Prefer the commerce country name ("Spain") over Meta's bare code.
+                'label'   => (string) ($rev[$key]['label'] ?? $s['label']),
                 'byMonth' => $byMonth,
                 'spend'   => round($tSpend, 2),
                 'roas'    => $tSpend > 0 ? round($tRev / $tSpend, 2) : null,
