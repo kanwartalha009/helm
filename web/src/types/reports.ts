@@ -239,6 +239,33 @@ export interface MonthlyPlacementRow {
   share: number | null;
 }
 
+// New vs existing customers, one row per trailing month. Revenue is NOT split by
+// customer type (no customer_type dimension on ShopifyQL sales) — counts only,
+// with blended revenue/spend/ROAS alongside. CAC = spend ÷ new customers.
+export interface MonthlyCustomerRow {
+  month: string;
+  new: number;
+  returning: number;
+  total: number;
+  retPct: number | null; // returning ÷ total, %
+  revenue: number;
+  orders: number;
+  aov: number | null;
+  spend: number;
+  roas: number | null;
+  cac: number | null; // ad spend ÷ new customers
+}
+
+// Web funnel row — sessions → cart → checkout → purchase, by country / landing.
+export interface MonthlyFunnelRow {
+  label: string;
+  sessions: number;
+  cart: number;
+  checkout: number;
+  purchase: number;
+  cvr: number | null; // purchase ÷ sessions %
+}
+
 export interface MonthlyReportSection {
   status: MonthlySectionStatus;
   data?: MonthlySeriesData;          // month-over-month heat table (country/category/product/market)
@@ -246,6 +273,8 @@ export interface MonthlyReportSection {
   roas?: MonthlyRoasData;            // month-over-month ROAS heat table (roas by country)
   products?: MonthlyLandingRow[];    // landing × best sellers (spend vs revenue + stock)
   placement?: MonthlyPlacementRow[]; // ad spend by placement
+  funnel?: MonthlyFunnelRow[];       // web funnel by country / landing path
+  customers?: MonthlyCustomerRow[];  // new vs existing customers, month over month
   note?: string;
 }
 

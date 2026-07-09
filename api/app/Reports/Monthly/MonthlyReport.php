@@ -9,7 +9,10 @@ use App\Models\Brand;
 use App\Models\CommerceDailyMetric;
 use App\Models\DailyMetric;
 use App\Models\MetaBreakdownDaily;
+use App\Models\PlatformConnection;
 use App\Models\ProductCatalog;
+use App\Models\ShopifyFunnelDaily;
+use App\Platforms\Shopify\RevenueFetcher;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Contracts\ReportType;
 use App\Reports\Support\MonthlySeries;
@@ -44,7 +47,10 @@ final class MonthlyReport implements ReportType
     /** How many trailing calendar months the MoM heatmaps show. */
     private const TRAILING_MONTHS = 6;
 
-    public function __construct(private readonly MonthlySeries $series) {}
+    public function __construct(
+        private readonly MonthlySeries $series,
+        private readonly RevenueFetcher $revenue,
+    ) {}
 
     public function key(): string
     {
@@ -122,9 +128,9 @@ final class MonthlyReport implements ReportType
                 'roasByCountry'  => $this->roasByCountrySection($brand->id, $months, $filters->usd),
                 'placement'      => $this->placementSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'landingSellers' => $this->landingSellersSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString()),
-                'newVsExisting'  => ['status' => 'needs_source', 'note' => 'ShopifyQL new/returning split — customer-type probe not yet verified.'],
-                'funnelCountry'  => ['status' => 'needs_source', 'note' => 'Session → cart → checkout funnel needs a web-analytics source (GA4 / Shopify analytics).'],
-                'funnelLanding'  => ['status' => 'needs_source', 'note' => 'Landing-path funnels need page-level session data from a web-analytics source.'],
+                'newVsExisting'  => $this->newVsExistingSection($brand, $months, $filters->usd),
+                'funnelCountry'  => $this->funnelSection($brand->id, 'country', $monthStart->toDateString(), $monthEnd->toDateString()),
+                'funnelLanding'  => $this->funnelSection($brand->id, 'landing', $monthStart->toDateString(), $monthEnd->toDateString()),
             ],
         ];
     }
@@ -506,6 +512,135 @@ final class MonthlyReport implements ReportType
         usort($out, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
 
         return ['status' => 'ready', 'placement' => array_slice($out, 0, 10)];
+    }
+
+    /**
+     * Web funnel (sessions → cart → checkout → purchase) for the report month, by
+     * country or landing path — summed from shopify_funnel_daily (additive across
+     * days). `needs_source` until shopify:backfill-funnel has run for the brand.
+     *
+     * @return array<string, mixed>
+     */
+    private function funnelSection(int $brandId, string $dimension, string $start, string $end): array
+    {
+        try {
+            $rows = ShopifyFunnelDaily::query()
+                ->where('brand_id', $brandId)
+                ->where('dimension', $dimension)
+                ->whereBetween('date', [$start, $end])
+                ->groupBy('segment_key', 'segment_label')
+                ->selectRaw('segment_key, MAX(segment_label) AS label,
+                    COALESCE(SUM(sessions), 0) AS sessions,
+                    COALESCE(SUM(cart_additions), 0) AS cart_additions,
+                    COALESCE(SUM(reached_checkout), 0) AS reached_checkout,
+                    COALESCE(SUM(completed_checkout), 0) AS completed_checkout')
+                ->get();
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'funnel_' . $dimension, 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+
+        if ($rows->isEmpty()) {
+            return ['status' => 'needs_source', 'note' => 'Run shopify:backfill-funnel for this brand to populate the web funnel.'];
+        }
+
+        $out = [];
+        foreach ($rows as $r) {
+            $sessions = (int) $r->sessions;
+            $purchase = (int) $r->completed_checkout;
+            $out[] = [
+                'label'    => (string) ($r->label ?: $r->segment_key),
+                'sessions' => $sessions,
+                'cart'     => (int) $r->cart_additions,
+                'checkout' => (int) $r->reached_checkout,
+                'purchase' => $purchase,
+                'cvr'      => $sessions > 0 ? round($purchase / $sessions * 100, 2) : null,
+            ];
+        }
+        usort($out, static fn (array $a, array $b): int => $b['sessions'] <=> $a['sessions']);
+
+        return ['status' => 'ready', 'funnel' => array_slice($out, 0, 10)];
+    }
+
+    /**
+     * §4 — new vs existing customers, month over month. Counts come from a LIVE
+     * monthly ShopifyQL `sales` query (customersByMonthRange): unique customers
+     * don't decompose to days, so — unlike the funnel — they can't ride the daily
+     * sync. `new = customers − returning`. Revenue/spend/ROAS reuse monthMetrics
+     * (fx-aware, consistent with the rest of the report); AOV = that revenue ÷
+     * ShopifyQL orders; CAC = ad spend ÷ new customers.
+     *
+     * There is NO customer_type dimension on `sales` (verified via
+     * shopify:diagnose-customer-type), so this is counts + blended money only:
+     * revenue is NOT split by new/returning and there is no new-customer ROAS.
+     *
+     * @param  list<string>  $months  trailing Y-m, chronological
+     * @return array<string, mixed>
+     */
+    private function newVsExistingSection(Brand $brand, array $months, bool $usd): array
+    {
+        $conn = PlatformConnection::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', 'shopify')
+            ->where('status', 'active')
+            ->first();
+
+        if (! $conn) {
+            return ['status' => 'needs_source', 'note' => 'No active Shopify connection for this brand.'];
+        }
+
+        $start = CarbonImmutable::parse($months[0] . '-01')->toDateString();
+        $end   = CarbonImmutable::parse(end($months) . '-01')->endOfMonth()->toDateString();
+
+        try {
+            $byMonth = $this->revenue->customersByMonthRange($conn, $start, $end);
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'newVsExisting', 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+
+        if ($byMonth === []) {
+            return ['status' => 'needs_source', 'note' => 'Shopify customer counts unavailable — the store needs ShopifyQL (read_reports) access.'];
+        }
+
+        $rows = [];
+        foreach ($months as $ym) {
+            $c = $byMonth[$ym] ?? null;
+            if ($c === null) {
+                continue;
+            }
+            $customers = (int) ($c['customers'] ?? 0);
+            $returning = (int) ($c['returning'] ?? 0);
+            $new       = max(0, $customers - $returning);
+            $orders    = (int) ($c['orders'] ?? 0);
+
+            $ms      = CarbonImmutable::parse($ym . '-01');
+            $metrics = $this->monthMetrics($brand->id, $ms->toDateString(), $ms->endOfMonth()->toDateString(), $usd);
+            $revenue = $metrics['revenue'];
+            $spend   = $metrics['totalSpend'];
+
+            $rows[] = [
+                'month'     => $ms->isoFormat('MMM YY'),
+                'new'       => $new,
+                'returning' => $returning,
+                'total'     => $customers,
+                'retPct'    => $customers > 0 ? round($returning / $customers * 100, 1) : null,
+                'revenue'   => $revenue,
+                'orders'    => $orders,
+                'aov'       => $orders > 0 ? round($revenue / $orders, 2) : null,
+                'spend'     => $spend,
+                'roas'      => $metrics['roas'],
+                'cac'       => $new > 0 ? round($spend / $new, 2) : null,
+            ];
+        }
+
+        if ($rows === []) {
+            return ['status' => 'no_data'];
+        }
+
+        return ['status' => 'ready', 'customers' => $rows];
     }
 
     /** Prettify a Meta placement segment ("instagram · feed" → "IG · Feed"). */

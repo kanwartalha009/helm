@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import { REPORT_CSS } from './ReportDocument';
-import type { MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySeriesData } from '@/types/reports';
+import type { MonthlyCustomerRow, MonthlyFunnelRow, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySeriesData } from '@/types/reports';
 
 const DEFAULT_COMMENTARY =
   'Summarise the month for the store owner here — what moved, how it landed against targets, and the plan for next month. Editable before you send.';
@@ -100,7 +100,7 @@ export function MonthlyReportDocument({
       <SectionBlock num="01" title="Market revenue — month over month" sub="Revenue grouped into markets/tiers." section={sections.market} currency={currency} />
       <SectionBlock num="02" title="Country revenue — month over month" sub="Revenue by country, rolled to calendar months." section={sections.countryRevenue} currency={currency} />
       <SectionBlock num="03" title="ROAS by country — month over month" sub="Meta country spend ÷ commerce country revenue." section={sections.roasByCountry} currency={currency} />
-      <SectionBlock num="04" title="New vs existing customers" sub="New/returning revenue split and new-customer ROAS." section={sections.newVsExisting} currency={currency} />
+      <SectionBlock num="04" title="New vs existing customers" sub="New vs returning counts, retention, CAC and blended ROAS by month." section={sections.newVsExisting} currency={currency} />
       <SectionBlock num="05" title="Ad spend by placement" sub="Where the budget ran — Feed, Reels, Stories." section={sections.placement} currency={currency} />
       <SectionBlock num="06" title="Ad spend by gender" sub="Audience concentration by gender." section={sections.gender} currency={currency} />
       <SectionBlock num="07" title="Best categories — month over month" sub="Revenue by product category, month over month." section={sections.categories} currency={currency} />
@@ -135,6 +135,10 @@ function SectionBlock({ num, title, sub, section, currency }: { num: string; tit
         <LandingTable rows={section.products} currency={currency} />
       ) : section.status === 'ready' && section.placement ? (
         <PlacementTable rows={section.placement} currency={currency} />
+      ) : section.status === 'ready' && section.funnel ? (
+        <FunnelTable rows={section.funnel} />
+      ) : section.status === 'ready' && section.customers ? (
+        <NewVsExistingTable rows={section.customers} currency={currency} />
       ) : (
         <Ribbon status={section.status} note={section.note} />
       )}
@@ -360,6 +364,83 @@ function PlacementTable({ rows, currency }: { rows: MonthlyPlacementRow[]; curre
       </div>
       {!hasReach && <div className="rpt-cap">Reach &amp; frequency populate after the next sync — the pull now captures reach; existing history shows “—” until re-synced.</div>}
     </>
+  );
+}
+
+// Web funnel — sessions → cart → checkout → purchase, by country or landing.
+function FunnelTable({ rows }: { rows: MonthlyFunnelRow[] }) {
+  const n = (v: number) => v.toLocaleString();
+  return (
+    <div className="rpt-tbl-wrap">
+      <table className="rpt-tbl mrt-tbl">
+        <thead>
+          <tr>
+            <th>Segment</th>
+            <th className="r">Sessions</th>
+            <th className="r">Add to cart</th>
+            <th className="r">Checkout</th>
+            <th className="r">Purchase</th>
+            <th className="r">CVR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label}>
+              <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
+              <td className="r">{n(r.sessions)}</td>
+              <td className="r">{n(r.cart)}</td>
+              <td className="r">{n(r.checkout)}</td>
+              <td className="r">{n(r.purchase)}</td>
+              <td className="r">{r.cvr == null ? '—' : `${r.cvr.toFixed(2)}%`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// New vs existing customers, one row per trailing month. Counts + blended money;
+// revenue is NOT split by customer type (no customer_type dimension on ShopifyQL
+// sales) — so no per-segment revenue and no new-customer ROAS. CAC = spend ÷ new.
+function NewVsExistingTable({ rows, currency }: { rows: MonthlyCustomerRow[]; currency: string }) {
+  const n = (v: number) => v.toLocaleString();
+  const money = (v: number | null) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+  return (
+    <div className="rpt-tbl-wrap">
+      <table className="rpt-tbl mrt-tbl">
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th className="r">New</th>
+            <th className="r">Returning</th>
+            <th className="r">Total</th>
+            <th className="r">% ret.</th>
+            <th className="r">Revenue</th>
+            <th className="r">AOV</th>
+            <th className="r">Spend</th>
+            <th className="r">ROAS</th>
+            <th className="r">CAC</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.month}>
+              <td className="name"><div className="rpt-dim-label">{r.month}</div></td>
+              <td className="r">{n(r.new)}</td>
+              <td className="r">{n(r.returning)}</td>
+              <td className="r">{n(r.total)}</td>
+              <td className="r">{r.retPct == null ? '—' : `${r.retPct.toFixed(1)}%`}</td>
+              <td className="r">{money(r.revenue)}</td>
+              <td className="r">{money(r.aov)}</td>
+              <td className="r">{money(r.spend)}</td>
+              <td className="r">{r.roas == null ? '—' : `${r.roas.toFixed(2)}×`}</td>
+              <td className="r">{money(r.cac)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

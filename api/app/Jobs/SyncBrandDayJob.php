@@ -7,8 +7,10 @@ namespace App\Jobs;
 use App\Models\Brand;
 use App\Models\DailyMetric;
 use App\Models\PlatformConnection;
+use App\Models\ShopifyFunnelDaily;
 use App\Models\SyncLog;
 use App\Platforms\PlatformRegistry;
+use App\Platforms\Shopify\RevenueFetcher;
 use App\Platforms\Support\SyncFailureClassifier;
 use App\Services\Currency\FxService;
 use App\Services\Sync\CampaignSync;
@@ -63,7 +65,7 @@ class SyncBrandDayJob implements ShouldQueue
         $this->onQueue($platformConnection->platform === 'shopify' ? 'shopify-sync' : 'ads-sync');
     }
 
-    public function handle(PlatformRegistry $registry, FxService $fx, CampaignSync $campaignSync): void
+    public function handle(PlatformRegistry $registry, FxService $fx, CampaignSync $campaignSync, RevenueFetcher $revenue): void
     {
         // Two paths in:
         //   - $logId set      → controller/command already wrote a `queued`
@@ -161,6 +163,13 @@ class SyncBrandDayJob implements ShouldQueue
             foreach (['device', 'country'] as $googleAxis) {
                 $campaignSync->syncGoogleBreakdown($this->platformConnection, $this->date, $googleAxis);
             }
+
+            // Shopify web funnel (sessions → cart → checkout → purchase) by country
+            // + landing path for the monthly report's §10/§11. Shopify-only +
+            // best-effort — a funnel hiccup never fails the day's main sync.
+            if ($this->platformConnection->platform === 'shopify') {
+                $this->syncShopifyFunnel($revenue, $this->platformConnection, $this->date);
+            }
         } catch (Throwable $e) {
             $log->update([
                 'status'        => 'failed',
@@ -187,6 +196,64 @@ class SyncBrandDayJob implements ShouldQueue
             ]);
             report($e);
             throw $e;   // hand to Horizon for retry
+        }
+    }
+
+    /**
+     * Pull one day of the Shopify web funnel (sessions → cart → checkout →
+     * purchase) by country + landing path into shopify_funnel_daily. Best-effort:
+     * each dimension guards itself so a ShopifyQL hiccup never touches the day's
+     * main sync, which has already succeeded. History is filled by
+     * shopify:backfill-funnel; this keeps it fresh.
+     */
+    private function syncShopifyFunnel(RevenueFetcher $revenue, PlatformConnection $conn, CarbonImmutable $date): void
+    {
+        $day = $date->toDateString();
+
+        foreach (['country' => 'session_country', 'landing' => 'landing_page_path'] as $type => $dim) {
+            try {
+                $rows = $revenue->funnelByDimensionRange($conn, $dim, $day, $day);
+            } catch (Throwable $e) {
+                Log::warning('sync.shopify_funnel.failed', [
+                    'brand_id'  => $conn->brand_id,
+                    'dimension' => $type,
+                    'date'      => $day,
+                    'error'     => $e->getMessage(),
+                ]);
+                continue;
+            }
+            if ($rows === []) {
+                continue;
+            }
+
+            $records = [];
+            foreach ($rows as $r) {
+                $seg = trim((string) ($r['segment_key'] ?? ''));
+                if ($seg === '') {
+                    continue;
+                }
+                $records[] = [
+                    'brand_id'           => (int) $conn->brand_id,
+                    'date'               => $day,
+                    'dimension'          => $type,
+                    'segment_key'        => mb_substr($seg, 0, 191),
+                    'segment_label'      => mb_substr((string) ($r['segment_label'] ?? $seg), 0, 191),
+                    'sessions'           => (int) ($r['sessions'] ?? 0),
+                    'cart_additions'     => (int) ($r['cart_additions'] ?? 0),
+                    'reached_checkout'   => (int) ($r['reached_checkout'] ?? 0),
+                    'completed_checkout' => (int) ($r['completed_checkout'] ?? 0),
+                    'is_complete'        => true,
+                    'pulled_at'          => now(),
+                ];
+            }
+
+            foreach (array_chunk($records, 500) as $chunk) {
+                ShopifyFunnelDaily::upsert(
+                    $chunk,
+                    ['brand_id', 'date', 'dimension', 'segment_key'],
+                    ['segment_label', 'sessions', 'cart_additions', 'reached_checkout', 'completed_checkout', 'is_complete', 'pulled_at'],
+                );
+            }
         }
     }
 

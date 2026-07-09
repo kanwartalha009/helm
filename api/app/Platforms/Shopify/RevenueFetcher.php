@@ -684,6 +684,192 @@ GQL;
     }
 
     /**
+     * Range pull of the ShopifyQL web funnel grouped by day AND a dimension
+     * (session_country for §10, landing_page_path for §11): sessions → cart
+     * additions → reached checkout → completed checkout per (day, segment). These
+     * are additive counts, so they're stored daily and summed to the month. One
+     * ShopifyQL `FROM sessions` call; degrades to [] + a logged parseError on
+     * failure (never a fake zero).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function funnelByDimensionRange(PlatformConnection $conn, string $dimension, string $sinceStr, string $untilStr): array
+    {
+        return $this->groupedFunnelByDay($this->makeClient($conn), $dimension, $sinceStr, $untilStr);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function groupedFunnelByDay(ShopifyClient $client, string $dimension, string $sinceStr, string $untilStr): array
+    {
+        // Fixed allow-list from the caller, but sanitise anyway (never user input).
+        $dim = preg_replace('/[^a-z_]/', '', strtolower($dimension)) ?? '';
+        if ($dim === '') {
+            return [];
+        }
+
+        $ql = 'FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_reached_checkout, sessions_that_completed_checkout '
+            . "GROUP BY day, {$dim} "
+            . "SINCE {$sinceStr} UNTIL {$untilStr} "
+            . 'ORDER BY day '
+            . 'LIMIT ' . self::SHOPIFYQL_ROW_LIMIT;
+
+        $gql = <<<'GQL'
+query ($q: String!) {
+  shopifyqlQuery(query: $q) {
+    tableData { columns { name } rows }
+    parseErrors
+  }
+}
+GQL;
+
+        try {
+            $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
+        } catch (Throwable $e) {
+            Log::warning('shopify.shopifyql.request_failed', ['error' => $e->getMessage(), 'ql' => $ql]);
+
+            return [];
+        }
+
+        $resp = $data['shopifyqlQuery'] ?? null;
+        if (! is_array($resp)) {
+            return [];
+        }
+        if (! empty($resp['parseErrors'])) {
+            $pe = $resp['parseErrors'];
+            Log::warning('shopify.shopifyql.parse_error', ['parseErrors' => is_array($pe) ? json_encode($pe) : (string) $pe, 'ql' => $ql]);
+
+            return [];
+        }
+
+        $columns = $resp['tableData']['columns'] ?? [];
+        $rows    = $resp['tableData']['rows'] ?? [];
+        if (! is_array($rows) || ! is_array($columns)) {
+            return [];
+        }
+
+        $metricCols = ['sessions', 'sessions_with_cart_additions', 'sessions_that_reached_checkout', 'sessions_that_completed_checkout'];
+        $dayCol = null;
+        foreach ($columns as $c) {
+            $name = (string) ($c['name'] ?? '');
+            if ($name !== '' && $name !== $dim && ! in_array($name, $metricCols, true)) {
+                $dayCol = $name;
+                break;
+            }
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $rawDay = $dayCol !== null ? ($row[$dayCol] ?? null) : null;
+            $key    = $row[$dim] ?? null;
+            if ($rawDay === null || $key === null || (string) $key === '') {
+                continue;
+            }
+            $out[] = [
+                'date'               => substr((string) $rawDay, 0, 10),
+                'segment_key'        => (string) $key,
+                'segment_label'      => (string) $key,
+                'sessions'           => isset($row['sessions']) ? (int) round((float) $row['sessions']) : 0,
+                'cart_additions'     => isset($row['sessions_with_cart_additions']) ? (int) round((float) $row['sessions_with_cart_additions']) : 0,
+                'reached_checkout'   => isset($row['sessions_that_reached_checkout']) ? (int) round((float) $row['sessions_that_reached_checkout']) : 0,
+                'completed_checkout' => isset($row['sessions_that_completed_checkout']) ? (int) round((float) $row['sessions_that_completed_checkout']) : 0,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Per-MONTH customer aggregates from ShopifyQL `sales`: total/net sales,
+     * orders, and the new-vs-returning counts (`customers`, `returning_customers`;
+     * `new = customers − returning`). Month-grouped on purpose — unique customers
+     * don't decompose to days (a buyer on two days is one customer that month), so
+     * this can't ride the daily sync; the monthly report calls it live at build.
+     * There is NO customer_type dimension on `sales` (verified via
+     * shopify:diagnose-customer-type), so revenue can't be split by customer type
+     * — only these aggregate counts are available. Degrades to [] on failure.
+     *
+     * @return array<string, array{total: ?float, net: ?float, orders: ?int, customers: ?int, returning: ?int}>  [Y-m => figures]
+     */
+    public function customersByMonthRange(PlatformConnection $conn, string $sinceStr, string $untilStr): array
+    {
+        $client  = $this->makeClient($conn);
+        $channel = str_replace("'", '', $this->shopifyqlChannel());
+        $ql = 'FROM sales SHOW net_sales, total_sales, orders, customers, returning_customers GROUP BY month '
+            . "SINCE {$sinceStr} UNTIL {$untilStr} "
+            . "WHERE sales_channel = '{$channel}' ORDER BY month";
+
+        $gql = <<<'GQL'
+query ($q: String!) {
+  shopifyqlQuery(query: $q) {
+    tableData { columns { name } rows }
+    parseErrors
+  }
+}
+GQL;
+
+        try {
+            $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
+        } catch (Throwable $e) {
+            Log::warning('shopify.shopifyql.request_failed', ['error' => $e->getMessage(), 'ql' => $ql]);
+
+            return [];
+        }
+
+        $resp = $data['shopifyqlQuery'] ?? null;
+        if (! is_array($resp)) {
+            return [];
+        }
+        if (! empty($resp['parseErrors'])) {
+            $pe = $resp['parseErrors'];
+            Log::warning('shopify.shopifyql.parse_error', ['parseErrors' => is_array($pe) ? json_encode($pe) : (string) $pe, 'ql' => $ql]);
+
+            return [];
+        }
+
+        $columns = $resp['tableData']['columns'] ?? [];
+        $rows    = $resp['tableData']['rows'] ?? [];
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        $metricCols = ['net_sales', 'total_sales', 'orders', 'customers', 'returning_customers'];
+        $monthCol = null;
+        foreach ($columns as $c) {
+            $name = (string) ($c['name'] ?? '');
+            if ($name !== '' && ! in_array($name, $metricCols, true)) {
+                $monthCol = $name;
+                break;
+            }
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $rawMonth = $monthCol !== null ? ($row[$monthCol] ?? null) : null;
+            if ($rawMonth === null) {
+                continue;
+            }
+            $ym = substr((string) $rawMonth, 0, 7); // "2026-06-01" / "2026-06" → "2026-06"
+            $out[$ym] = [
+                'total'     => isset($row['total_sales']) ? round((float) $row['total_sales'], 2) : null,
+                'net'       => isset($row['net_sales']) ? round((float) $row['net_sales'], 2) : null,
+                'orders'    => isset($row['orders']) ? (int) $row['orders'] : null,
+                'customers' => isset($row['customers']) ? (int) $row['customers'] : null,
+                'returning' => isset($row['returning_customers']) ? (int) $row['returning_customers'] : null,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * Inventory stock + sell-through for one dimension (product_title or
      * product_type) over a trailing window — powers the dead-stock report. One
      * ShopifyQL `FROM inventory` call, one row per dimension value (no day
