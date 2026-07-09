@@ -64,40 +64,42 @@ class ShopifyDiagnoseSessionsCommand extends Command
         $this->line('An "access denied" below is a SCOPE problem, not bad syntax.');
         $this->newLine();
 
-        // A — does the sessions dataset exist + return at all?
-        $this->probe($client, 'A. Sanity — sessions + visitors, no breakdown',
-            "FROM sessions SHOW sessions, visitors SINCE {$since} UNTIL today");
+        // A — the FULL funnel metrics (corrected names from Shopify's schema).
+        // Expected to pass; the columns list confirms the exact stage names.
+        $this->probe($client, 'A. Full funnel metrics',
+            "FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_reached_checkout, sessions_that_completed_checkout, conversion_rate SINCE {$since} UNTIL today");
 
-        // B–C — the funnel metrics: candidate names for add-to-cart / checkout /
-        // converted sessions. The one with empty parseErrors names the fields.
-        $this->probe($client, 'B. Funnel metrics (candidate 1)',
-            "FROM sessions SHOW sessions, sessions_that_added_to_cart, sessions_that_reached_checkout, sessions_converted SINCE {$since} UNTIL today");
+        // B — §11 landing path: confirmed dim (landing_page_path) × the funnel.
+        $this->probe($client, 'B. §11 — by LANDING PATH (landing_page_path)',
+            "FROM sessions SHOW landing_page_path, sessions, sessions_with_cart_additions, sessions_that_reached_checkout, sessions_that_completed_checkout GROUP BY landing_page_path SINCE {$since} UNTIL today");
 
-        $this->probe($client, 'C. Funnel metrics (candidate 2)',
-            "FROM sessions SHOW sessions, added_to_cart_sessions, reached_checkout_sessions, converted_sessions SINCE {$since} UNTIL today");
+        $this->probe($client, 'C. §11 alt — by landing_page_type',
+            "FROM sessions SHOW landing_page_type, sessions, sessions_that_completed_checkout GROUP BY landing_page_type SINCE {$since} UNTIL today");
 
-        $this->probe($client, 'D. Conversion metrics — rate + converted',
-            "FROM sessions SHOW sessions, session_conversion_rate, sessions_converted SINCE {$since} UNTIL today");
+        // D–H — §10 COUNTRY dimension: the one still unknown. Candidate names;
+        // the one with empty parseErrors is what the country funnel groups by.
+        // If NONE pass, the sessions dataset has no geo → §10 needs GA4 (§11 is
+        // unaffected — landing path works).
+        $this->probe($client, 'D. §10 country (cand 1) — visitor_location',
+            "FROM sessions SHOW visitor_location, sessions, sessions_that_completed_checkout GROUP BY visitor_location SINCE {$since} UNTIL today");
 
-        // E–F — the COUNTRY dimension (§10). Candidate dimension names.
-        $this->probe($client, 'E. By COUNTRY (candidate 1) — visitor_location_country',
-            "FROM sessions SHOW visitor_location_country, sessions, sessions_converted GROUP BY visitor_location_country SINCE {$since} UNTIL today");
+        $this->probe($client, 'E. §10 country (cand 2) — location',
+            "FROM sessions SHOW location, sessions GROUP BY location SINCE {$since} UNTIL today");
 
-        $this->probe($client, 'F. By COUNTRY (candidate 2) — country',
-            "FROM sessions SHOW country, sessions GROUP BY country SINCE {$since} UNTIL today");
+        $this->probe($client, 'F. §10 country (cand 3) — country_code',
+            "FROM sessions SHOW country_code, sessions GROUP BY country_code SINCE {$since} UNTIL today");
 
-        // G–H — the LANDING PATH dimension (§11). Candidate dimension names.
-        $this->probe($client, 'G. By LANDING PATH (candidate 1) — landing_page_path',
-            "FROM sessions SHOW landing_page_path, sessions, sessions_converted GROUP BY landing_page_path SINCE {$since} UNTIL today");
+        $this->probe($client, 'G. §10 country (cand 4) — session_country',
+            "FROM sessions SHOW session_country, sessions GROUP BY session_country SINCE {$since} UNTIL today");
 
-        $this->probe($client, 'H. By LANDING PATH (candidate 2) — landing_page',
-            "FROM sessions SHOW landing_page, sessions GROUP BY landing_page SINCE {$since} UNTIL today");
+        $this->probe($client, 'H. §10 country (cand 5) — visitor_country',
+            "FROM sessions SHOW visitor_country, sessions GROUP BY visitor_country SINCE {$since} UNTIL today");
 
         $this->newLine();
-        $this->line('Verdict: §10 needs one COUNTRY candidate (E/F) + the funnel metrics (B/C/D) to pass;');
-        $this->line('§11 needs one LANDING-PATH candidate (G/H) + the funnel metrics. Note which field');
-        $this->line('names come back OK — those are what the sync will pull. If A errors or no funnel');
-        $this->line('metric candidate passes, ShopifyQL can\'t drive the funnels → GA4 is required instead.');
+        $this->line('Verdict: A confirms the funnel stage names; B confirms §11 (landing path) — both');
+        $this->line('expected to pass. The open question is §10: which of D–H returns a COUNTRY');
+        $this->line('dimension with empty parseErrors. If none pass, ShopifyQL sessions has no geo →');
+        $this->line('§10 needs GA4; §11 (landing funnel) can be built regardless.');
 
         return self::SUCCESS;
     }
