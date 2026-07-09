@@ -87,6 +87,13 @@ final class MonthlyReport implements ReportType
         $cur = $this->monthMetrics($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd);
         $mom = $this->monthMetrics($brand->id, $momStart->toDateString(), $momStart->endOfMonth()->toDateString(), $filters->usd);
 
+        // §4 is built here (not inline in `sections`) so the Overall picture can
+        // surface its ESTIMATED new-customer ROAS for the report month. Built once,
+        // reused below — one ShopifyQL customer pull.
+        $newVsExisting = $this->newVsExistingSection($brand, $months, $filters->usd);
+        $curNewRoas    = $this->newRoasForMonth($newVsExisting, $monthStart->isoFormat('MMM YY'));
+        $prevNewRoas   = $this->newRoasForMonth($newVsExisting, $momStart->isoFormat('MMM YY'));
+
         $currency = $filters->usd ? 'USD' : ($brand->base_currency ?: 'USD');
         $limit    = 8;
 
@@ -115,7 +122,7 @@ final class MonthlyReport implements ReportType
                 'blendedRoas'     => $this->kpi('ratio', $cur['roas'], $mom['roas']),
                 'revenue'         => $this->kpi('money', $cur['revenue'], $mom['revenue']),
                 'adSpend'         => $this->kpi('money', $cur['totalSpend'], $mom['totalSpend']),
-                'newCustomerRoas' => null, // unavailable: Shopify sales has no new/returning revenue split
+                'newCustomerRoas' => $curNewRoas === null ? null : $this->kpi('ratio', $curNewRoas, $prevNewRoas),
                 'acquisitionYoY'  => null, // unavailable: needs same-month-last-year new-customer counts
             ],
             // Each section carries a readiness status so the SPA renders the whole
@@ -129,7 +136,7 @@ final class MonthlyReport implements ReportType
                 'roasByCountry'  => $this->roasByCountrySection($brand->id, $months, $filters->usd),
                 'placement'      => $this->placementSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'landingSellers' => $this->landingSellersSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString()),
-                'newVsExisting'  => $this->newVsExistingSection($brand, $months, $filters->usd),
+                'newVsExisting'  => $newVsExisting,
                 'funnelCountry'  => $this->funnelSection($brand->id, 'country', $monthStart->toDateString(), $monthEnd->toDateString()),
                 'funnelLanding'  => $this->funnelSection($brand->id, 'landing', $monthStart->toDateString(), $monthEnd->toDateString()),
             ],
@@ -626,6 +633,15 @@ final class MonthlyReport implements ReportType
             $metrics = $this->monthMetrics($brand->id, $ms->toDateString(), $ms->endOfMonth()->toDateString(), $usd);
             $revenue = $metrics['revenue'];
             $spend   = $metrics['totalSpend'];
+            $aov     = $orders > 0 ? round($revenue / $orders, 2) : null;
+
+            // Estimated new-customer ROAS. Shopify can't split revenue by customer
+            // type, so we model new-customer revenue as new customers × AOV and
+            // divide by total ad spend (standard naMER convention). It uses BLENDED
+            // AOV, so it skews slightly optimistic (new customers' first order is
+            // usually below the blended average) — surfaced as an estimate, never a
+            // hard figure.
+            $newRoas = ($aov !== null && $spend > 0.0) ? round(($new * $aov) / $spend, 2) : null;
 
             $rows[] = [
                 'month'     => $ms->isoFormat('MMM YY'),
@@ -635,9 +651,10 @@ final class MonthlyReport implements ReportType
                 'retPct'    => $customers > 0 ? round($returning / $customers * 100, 1) : null,
                 'revenue'   => $revenue,
                 'orders'    => $orders,
-                'aov'       => $orders > 0 ? round($revenue / $orders, 2) : null,
+                'aov'       => $aov,
                 'spend'     => $spend,
                 'roas'      => $metrics['roas'],
+                'roasNew'   => $newRoas,
                 'cac'       => $new > 0 ? round($spend / $new, 2) : null,
             ];
         }
@@ -647,6 +664,28 @@ final class MonthlyReport implements ReportType
         }
 
         return ['status' => 'ready', 'customers' => $rows];
+    }
+
+    /**
+     * Pull the estimated new-customer ROAS for one month label ("Jun 26") out of
+     * the §4 payload, so the Overall picture KPI and the §4 row agree exactly.
+     *
+     * @param array<string, mixed> $section
+     */
+    private function newRoasForMonth(array $section, string $monthLabel): ?float
+    {
+        if (($section['status'] ?? '') !== 'ready') {
+            return null;
+        }
+        foreach ($section['customers'] ?? [] as $row) {
+            if (($row['month'] ?? '') === $monthLabel) {
+                $v = $row['roasNew'] ?? null;
+
+                return $v === null ? null : (float) $v;
+            }
+        }
+
+        return null;
     }
 
     /** Prettify a Meta placement segment ("instagram · feed" → "IG · Feed"). */

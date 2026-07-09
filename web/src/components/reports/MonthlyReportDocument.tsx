@@ -74,7 +74,14 @@ export function MonthlyReportDocument({
           <Kpi label="Blended ROAS" value={formatRoas(overall.blendedRoas.value)} delta={<RatioDelta k={overall.blendedRoas} />} note={targetNote(overall.blendedRoas.value, tBlended)} />
           <Kpi label="Revenue" value={money(overall.revenue.value)} delta={<PctDelta k={overall.revenue} />} />
           <Kpi label="Ad spend" value={money(overall.adSpend.value)} delta={<PctDelta k={overall.adSpend} goodUp={false} />} />
-          <Kpi label="ROAS · new customer" value="—" note={tNewCust != null ? `Target ${tNewCust} · not available` : 'Shopify has no new/returning revenue split'} />
+          <Kpi
+            label="ROAS · new customer"
+            value={overall.newCustomerRoas ? `~${formatRoas(overall.newCustomerRoas.value)}` : '—'}
+            delta={overall.newCustomerRoas ? <RatioDelta k={overall.newCustomerRoas} /> : undefined}
+            note={overall.newCustomerRoas
+              ? (tNewCust != null ? `Target ${tNewCust} · est` : 'est · new customers × AOV ÷ spend')
+              : 'Shopify has no new/returning revenue split'}
+          />
         </div>
         {editable && (
           <div className="mrt-targets">
@@ -421,6 +428,7 @@ function NewVsExistingTable({ rows, currency }: { rows: MonthlyCustomerRow[]; cu
             <th className="r">AOV</th>
             <th className="r">Spend</th>
             <th className="r">ROAS</th>
+            <th className="r">ROAS·new<span style={{ opacity: 0.5, fontWeight: 400 }}> est</span></th>
             <th className="r">CAC</th>
           </tr>
         </thead>
@@ -436,11 +444,13 @@ function NewVsExistingTable({ rows, currency }: { rows: MonthlyCustomerRow[]; cu
               <td className="r">{money(r.aov)}</td>
               <td className="r">{money(r.spend)}</td>
               <td className="r">{r.roas == null ? '—' : `${r.roas.toFixed(2)}×`}</td>
+              <td className="r">{r.roasNew == null ? '—' : `~${r.roasNew.toFixed(2)}×`}</td>
               <td className="r">{money(r.cac)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      <div className="rpt-cap">ROAS·new is an estimate — new customers × AOV ÷ ad spend (uses blended AOV, so it runs slightly high).</div>
     </div>
   );
 }

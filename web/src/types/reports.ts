@@ -253,6 +253,7 @@ export interface MonthlyCustomerRow {
   aov: number | null;
   spend: number;
   roas: number | null;
+  roasNew: number | null; // ESTIMATE: new customers × AOV ÷ ad spend
   cac: number | null; // ad spend ÷ new customers
 }
 
