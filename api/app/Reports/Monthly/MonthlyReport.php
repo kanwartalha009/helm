@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace App\Reports\Monthly;
 
+use App\Models\AdProductDaily;
 use App\Models\Brand;
+use App\Models\CommerceDailyMetric;
 use App\Models\DailyMetric;
+use App\Models\MetaBreakdownDaily;
+use App\Models\ProductCatalog;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Contracts\ReportType;
 use App\Reports\Support\MonthlySeries;
@@ -113,11 +117,11 @@ final class MonthlyReport implements ReportType
                 'countryRevenue' => $this->commerceSection('country', $brand->id, $months, $filters->usd, $limit),
                 'categories'     => $this->commerceSection('category', $brand->id, $months, $filters->usd, $limit),
                 'bestSellers'    => $this->commerceSection('product', $brand->id, $months, $filters->usd, $limit),
-                'roasByCountry'  => ['status' => 'coming'],   // Meta country spend ÷ commerce country revenue, per month
-                'gender'         => ['status' => 'coming'],   // meta_breakdown age_gender, folded to gender
-                'market'         => ['status' => 'coming'],   // country → market/tier grouping config
-                'placement'      => ['status' => 'coming'],   // placement breakdown + reach/frequency on the Meta pull
-                'landingSellers' => ['status' => 'coming'],   // ad_product_daily ⋈ commerce product
+                'market'         => $this->marketSection($brand->id, $months, $filters->usd),
+                'gender'         => $this->genderSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
+                'roasByCountry'  => $this->roasByCountrySection($brand->id, $months, $filters->usd),
+                'placement'      => $this->placementSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
+                'landingSellers' => $this->landingSellersSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString()),
                 'newVsExisting'  => ['status' => 'needs_source', 'note' => 'ShopifyQL new/returning split — customer-type probe not yet verified.'],
                 'funnelCountry'  => ['status' => 'needs_source', 'note' => 'Session → cart → checkout funnel needs a web-analytics source (GA4 / Shopify analytics).'],
                 'funnelLanding'  => ['status' => 'needs_source', 'note' => 'Landing-path funnels need page-level session data from a web-analytics source.'],
@@ -147,6 +151,394 @@ final class MonthlyReport implements ReportType
         return $data === null
             ? ['status' => 'no_data']
             : ['status' => 'ready', 'data' => $data];
+    }
+
+    /**
+     * Market/tier revenue MoM — the commerce country series folded into markets
+     * via the country_regions config (Europe / North America / … — the same map
+     * the dashboard region rollup uses; Bosco's bespoke tiers become a per-brand
+     * override later, [[helm_white_label]]). Reuses MonthlySeries + renders in the
+     * same heat table as country. "coming" when no market map is configured.
+     *
+     * @param array<int, string> $months
+     * @return array<string, mixed>
+     */
+    private function marketSection(int $brandId, array $months, bool $usd): array
+    {
+        $map    = array_change_key_case((array) config('country_regions.map', []), CASE_UPPER);
+        $labels = (array) config('country_regions.labels', []);
+        if ($map === []) {
+            return ['status' => 'coming'];
+        }
+
+        try {
+            $data = $this->series->forDimension($brandId, 'country', $months, $usd, 8, $map, $labels);
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'market', 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+
+        return $data === null ? ['status' => 'no_data'] : ['status' => 'ready', 'data' => $data];
+    }
+
+    /**
+     * Ad spend by gender for the report month — meta_breakdown_daily[age_gender]
+     * folded onto the gender axis (mirrors the dashboard Audience fold). Cost /
+     * clicks / CPC / CTR / CPM / share. Reach + frequency aren't stored on the
+     * breakdown yet, so they're intentionally absent (added with the Meta pull).
+     *
+     * @return array<string, mixed>
+     */
+    private function genderSection(int $brandId, string $start, string $end, bool $usd): array
+    {
+        $money = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+
+        try {
+            $rows = MetaBreakdownDaily::query()
+                ->where('brand_id', $brandId)
+                ->where('platform', 'meta')
+                ->where('breakdown_type', 'age_gender')
+                ->whereBetween('date', [$start, $end])
+                ->groupBy('segment_key')
+                ->selectRaw('segment_key,
+                    COALESCE(SUM(' . $money('spend') . '), 0) AS spend,
+                    COALESCE(SUM(impressions), 0) AS impressions,
+                    COALESCE(SUM(clicks), 0) AS clicks')
+                ->get();
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'gender', 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+
+        if ($rows->isEmpty()) {
+            return ['status' => 'no_data'];
+        }
+
+        $acc = [];
+        foreach ($rows as $r) {
+            $g = $this->genderOf((string) $r->segment_key);
+            $acc[$g] ??= ['label' => ucfirst($g), 'cost' => 0.0, 'impressions' => 0, 'clicks' => 0];
+            $acc[$g]['cost']        += (float) $r->spend;
+            $acc[$g]['impressions'] += (int) $r->impressions;
+            $acc[$g]['clicks']      += (int) $r->clicks;
+        }
+
+        $totalCost = 0.0;
+        foreach ($acc as $a) {
+            $totalCost += $a['cost'];
+        }
+
+        $out = [];
+        foreach ($acc as $a) {
+            $cost = round($a['cost'], 2);
+            $impr = (int) $a['impressions'];
+            $clk  = (int) $a['clicks'];
+            $out[] = [
+                'label'  => $a['label'],
+                'cost'   => $cost,
+                'clicks' => $clk,
+                'cpc'    => $clk > 0 ? round($cost / $clk, 2) : null,
+                'ctr'    => $impr > 0 ? round($clk / $impr * 100, 2) : null,
+                'cpm'    => $impr > 0 ? round($cost / $impr * 1000, 2) : null,
+                'share'  => $totalCost > 0 ? round($cost / $totalCost, 4) : null,
+            ];
+        }
+        usort($out, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
+
+        return ['status' => 'ready', 'metrics' => $out];
+    }
+
+    /**
+     * ROAS by country, month over month = commerce country revenue ÷ Meta country
+     * spend, per calendar month. Reveals the scaling opportunity: low-spend,
+     * high-ROAS countries. Ranked by Meta spend (where the money actually is), and
+     * the section's blended ROAS drives the green/red heat. "no_data" until the
+     * Meta `country` breakdown is on file.
+     *
+     * @param array<int, string> $months
+     * @return array<string, mixed>
+     */
+    private function roasByCountrySection(int $brandId, array $months, bool $usd): array
+    {
+        $start = CarbonImmutable::parse($months[0] . '-01')->toDateString();
+        $end   = CarbonImmutable::parse(end($months) . '-01')->endOfMonth()->toDateString();
+
+        try {
+            $rev   = $this->series->rawByMonth($brandId, 'country', $start, $end, $usd);
+            $spend = $this->metaSpendByMonth($brandId, 'country', $start, $end, $usd);
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'roasByCountry', 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+
+        if ($spend === []) {
+            return ['status' => 'no_data'];
+        }
+
+        $totRevAll = 0.0;
+        $totSpendAll = 0.0;
+        $rows = [];
+        foreach ($spend as $key => $s) {
+            $revByM  = $rev[$key]['byMonth'] ?? [];
+            $byMonth = [];
+            $tRev = 0.0;
+            $tSpend = 0.0;
+            foreach ($months as $m) {
+                $sp = (float) ($s['byMonth'][$m] ?? 0);
+                $rv = (float) ($revByM[$m] ?? 0);
+                $byMonth[$m] = $sp > 0 ? round($rv / $sp, 2) : null;
+                $tSpend += $sp;
+                $tRev   += $rv;
+            }
+            $totSpendAll += $tSpend;
+            $totRevAll   += $tRev;
+            $rows[] = [
+                'key'     => (string) $key,
+                'label'   => (string) $s['label'],
+                'byMonth' => $byMonth,
+                'spend'   => round($tSpend, 2),
+                'roas'    => $tSpend > 0 ? round($tRev / $tSpend, 2) : null,
+            ];
+        }
+
+        usort($rows, static fn (array $a, array $b): int => $b['spend'] <=> $a['spend']);
+        $rows = array_slice($rows, 0, 8);
+
+        return [
+            'status' => 'ready',
+            'roas'   => [
+                'months'  => $months,
+                'rows'    => $rows,
+                'blended' => $totSpendAll > 0 ? round($totRevAll / $totSpendAll, 2) : null,
+            ],
+        ];
+    }
+
+    /**
+     * Meta spend per segment per calendar month from meta_breakdown_daily, in
+     * display currency. Shape mirrors MonthlySeries::rawByMonth so the two pair up.
+     *
+     * @return array<string, array{label: string, byMonth: array<string, float>}>
+     */
+    private function metaSpendByMonth(int $brandId, string $dimension, string $start, string $end, bool $usd): array
+    {
+        $spend = $usd ? 'spend * COALESCE(fx_rate_to_usd, 1)' : 'spend';
+
+        $rows = MetaBreakdownDaily::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'meta')
+            ->where('breakdown_type', $dimension)
+            ->whereBetween('date', [$start, $end])
+            ->groupByRaw("segment_key, DATE_FORMAT(date, '%Y-%m')")
+            ->selectRaw("segment_key,
+                MAX(segment_label) AS label,
+                DATE_FORMAT(date, '%Y-%m') AS ym,
+                COALESCE(SUM({$spend}), 0) AS spend")
+            ->get();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $key = (string) $r->segment_key;
+            if ($key === '') {
+                continue;
+            }
+            $out[$key] ??= ['label' => (string) ($r->label ?: $key), 'byMonth' => []];
+            $out[$key]['byMonth'][(string) $r->ym] = (float) $r->spend;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ad spend by landing page × best sellers — "is the ad budget behind the
+     * winners?". The Inventory report's join: product_catalog bridges Meta spend
+     * (ad_product_daily, by product HANDLE) and commerce revenue/units (by product
+     * TITLE), plus current stock. Native currency (matches the Inventory report;
+     * ad_product_daily carries no fx). Ranked by revenue, top 8.
+     *
+     * @return array<string, mixed>
+     */
+    private function landingSellersSection(int $brandId, string $start, string $end): array
+    {
+        try {
+            $products = ProductCatalog::query()->where('brand_id', $brandId)->get();
+            if ($products->isEmpty()) {
+                return ['status' => 'no_data'];
+            }
+
+            $adByHandle = AdProductDaily::query()
+                ->where('brand_id', $brandId)
+                ->whereBetween('date', [$start, $end])
+                ->selectRaw('product_key, COALESCE(SUM(spend), 0) AS spend')
+                ->groupBy('product_key')
+                ->get()
+                ->keyBy('product_key');
+
+            $commByTitle = CommerceDailyMetric::query()
+                ->where('brand_id', $brandId)
+                ->where('dimension_type', 'product')
+                ->whereBetween('date', [$start, $end])
+                ->selectRaw('dimension_key,
+                    COALESCE(SUM(units), 0)          AS units,
+                    COALESCE(SUM(total_sales), 0)    AS total_sales,
+                    COALESCE(SUM(refunds_amount), 0) AS refunds')
+                ->groupBy('dimension_key')
+                ->get()
+                ->keyBy('dimension_key');
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'landingSellers', 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+
+        $rows = [];
+        foreach ($products as $p) {
+            $ad      = $adByHandle->get($p->handle);
+            $c       = $commByTitle->get($p->title);
+            $spend   = round((float) ($ad->spend ?? 0), 2);
+            $revenue = round((float) ($c->total_sales ?? 0) + (float) ($c->refunds ?? 0), 2);
+            if ($spend <= 0.0 && $revenue <= 0.0) {
+                continue; // neither advertised nor sold this month — skip
+            }
+            $stock = (int) $p->total_inventory;
+            $roas  = $spend > 0 ? round($revenue / $spend, 2) : null;
+            $rows[] = [
+                'label'   => (string) $p->title,
+                'spend'   => $spend,
+                'revenue' => $revenue,
+                'roas'    => $roas,
+                'units'   => (int) ($c->units ?? 0),
+                'stock'   => $stock,
+                'read'    => $this->landingRead($spend, $revenue, $roas, $stock),
+            ];
+        }
+
+        if ($rows === []) {
+            return ['status' => 'no_data'];
+        }
+
+        usort($rows, static fn (array $a, array $b): int => $b['revenue'] <=> $a['revenue']);
+
+        return ['status' => 'ready', 'products' => array_slice($rows, 0, 8)];
+    }
+
+    /** Plain-English read pairing spend efficiency with stock urgency. */
+    private function landingRead(float $spend, float $revenue, ?float $roas, int $stock): string
+    {
+        if ($spend <= 0.0 && $revenue > 0.0) {
+            return 'Selling organically — no ad spend behind it';
+        }
+        if ($roas !== null && $roas >= 4.0 && $stock > 0 && $stock <= 20) {
+            return 'Winner, low stock — reorder';
+        }
+        if ($stock > 0 && $stock <= 20) {
+            return 'Low stock — reorder';
+        }
+        if ($roas !== null && $roas < 2.0) {
+            return 'Spend-heavy vs return';
+        }
+
+        return '';
+    }
+
+    /**
+     * Ad spend by placement for the report month — meta_breakdown_daily[placement]
+     * (publisher × position, e.g. "IG · Feed"). Cost / reach / frequency / clicks
+     * / CPC / CTR / CPM / share. Reach + frequency are NULL until a re-sync
+     * captures reach (added to the breakdown pull in this increment); summed reach
+     * is an upper bound so frequency (impressions ÷ reach) is approximate.
+     *
+     * @return array<string, mixed>
+     */
+    private function placementSection(int $brandId, string $start, string $end, bool $usd): array
+    {
+        $money = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+
+        try {
+            $rows = MetaBreakdownDaily::query()
+                ->where('brand_id', $brandId)
+                ->where('platform', 'meta')
+                ->where('breakdown_type', 'placement')
+                ->whereBetween('date', [$start, $end])
+                ->groupBy('segment_key', 'segment_label')
+                ->selectRaw('segment_key, MAX(segment_label) AS label,
+                    COALESCE(SUM(' . $money('spend') . '), 0) AS spend,
+                    COALESCE(SUM(impressions), 0) AS impressions,
+                    COALESCE(SUM(clicks), 0) AS clicks,
+                    COALESCE(SUM(reach), 0) AS reach')
+                ->get();
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'placement', 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+
+        if ($rows->isEmpty()) {
+            return ['status' => 'no_data'];
+        }
+
+        $total = 0.0;
+        foreach ($rows as $r) {
+            $total += (float) $r->spend;
+        }
+
+        $out = [];
+        foreach ($rows as $r) {
+            $cost  = round((float) $r->spend, 2);
+            $impr  = (int) $r->impressions;
+            $clk   = (int) $r->clicks;
+            $reach = (int) $r->reach;
+            $out[] = [
+                'label'  => $this->placementLabel((string) ($r->label ?: $r->segment_key)),
+                'cost'   => $cost,
+                'reach'  => $reach > 0 ? $reach : null,
+                'freq'   => $reach > 0 ? round($impr / $reach, 2) : null,
+                'clicks' => $clk,
+                'cpc'    => $clk > 0 ? round($cost / $clk, 2) : null,
+                'ctr'    => $impr > 0 ? round($clk / $impr * 100, 2) : null,
+                'cpm'    => $impr > 0 ? round($cost / $impr * 1000, 2) : null,
+                'share'  => $total > 0 ? round($cost / $total, 4) : null,
+            ];
+        }
+        usort($out, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
+
+        return ['status' => 'ready', 'placement' => array_slice($out, 0, 10)];
+    }
+
+    /** Prettify a Meta placement segment ("instagram · feed" → "IG · Feed"). */
+    private function placementLabel(string $seg): string
+    {
+        $parts = array_map(static function (string $p): string {
+            $p = strtolower(trim($p));
+
+            return match ($p) {
+                'instagram'        => 'IG',
+                'facebook'         => 'FB',
+                'audience_network' => 'Audience Network',
+                'messenger'        => 'Messenger',
+                default            => ucwords(str_replace('_', ' ', $p)),
+            };
+        }, explode('·', $seg));
+
+        return implode(' · ', $parts);
+    }
+
+    /** Parse the gender axis out of a Meta "AGE · GENDER" segment key. */
+    private function genderOf(string $seg): string
+    {
+        $parts = array_map('trim', explode('·', $seg));
+        $g     = strtolower((string) end($parts));
+        if (str_contains($g, 'female')) {
+            return 'female';
+        }
+        if (str_contains($g, 'male')) {
+            return 'male';
+        }
+
+        return 'unknown';
     }
 
     /**

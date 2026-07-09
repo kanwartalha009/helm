@@ -123,6 +123,9 @@ export interface AdAuditSection {
 // none of it (data-only), and richer as each slot is filled.
 export interface ReportContent {
   commentary?: string;
+  // Monthly report — agency-set targets for the Overall picture (editable, saved
+  // with the share alongside the commentary).
+  targets?: { blendedRoas?: number | null; newCustomerRoas?: number | null };
   actions?: { kind: 'stop' | 'fix' | 'scale'; title: string; body: string }[];
   regionRead?: string;
   productRead?: string;
@@ -183,9 +186,66 @@ export interface MonthlySeriesData {
 
 export type MonthlySectionStatus = 'ready' | 'coming' | 'needs_source' | 'no_data';
 
+// Single-month metric rows (e.g. ad spend by gender). Reach/frequency are absent
+// until they're added to the Meta breakdown pull.
+export interface MonthlyGenderRow {
+  label: string;
+  cost: number;
+  clicks: number;
+  cpc: number | null;
+  ctr: number | null;
+  cpm: number | null;
+  share: number | null;
+}
+
+// ROAS-by-country month-over-month: per-month ROAS (rev ÷ Meta spend) + the
+// window spend behind it. Cells are heat-tinted against the section's blended ROAS.
+export interface MonthlyRoasRow {
+  key: string;
+  label: string;
+  byMonth: Record<string, number | null>; // Y-m => ROAS
+  spend: number;
+  roas: number | null;
+}
+
+export interface MonthlyRoasData {
+  months: string[];
+  rows: MonthlyRoasRow[];
+  blended: number | null;
+}
+
+// Landing page × best sellers: Meta spend vs product revenue, with stock + a read.
+export interface MonthlyLandingRow {
+  label: string;
+  spend: number;
+  revenue: number;
+  roas: number | null;
+  units: number;
+  stock: number;
+  read: string;
+}
+
+// Ad spend by placement (IG · Feed, IG · Reels, …). Reach/freq are null until a
+// re-sync captures reach on the breakdown pull.
+export interface MonthlyPlacementRow {
+  label: string;
+  cost: number;
+  reach: number | null;
+  freq: number | null;
+  clicks: number;
+  cpc: number | null;
+  ctr: number | null;
+  cpm: number | null;
+  share: number | null;
+}
+
 export interface MonthlyReportSection {
   status: MonthlySectionStatus;
-  data?: MonthlySeriesData;
+  data?: MonthlySeriesData;          // month-over-month heat table (country/category/product/market)
+  metrics?: MonthlyGenderRow[];      // single-month metric table (gender)
+  roas?: MonthlyRoasData;            // month-over-month ROAS heat table (roas by country)
+  products?: MonthlyLandingRow[];    // landing × best sellers (spend vs revenue + stock)
+  placement?: MonthlyPlacementRow[]; // ad spend by placement
   note?: string;
 }
 

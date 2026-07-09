@@ -33,6 +33,8 @@ final class MonthlySeries
         array $months,
         bool $usd,
         int $limit = 8,
+        ?array $groupMap = null,
+        array $groupLabels = [],
     ): ?array {
         if ($months === []) {
             return null;
@@ -45,6 +47,12 @@ final class MonthlySeries
         $rows  = $this->aggregate($brandId, $dimensionType, $first->subYear()->toDateString(), $last->toDateString(), $usd);
         if ($rows === []) {
             return null;
+        }
+
+        // Optional fold: remap each key into a group (e.g. country → market/tier)
+        // before ranking, so one query drives both the country and market tables.
+        if ($groupMap !== null) {
+            $rows = $this->regroup($rows, $groupMap, $groupLabels);
         }
 
         // The Y-m keys for the same-month-last-year YoY total (whole trailing set,
@@ -112,6 +120,18 @@ final class MonthlySeries
     }
 
     /**
+     * Raw per-key monthly revenue matrix over [start, end] — the un-ranked, un-
+     * grouped aggregate. Used where a section needs the values keyed by segment
+     * (e.g. ROAS-by-country pairs this revenue with Meta spend per country/month).
+     *
+     * @return array<string, array{label: string, byMonth: array<string, float>, ordersTotal: int}>
+     */
+    public function rawByMonth(int $brandId, string $dimensionType, string $start, string $end, bool $usd): array
+    {
+        return $this->aggregate($brandId, $dimensionType, $start, $end, $usd);
+    }
+
+    /**
      * Per dimension_key: label + revenue by Y-m across the span, and the total
      * orders. One grouped query (dimension_key × month) pivoted in PHP.
      *
@@ -142,6 +162,31 @@ final class MonthlySeries
             $out[$key] ??= ['label' => (string) ($r->label ?? $key), 'byMonth' => [], 'ordersTotal' => 0];
             $out[$key]['byMonth'][(string) $r->ym] = (float) $r->revenue;
             $out[$key]['ordersTotal']             += (int) $r->orders;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Fold per-key aggregate rows into groups (e.g. country → market) using a
+     * key→group map; unmapped keys land in "other" so groups reconcile to 100%.
+     * Preserves the full byMonth span (incl. last-year months) so YoY still holds.
+     *
+     * @param array<string, array{label: string, byMonth: array<string, float>, ordersTotal: int}> $rows
+     * @param array<string, string> $map     UPPER-cased key => group key
+     * @param array<string, string> $labels  group key => display label
+     * @return array<string, array{label: string, byMonth: array<string, float>, ordersTotal: int}>
+     */
+    private function regroup(array $rows, array $map, array $labels): array
+    {
+        $out = [];
+        foreach ($rows as $key => $r) {
+            $g = $map[strtoupper((string) $key)] ?? 'other';
+            $out[$g] ??= ['label' => (string) ($labels[$g] ?? ucfirst($g)), 'byMonth' => [], 'ordersTotal' => 0];
+            foreach ($r['byMonth'] as $ym => $v) {
+                $out[$g]['byMonth'][$ym] = ($out[$g]['byMonth'][$ym] ?? 0) + $v;
+            }
+            $out[$g]['ordersTotal'] += $r['ordersTotal'];
         }
 
         return $out;

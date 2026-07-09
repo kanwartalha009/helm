@@ -121,7 +121,7 @@ class MetaBackfillBreakdownCommand extends Command
                             MetaBreakdownDaily::upsert(
                                 $chunk,
                                 ['brand_id', 'platform', 'date', 'breakdown_type', 'segment_key'],
-                                ['segment_label', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+                                ['segment_label', 'spend', 'impressions', 'clicks', 'reach', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                             );
                         }
                         $rows += count($records);
@@ -205,6 +205,7 @@ class MetaBackfillBreakdownCommand extends Command
                 'spend'            => (float) ($r['spend'] ?? 0),
                 'impressions'      => (int) ($r['impressions'] ?? 0),
                 'clicks'           => (int) ($r['clicks'] ?? 0),
+                'reach'            => (int) ($r['reach'] ?? 0),
                 'conversions'      => (int) ($r['conversions'] ?? 0),
                 'conversion_value' => (float) ($r['conversion_value'] ?? 0),
                 'currency'         => $rowCcy,

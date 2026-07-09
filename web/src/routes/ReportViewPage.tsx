@@ -23,6 +23,7 @@ export function ReportViewPage() {
   const [period, setPeriod] = useState<ReportFiltersInput['period']>('last30');
   const [compare, setCompare] = useState<ReportFiltersInput['compare']>('previous');
   const [commentary, setCommentary] = useState('');
+  const [targets, setTargets] = useState<{ blendedRoas: number | null; newCustomerRoas: number | null }>({ blendedRoas: null, newCustomerRoas: null });
   const [showAnyway, setShowAnyway] = useState(false);
 
   const filters: ReportFiltersInput = { period, compare };
@@ -37,7 +38,7 @@ export function ReportViewPage() {
 
   const onShare = () => {
     createShare.mutate(
-      { filters, content: { commentary } },
+      { filters, content: { commentary, targets } },
       {
         onSuccess: (res) => {
           const url = window.location.origin + res.url;
@@ -108,7 +109,7 @@ export function ReportViewPage() {
             onShowAnyway={() => setShowAnyway(true)}
           />
         ) : data.reportType === 'monthly' ? (
-          <MonthlyReportDocument data={data} editable onCommentaryChange={setCommentary} />
+          <MonthlyReportDocument data={data} editable onCommentaryChange={setCommentary} onTargetsChange={setTargets} />
         ) : (
           <ReportDocument data={data} editable onCommentaryChange={setCommentary} />
         ))}

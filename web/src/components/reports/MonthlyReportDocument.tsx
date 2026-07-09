@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import { REPORT_CSS } from './ReportDocument';
-import type { MonthlyKpi, MonthlyReportData, MonthlyReportSection, MonthlySeriesData } from '@/types/reports';
+import type { MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySeriesData } from '@/types/reports';
 
 const DEFAULT_COMMENTARY =
   'Summarise the month for the store owner here — what moved, how it landed against targets, and the plan for next month. Editable before you send.';
@@ -23,16 +24,25 @@ export function MonthlyReportDocument({
   data,
   editable = false,
   onCommentaryChange,
+  onTargetsChange,
 }: {
   data: MonthlyReportData;
   editable?: boolean;
   onCommentaryChange?: (value: string) => void;
+  onTargetsChange?: (t: { blendedRoas: number | null; newCustomerRoas: number | null }) => void;
 }) {
   const { brand, currency, month, comparison, overall, sections } = data;
   const accent = data.branding?.accent || '#1f6f5c';
   const agencyName = data.branding?.agency_name || 'Roasdriven';
   const footerText = data.branding?.footer_text || 'Powered by novasolution.ae';
   const commentary = data.content?.commentary ?? DEFAULT_COMMENTARY;
+
+  // Agency targets — editable in-app, saved with the share, read-only on the
+  // public view. Drive the "Target X · met / near" note on the KPIs.
+  const t0 = data.content?.targets;
+  const [tBlended, setTBlended] = useState<number | null>(t0?.blendedRoas ?? null);
+  const [tNewCust, setTNewCust] = useState<number | null>(t0?.newCustomerRoas ?? null);
+  const push = (b: number | null, n: number | null) => onTargetsChange?.({ blendedRoas: b, newCustomerRoas: n });
 
   const money = (v: number | null) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
 
@@ -61,11 +71,18 @@ export function MonthlyReportDocument({
         <div className="rpt-sec-head"><span className="rpt-sec-num">00</span><h2>Overall picture</h2></div>
         <div className="rpt-sec-sub">{month.label} close · headline numbers vs {comparison.mom}.</div>
         <div className="rpt-kpis mrt-kpis-4">
-          <Kpi label="Blended ROAS" value={formatRoas(overall.blendedRoas.value)} delta={<RatioDelta k={overall.blendedRoas} />} />
+          <Kpi label="Blended ROAS" value={formatRoas(overall.blendedRoas.value)} delta={<RatioDelta k={overall.blendedRoas} />} note={targetNote(overall.blendedRoas.value, tBlended)} />
           <Kpi label="Revenue" value={money(overall.revenue.value)} delta={<PctDelta k={overall.revenue} />} />
           <Kpi label="Ad spend" value={money(overall.adSpend.value)} delta={<PctDelta k={overall.adSpend} goodUp={false} />} />
-          <Kpi label="ROAS · new customer" value="—" note="pending customer-type probe" />
+          <Kpi label="ROAS · new customer" value="—" note={tNewCust != null ? `Target ${tNewCust} · pending` : 'pending customer-type probe'} />
         </div>
+        {editable && (
+          <div className="mrt-targets">
+            <span className="mrt-targets-l">Targets</span>
+            <label>Blended ROAS <input type="number" step="0.1" defaultValue={tBlended ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); setTBlended(v); push(v, tNewCust); }} /></label>
+            <label>New-customer ROAS <input type="number" step="0.1" defaultValue={tNewCust ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); setTNewCust(v); push(tBlended, v); }} /></label>
+          </div>
+        )}
         <div className="rpt-narrative">
           <div className="rpt-ai-tag">Commentary{editable ? ' · editable' : ''}</div>
           {editable ? (
@@ -108,9 +125,19 @@ function SectionBlock({ num, title, sub, section, currency }: { num: string; tit
     <section className="rpt-sec">
       <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>{title}</h2></div>
       <div className="rpt-sec-sub">{sub}</div>
-      {section.status === 'ready' && section.data
-        ? <MoMTable data={section.data} currency={currency} />
-        : <Ribbon status={section.status} note={section.note} />}
+      {section.status === 'ready' && section.data ? (
+        <MoMTable data={section.data} currency={currency} />
+      ) : section.status === 'ready' && section.roas ? (
+        <RoasTable data={section.roas} currency={currency} />
+      ) : section.status === 'ready' && section.metrics ? (
+        <GenderTable rows={section.metrics} currency={currency} />
+      ) : section.status === 'ready' && section.products ? (
+        <LandingTable rows={section.products} currency={currency} />
+      ) : section.status === 'ready' && section.placement ? (
+        <PlacementTable rows={section.placement} currency={currency} />
+      ) : (
+        <Ribbon status={section.status} note={section.note} />
+      )}
     </section>
   );
 }
@@ -171,6 +198,171 @@ function MoMTable({ data, currency }: { data: MonthlySeriesData; currency: strin
   );
 }
 
+// ROAS by country, month over month — each cell heat-tinted vs the section's
+// blended ROAS. The Meta-spend column reveals the low-spend, high-ROAS scalers.
+function RoasTable({ data, currency }: { data: MonthlyRoasData; currency: string }) {
+  const money = (v: number | null) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+  const { months, blended } = data;
+  return (
+    <>
+      <div className="rpt-tbl-wrap">
+        <table className="rpt-tbl mrt-tbl">
+          <thead>
+            <tr>
+              <th>Country</th>
+              {months.map((m) => <th className="r" key={m}>{monthLabel(m)}</th>)}
+              <th className="r">ROAS</th>
+              <th className="r">Meta spend</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => (
+              <tr key={r.key}>
+                <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
+                {months.map((m) => {
+                  const v = r.byMonth[m] ?? null;
+                  return <td className={`r ${roasHeat(v, blended)}`} key={m}>{v == null ? '—' : `${v.toFixed(1)}×`}</td>;
+                })}
+                <td className="r"><b>{r.roas == null ? '—' : `${r.roas.toFixed(1)}×`}</b></td>
+                <td className="r">{money(r.spend)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="rpt-cap">Green = above your blended ROAS{blended == null ? '' : ` (${blended.toFixed(1)}×)`}, red = below. Low-spend, high-ROAS countries are the scaling opportunity.</div>
+    </>
+  );
+}
+
+function roasHeat(v: number | null, blended: number | null): string {
+  if (v == null || blended == null || blended <= 0) return '';
+  const r = v / blended;
+  if (r >= 1.5) return 'mrt-g3';
+  if (r >= 1.15) return 'mrt-g2';
+  if (r > 1.02) return 'mrt-g1';
+  if (r <= 0.5) return 'mrt-r3';
+  if (r <= 0.85) return 'mrt-r2';
+  if (r < 0.98) return 'mrt-r1';
+  return '';
+}
+
+// Single-month ad-spend-by-gender table (cost / efficiency / share).
+function GenderTable({ rows, currency }: { rows: MonthlyGenderRow[]; currency: string }) {
+  const money = (v: number | null) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+  return (
+    <>
+      <div className="rpt-tbl-wrap">
+        <table className="rpt-tbl mrt-tbl">
+          <thead>
+            <tr>
+              <th>Gender</th>
+              <th className="r">Cost</th>
+              <th className="r">Clicks</th>
+              <th className="r">CPC</th>
+              <th className="r">CTR</th>
+              <th className="r">CPM</th>
+              <th className="r">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label}>
+                <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
+                <td className="r">{money(r.cost)}</td>
+                <td className="r">{r.clicks.toLocaleString()}</td>
+                <td className="r">{money(r.cpc)}</td>
+                <td className="r">{r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`}</td>
+                <td className="r">{money(r.cpm)}</td>
+                <td className="r">{r.share == null ? '—' : `${(r.share * 100).toFixed(0)}%`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="rpt-cap">Reach &amp; frequency aren’t stored on breakdowns yet — they arrive when added to the Meta pull.</div>
+    </>
+  );
+}
+
+// Landing page × best sellers — Meta spend vs product revenue, stock, and a read.
+function LandingTable({ rows, currency }: { rows: MonthlyLandingRow[]; currency: string }) {
+  const money = (v: number | null) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+  return (
+    <div className="rpt-tbl-wrap">
+      <table className="rpt-tbl mrt-tbl">
+        <thead>
+          <tr>
+            <th>Product (landing)</th>
+            <th className="r">Meta spend</th>
+            <th className="r">Revenue</th>
+            <th className="r">ROAS</th>
+            <th className="r">Units</th>
+            <th className="r">Stock</th>
+            <th>Read</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label}>
+              <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
+              <td className="r">{money(r.spend)}</td>
+              <td className="r">{money(r.revenue)}</td>
+              <td className="r">{r.roas == null ? '—' : `${r.roas.toFixed(1)}×`}</td>
+              <td className="r">{r.units.toLocaleString()}</td>
+              <td className={`r ${r.stock > 0 && r.stock <= 20 ? 'mrt-r1' : ''}`}>{r.stock.toLocaleString()}</td>
+              <td>{r.read}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Ad spend by placement (cost / reach / frequency / efficiency / share).
+function PlacementTable({ rows, currency }: { rows: MonthlyPlacementRow[]; currency: string }) {
+  const money = (v: number | null) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+  const hasReach = rows.some((r) => r.reach != null);
+  return (
+    <>
+      <div className="rpt-tbl-wrap">
+        <table className="rpt-tbl mrt-tbl">
+          <thead>
+            <tr>
+              <th>Placement</th>
+              <th className="r">Cost</th>
+              <th className="r">Reach</th>
+              <th className="r">Freq</th>
+              <th className="r">Clicks</th>
+              <th className="r">CPC</th>
+              <th className="r">CTR</th>
+              <th className="r">CPM</th>
+              <th className="r">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label}>
+                <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
+                <td className="r">{money(r.cost)}</td>
+                <td className="r">{r.reach == null ? '—' : r.reach.toLocaleString()}</td>
+                <td className="r">{r.freq == null ? '—' : r.freq.toFixed(2)}</td>
+                <td className="r">{r.clicks.toLocaleString()}</td>
+                <td className="r">{money(r.cpc)}</td>
+                <td className="r">{r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`}</td>
+                <td className="r">{money(r.cpm)}</td>
+                <td className="r">{r.share == null ? '—' : `${(r.share * 100).toFixed(0)}%`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!hasReach && <div className="rpt-cap">Reach &amp; frequency populate after the next sync — the pull now captures reach; existing history shows “—” until re-synced.</div>}
+    </>
+  );
+}
+
 function Ribbon({ status, note }: { status: string; note?: string }) {
   const meta = RIBBON[status] ?? RIBBON.coming;
   return (
@@ -205,6 +397,14 @@ function RatioDelta({ k }: { k: MonthlyKpi }) {
   return <span className={dir}>{k.deltaAbs > 0 ? '+' : ''}{k.deltaAbs.toFixed(2)}× MoM</span>;
 }
 
+function targetNote(value: number | null, target: number | null): string | undefined {
+  if (target == null) return undefined;
+  if (value == null) return `Target ${target}`;
+  if (value >= target) return `Target ${target} · met ✓`;
+  if (value >= 0.9 * target) return `Target ${target} · ${Math.round((value / target) * 100)}% there`;
+  return `Target ${target} · below`;
+}
+
 function monthLabel(ym: string): string {
   const [y, m] = ym.split('-');
   const name = new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-GB', { month: 'short' });
@@ -226,6 +426,10 @@ function heatClass(cur: number, prev: number | null): string {
 const MONTHLY_CSS = `
 .rpt .mrt-kpis-4{grid-template-columns:repeat(4,1fr)}
 .rpt .mrt-kpis-4 .rpt-kpi-v{font-size:30px}
+.rpt .mrt-targets{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:-8px 0 20px;padding:10px 16px;background:var(--paper);border:1px dashed var(--line-2);border-radius:10px;font-size:12px}
+.rpt .mrt-targets-l{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.rpt .mrt-targets label{display:inline-flex;align-items:center;gap:7px;color:var(--ink-2)}
+.rpt .mrt-targets input{width:66px;padding:4px 8px;border:1px solid var(--line-2);border-radius:6px;font-family:var(--mono);font-size:12px;background:var(--paper);color:var(--ink)}
 .rpt .mrt-tbl td.name{min-width:180px}
 .rpt .mrt-tbl td.r{font-size:11px}
 .rpt .mrt-g1{background:#EAF6EE} .rpt .mrt-g2{background:#CFEBD8;color:#14532D} .rpt .mrt-g3{background:#A7DCB8;color:#14532D;font-weight:600}

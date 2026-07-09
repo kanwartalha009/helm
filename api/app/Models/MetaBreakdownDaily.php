@@ -23,6 +23,7 @@ class MetaBreakdownDaily extends Model
         'spend'            => 'float',
         'impressions'      => 'integer',
         'clicks'           => 'integer',
+        'reach'            => 'integer',
         'conversions'      => 'integer',
         'conversion_value' => 'float',
         'fx_rate_to_usd'   => 'float',

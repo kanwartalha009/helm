@@ -3,6 +3,7 @@ import { api } from '@/lib/api';
 import { toast } from '@/stores/toastStore';
 import type {
   AnyReportData,
+  ReportContent,
   ReportFiltersInput,
   ReportTypeItem,
 } from '@/types/reports';
@@ -55,7 +56,7 @@ export function useCreateShare(slug: string | undefined, type: string | undefine
   return useMutation({
     mutationFn: async (payload: {
       filters: ReportFiltersInput;
-      content: { commentary?: string };
+      content: ReportContent;
     }) => {
       const { data } = await api.post<{ token: string; url: string }>(
         `/brands/${slug}/reports/${type}/shares`,

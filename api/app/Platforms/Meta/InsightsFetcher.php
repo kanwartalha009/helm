@@ -377,7 +377,7 @@ final class InsightsFetcher
     {
         $rows = $this->client->paged($accountId . '/insights', [
             'level'                           => 'account',
-            'fields'                          => 'spend,impressions,clicks,actions,action_values,account_currency',
+            'fields'                          => 'spend,impressions,clicks,reach,actions,action_values,account_currency',
             'breakdowns'                      => implode(',', $breakdowns),
             'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
             'time_range'                      => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
@@ -410,6 +410,7 @@ final class InsightsFetcher
                 'spend'            => isset($row['spend']) ? round((float) $row['spend'], 2) : 0.0,
                 'impressions'      => (int) ($row['impressions'] ?? 0),
                 'clicks'           => (int) ($row['clicks'] ?? 0),
+                'reach'            => (int) ($row['reach'] ?? 0),
                 'conversions'      => (int) round(self::attributedTotal($row['actions'] ?? [], self::PURCHASE_ACTION_TYPES)),
                 'conversion_value' => round(self::attributedTotal($row['action_values'] ?? [], self::PURCHASE_ACTION_TYPES), 2),
                 'currency'         => strtoupper((string) ($row['account_currency'] ?? $fallbackCcy)),
