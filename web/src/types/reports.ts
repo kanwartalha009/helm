@@ -303,6 +303,19 @@ export interface MonthlyFunnelRow {
   cvr: number | null; // purchase ÷ sessions %
 }
 
+/** Channel mix — Meta / Google / TikTok side by side for the month. Revenue
+ * and ROAS are platform-reported (attribution overlaps); share is of spend. */
+export interface MonthlyChannelRow {
+  platform: string;
+  label: string;
+  spend: number;
+  purchases: number;
+  revenue: number;
+  roas: number | null;
+  cpa: number | null;
+  share: number | null;
+}
+
 export interface MonthlyReportSection {
   status: MonthlySectionStatus;
   data?: MonthlySeriesData;          // month-over-month heat table (country/category/product/market)
@@ -310,6 +323,7 @@ export interface MonthlyReportSection {
   roas?: MonthlyRoasData;            // month-over-month ROAS heat table (roas by country)
   products?: MonthlyLandingRow[];    // landing × best sellers (spend vs revenue + stock)
   placement?: MonthlyPlacementRow[]; // ad spend by placement
+  channels?: MonthlyChannelRow[];    // channel mix (Meta/Google/TikTok side by side)
   funnel?: MonthlyFunnelRow[];       // web funnel by country / landing path
   customers?: MonthlyCustomerRow[];  // new vs existing customers, month over month
   note?: string;
@@ -342,6 +356,7 @@ export interface MonthlyReportData {
     roasByCountry: MonthlyReportSection;
     gender: MonthlyReportSection;
     market: MonthlyReportSection;
+    channelMix: MonthlyReportSection;
     placement: MonthlyReportSection;
     landingSellers: MonthlyReportSection;
     newVsExisting: MonthlyReportSection;
