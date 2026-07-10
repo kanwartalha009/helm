@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Services\Sync;
 
 use App\Models\AdCampaignDailyMetric;
+use App\Models\AdProductDaily;
 use App\Models\MetaBreakdownDaily;
 use App\Models\PlatformConnection;
 use App\Platforms\Google\ReportsFetcher;
+use App\Platforms\Meta\AdProductFetcher;
 use App\Platforms\Meta\InsightsFetcher;
 use App\Platforms\TikTok\ReportsFetcher as TikTokReportsFetcher;
 use App\Services\Currency\FxService;
@@ -34,6 +36,7 @@ class CampaignSync
         private readonly ReportsFetcher $google,
         private readonly TikTokReportsFetcher $tiktok,
         private readonly FxService $fx,
+        private readonly AdProductFetcher $adProducts,
     ) {}
 
     /** Sync one day's campaigns for an ad-platform connection. Returns rows written. */
@@ -146,6 +149,71 @@ class CampaignSync
         }
 
         return $this->storeBreakdown($conn, 'meta', $date, $type, $rows);
+    }
+
+    /**
+     * Sync one day's Meta spend attributed to Shopify products (by ad landing
+     * URL) into ad_product_daily — the spend/ROAS side of the Inventory
+     * Intelligence report. Before this, only the manual meta:backfill-ad-products
+     * command wrote that table, so recent windows (last 7/30 days) showed empty
+     * Meta spend. Costs ONE extra Meta insights call (level=ad, single day) per
+     * brand-day, plus batched creative reads for ads that actually spent — the
+     * fetcher paces itself. Meta-only and best-effort, mirroring
+     * syncMetaBreakdown: a failure is logged and swallowed so it can never fail
+     * the day's main sync. Upsert key + fx-snapshot conventions match the
+     * backfill command exactly, so the two write paths stay idempotent against
+     * each other.
+     */
+    public function syncMetaAdProducts(PlatformConnection $conn, CarbonImmutable $date): int
+    {
+        if ($conn->platform !== 'meta') {
+            return 0;
+        }
+
+        try {
+            $rows = $this->adProducts->fetchDailyByProduct($conn, $date, $date);
+        } catch (Throwable $e) {
+            Log::warning('sync.meta_ad_products.failed', [
+                'brand_id' => $conn->brand_id,
+                'date'     => $date->toDateString(),
+                'error'    => $e->getMessage(),
+            ]);
+
+            return 0;
+        }
+        if ($rows === []) {
+            return 0;
+        }
+
+        $brandId  = (int) $conn->brand_id;
+        $fallback = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+
+        $records = [];
+        foreach ($rows as $r) {
+            $rowCcy = strtoupper((string) ($r['currency'] ?? $fallback));
+
+            $records[] = [
+                'brand_id'       => $brandId,
+                'date'           => (string) $r['date'],   // single-day fetch → always $date
+                'product_key'    => mb_substr((string) $r['key'], 0, 191),
+                'spend'          => (float) $r['spend'],
+                'ads_count'      => (int) $r['ads'],
+                'currency'       => $rowCcy,
+                'fx_rate_to_usd' => $this->fx->cachedToUsd($rowCcy, $date),
+                'is_complete'    => true,
+                'pulled_at'      => now(),
+            ];
+        }
+
+        foreach (array_chunk($records, 500) as $chunk) {
+            AdProductDaily::upsert(
+                $chunk,
+                ['brand_id', 'date', 'product_key'],
+                ['spend', 'ads_count', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+            );
+        }
+
+        return count($records);
     }
 
     /**

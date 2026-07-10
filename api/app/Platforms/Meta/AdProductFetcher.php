@@ -28,7 +28,10 @@ use Throwable;
  * heavy): creatives are read only for ads that actually spent, batched 45 per
  * ?ids= call with pacing; the caller chunks the date range by month.
  */
-final class AdProductFetcher
+// Not final: CampaignSync type-hints this concrete class for the daily
+// ad-product sync, and its tests need a test double at that seam
+// (tests/Feature/InventoryQueryTest) — same reasoning as CampaignSync itself.
+class AdProductFetcher
 {
     public const RESERVED_COLLECTION = '__collection';
     public const RESERVED_OTHER      = '__other';

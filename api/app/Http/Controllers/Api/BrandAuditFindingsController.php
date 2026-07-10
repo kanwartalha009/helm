@@ -9,6 +9,7 @@ use App\Models\Brand;
 use App\Models\DailyMetric;
 use App\Reports\Support\AdAudit;
 use App\Reports\Support\DeadInventory;
+use App\Services\Rules\AdSetFlags;
 use App\Services\Rules\ProductFlags;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -28,6 +29,7 @@ class BrandAuditFindingsController extends Controller
         private readonly AdAudit $ads,
         private readonly DeadInventory $inventory,
         private readonly ProductFlags $productFlags,
+        private readonly AdSetFlags $adSetFlags,
     ) {}
 
     public function index(Request $request, Brand $brand): JsonResponse
@@ -248,6 +250,48 @@ class BrandAuditFindingsController extends Controller
                 'Including ' . implode(', ', $agg['titles']) . '. Full list on the Products page.',
                 ['flag' => $key, 'count' => $agg['count']],
             );
+        }
+
+        // Ad-set flag rollups — per platform, per flag type (counts + example
+        // names), from the SAME AdSetFlags engine the campaign drawer uses, so an
+        // ad set is never flagged in the drawer but silent here. Plus the
+        // account-level fragmentation signal (≥4 active ad sets averaging under
+        // the per-day floor).
+        $adSets      = $this->adSetFlags->forBrand($brand, $start, $end);
+        $fragmentUsd = (float) (config('rules.adset.fragment_usd_day') ?? 50);
+        $byPlatformFlag = [];
+        $activeSmall    = [];
+        foreach ($adSets as $s) {
+            $pf = (string) $s['platform'];
+            if ($s['isActive'] && $len > 0 && ((float) $s['spend'] / $len) < $fragmentUsd) {
+                $activeSmall[$pf] = ($activeSmall[$pf] ?? 0) + 1;
+            }
+            foreach ($s['flags'] as $fl) {
+                $k = $pf . '|' . $fl['key'];
+                $byPlatformFlag[$k] ??= ['platform' => $pf, 'flag' => $fl['key'], 'label' => $fl['label'], 'severity' => $fl['severity'], 'count' => 0, 'names' => []];
+                $byPlatformFlag[$k]['count']++;
+                if (count($byPlatformFlag[$k]['names']) < 3) {
+                    $byPlatformFlag[$k]['names'][] = $s['name'] !== '' ? (string) $s['name'] : (string) $s['adSetId'];
+                }
+            }
+        }
+        foreach ($byPlatformFlag as $agg) {
+            $findings[] = $this->finding(
+                'ads', $agg['severity'],
+                ucfirst($agg['platform']) . ': ' . $agg['count'] . ' ad set' . ($agg['count'] === 1 ? '' : 's') . ' — ' . $agg['label'],
+                'Including ' . implode(', ', $agg['names']) . '. Open the campaign to see ad-set detail.',
+                ['platform' => $agg['platform'], 'flag' => $agg['flag'], 'count' => $agg['count']],
+            );
+        }
+        foreach ($activeSmall as $pf => $cnt) {
+            if ($cnt >= 4) {
+                $findings[] = $this->finding(
+                    'ads', 'info',
+                    ucfirst($pf) . ': budget spread thin across ' . $cnt . ' ad sets',
+                    'These active ad sets each average under $' . number_format($fragmentUsd, 0) . '/day — consolidating to 3–5 usually improves optimization (industry guidance).',
+                    ['platform' => $pf, 'flag' => 'fragmentation', 'count' => $cnt],
+                );
+            }
         }
 
         if ($findings === []) {

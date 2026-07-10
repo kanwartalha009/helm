@@ -35,9 +35,13 @@ final class BrandMarginTest extends TestCase
         ]);
 
         $res->assertOk();
-        $res->assertJsonPath('grossMarginPct', 50.0);
-        $res->assertJsonPath('targetCpa', 30.0);
-        $res->assertJsonPath('breakevenRoas', 2.0); // 1 ÷ 0.50
+        // PHP's json_encode drops the zero fraction on whole floats (50.0
+        // encodes as 50, decoding back to int), so strict assertJsonPath is
+        // type-flaky on round numbers. Cast-then-compare keeps the assertion
+        // exact on VALUE without depending on JSON number representation.
+        $this->assertSame(50.0, (float) $res->json('grossMarginPct'));
+        $this->assertSame(30.0, (float) $res->json('targetCpa'));
+        $this->assertSame(2.0, (float) $res->json('breakevenRoas')); // 1 ÷ 0.50
 
         $brand->refresh();
         $this->assertSame('50.00', (string) $brand->gross_margin_pct);

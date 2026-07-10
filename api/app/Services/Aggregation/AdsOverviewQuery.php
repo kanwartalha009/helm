@@ -1291,6 +1291,19 @@ final class AdsOverviewQuery
      * @param array<string, mixed> $params
      * @return array{0: string, 1: string}
      */
+    /**
+     * Public window resolver so callers outside this class (the ad-set drawer
+     * endpoint) resolve [start, end] with the exact same period logic the ads
+     * views use — one definition, no drift.
+     *
+     * @param array<string, mixed> $params
+     * @return array{0: string, 1: string}
+     */
+    public function resolveWindow(Brand $brand, array $params): array
+    {
+        return $this->window($params, $brand->timezone ?: 'UTC');
+    }
+
     private function window(array $params, string $tz): array
     {
         $period = strtolower((string) ($params['period'] ?? 'last30'));

@@ -80,10 +80,21 @@ class BackfillBrandDatasetJob implements ShouldQueue
             }
         }
         if ($wants('campaigns') && array_intersect(['meta', 'google', 'tiktok'], $connected) !== []) {
-            // ads:backfill-campaigns handles meta|google|tiktok itself; the ad-set
-            // grain (spec §4) rides the same dataset so one click fills both.
+            // ads:backfill-campaigns handles meta|google|tiktok itself.
             $commands[] = ['ads:backfill-campaigns', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+            // Ad-set grain (spec §4 Phase 3c) rides the same dataset so one
+            // click fills both levels.
             $commands[] = ['ads:backfill-adsets', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+        }
+        if ($wants('campaigns') && in_array('meta', $connected, true)) {
+            // Product-attributed Meta spend (ad_product_daily) rides the
+            // campaigns dataset — powers the Inventory Intelligence report.
+            $commands[] = ['meta:backfill-ad-products', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+        }
+        if ($wants('campaigns') && array_intersect(['google', 'tiktok'], $connected) !== []) {
+            // Google + TikTok product-attributed spend (ad_product_daily, spec §4
+            // Phase 5) — powers cross-platform product ROAS on the products page.
+            $commands[] = ['ads:backfill-ad-products', ['brand' => (string) $this->brand->slug, '--since' => $since]];
         }
         if ($wants('creatives')) {
             if (in_array('meta', $connected, true)) {

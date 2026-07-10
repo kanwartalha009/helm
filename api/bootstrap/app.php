@@ -103,6 +103,18 @@ return Application::configure(basePath: dirname(__DIR__))
             ->onOneServer()
             ->appendOutputTo(storage_path('logs/schedule.log'));
 
+        // Shopify product catalog snapshot (stock + variants + handle↔title)
+        // into product_catalog — the stock the Inventory Intelligence page
+        // shows. 14:10 UTC, after the 13:00 sync, beside the 14:00 inventory
+        // snapshot. Without this the catalog only refreshed when an operator
+        // ran shopify:sync-catalog by hand, so stock went stale silently.
+        $schedule->command('shopify:sync-catalog')
+            ->dailyAt('14:10')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
         // sync_logs retention — keep last 90 days. Sunday 02:00 UTC.
         $schedule->call(function (): void {
             SyncLog::where('created_at', '<', now()->subDays(90))->delete();

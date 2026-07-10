@@ -176,6 +176,12 @@ class SyncBrandDayJob implements ShouldQueue
             // and swallows its own errors), so it never affects the main sync.
             $campaignSync->syncMetaBreakdown($this->platformConnection, $this->date);
 
+            // Meta spend attributed to Shopify products (ad_product_daily) for
+            // the Inventory Intelligence report — one extra Meta insights call
+            // (level=ad, single day) per brand-day. Meta-only + best-effort
+            // (self-guards and swallows its own errors) like the breakdown above.
+            $campaignSync->syncMetaAdProducts($this->platformConnection, $this->date);
+
             // TikTok audience breakdowns (country/device/age×gender) for the ads
             // hub's TikTok Audience view. Also best-effort + self-guarded to tiktok.
             foreach (['country', 'device', 'age_gender'] as $tiktokAxis) {

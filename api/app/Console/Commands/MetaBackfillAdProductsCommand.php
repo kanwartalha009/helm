@@ -103,7 +103,7 @@ class MetaBackfillAdProductsCommand extends Command
                     foreach (array_chunk($records, 500) as $chunk) {
                         AdProductDaily::upsert(
                             $chunk,
-                            ['brand_id', 'date', 'product_key'],
+                            ['brand_id', 'platform', 'date', 'product_key'],
                             ['spend', 'ads_count', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                         );
                     }
@@ -140,6 +140,7 @@ class MetaBackfillAdProductsCommand extends Command
 
             $records[] = [
                 'brand_id'       => $brand->id,
+                'platform'       => 'meta',
                 'date'           => $date,
                 'product_key'    => mb_substr((string) $r['key'], 0, 191),
                 'spend'          => (float) $r['spend'],

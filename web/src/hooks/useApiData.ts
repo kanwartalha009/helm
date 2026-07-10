@@ -272,6 +272,10 @@ export interface BrandProductRow {
   abc: 'A' | 'B' | 'C' | null;
   coverDays: number | null;
   sellThroughPct: number | null;
+  // Phase 5 — mapped ad spend (native) + product ROAS; null when no landing URL
+  // maps ad spend to this product. A losing_on_ads entry may appear in flags.
+  adSpend: number | null;
+  roas: number | null;
   flags: ProductFlag[];
 }
 
@@ -281,6 +285,8 @@ export interface BrandProductsResponse {
   periodEnd: string;
   rows: BrandProductRow[];
   totalRevenue: number;
+  // Phase 5 — ad-spend coverage for the footer honesty line.
+  adSpend: { mappedSpend: number; totalSpend: number; mappedPct: number | null };
   hasData: boolean;
   lastPulledAt: string | null;
   inventorySnapshotAt: string | null;

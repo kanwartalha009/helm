@@ -107,6 +107,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         // Ads hub — per-brand ad-platform Overview (Meta today; platform-agnostic).
         Route::get('brands/{brand}/ads', [AdsController::class, 'show']);
         Route::get('brands/{brand}/ads/campaigns/{campaign}', [AdsController::class, 'campaign']);
+        Route::get('brands/{brand}/ads/campaigns/{campaign}/adsets', [AdsController::class, 'adsets']);
         Route::get('brands/{brand}/ads/creatives',            [AdsController::class, 'creatives']);
         Route::get('brands/{brand}/ads/creatives/{ad}/video', [AdsController::class, 'creativeVideo']);
 

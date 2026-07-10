@@ -9,7 +9,7 @@ import { useUsers } from '@/hooks/useApiData';
 import { useCurrentUser } from '@/hooks/useSettings';
 import { formatMoney, formatNumber, formatPercent, formatRoas, pctDelta, timeAgo } from '@/lib/formatters';
 import type { DashboardRow, DashboardRowBrand } from '@/types/domain';
-import type { CollectionGroup, InventoryPeriod, InventoryStatus } from '@/types/inventory';
+import type { CollectionGroup, InventoryPeriod, InventoryResponse, InventoryStatus } from '@/types/inventory';
 
 type SortKey = 'spend' | 'units' | 'stock' | 'name' | 'status';
 type StatusFilter = 'all' | InventoryStatus;
@@ -22,6 +22,21 @@ const PERIOD_LABEL: Record<InventoryPeriod, string> = {
 };
 
 const STATUS_ORDER: Record<InventoryStatus, number> = { pause: 0, alert: 1, ok: 2 };
+
+// Descending compare where null sorts BELOW every real value — a row with
+// unsynced spend/units must never interleave with genuine zeros as if it were 0.
+function descNullLast(a: number | null | undefined, b: number | null | undefined): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return b - a;
+}
+
+// Nullable sum: adding a null leaves the accumulator untouched, so a group
+// whose members are ALL null stays null (unknown), never 0.
+function addNullable(acc: number | null, v: number | null): number | null {
+  return v == null ? acc : (acc ?? 0) + v;
+}
 
 export function InventoryPage() {
   const { data: user } = useCurrentUser();
@@ -91,10 +106,10 @@ export function InventoryPage() {
     );
     return [...list].sort((a, b) => {
       if (sort === 'name') return a.title.localeCompare(b.title);
-      if (sort === 'units') return b.units - a.units;
+      if (sort === 'units') return descNullLast(a.units, b.units);
       if (sort === 'stock') return b.stock - a.stock;
-      if (sort === 'status') return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.spend - a.spend;
-      return b.spend - a.spend;
+      if (sort === 'status') return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || descNullLast(a.spend, b.spend);
+      return descNullLast(a.spend, b.spend);
     });
   }, [data, search, sort, statusFilter]);
 
@@ -109,9 +124,11 @@ export function InventoryPage() {
       const key = first.toLowerCase();
       let g = map.get(key);
       if (!g) {
+        // Metric sums start null — they only become numbers when a member
+        // contributes a real value, so unsynced datasets aggregate to '—' not 0.
         g = {
-          key, name: first, productCount: 0, stock: 0, units: 0, unitsPrev: 0,
-          deltaPct: null, spend: 0, revenue: 0, roas: null, ads: 0,
+          key, name: first, productCount: 0, stock: 0, units: null, unitsPrev: null,
+          deltaPct: null, spend: null, revenue: null, roas: null, ads: null,
           status: 'ok', action: 'ok', products: [],
         };
         map.set(key, g);
@@ -119,19 +136,30 @@ export function InventoryPage() {
       g.products.push(p);
       g.productCount += 1;
       g.stock += p.stock;
-      g.units += p.units;
-      g.unitsPrev += p.unitsPrev;
-      g.spend += p.spend;
-      g.revenue += p.revenue;
-      g.ads += p.ads;
+      g.units = addNullable(g.units, p.units);
+      g.unitsPrev = addNullable(g.unitsPrev, p.unitsPrev);
+      g.spend = addNullable(g.spend, p.spend);
+      g.revenue = addNullable(g.revenue, p.revenue);
+      g.ads = addNullable(g.ads, p.ads);
     }
     const groups = [...map.values()];
     for (const g of groups) {
-      g.roas = g.spend > 0 ? Math.round((g.revenue / g.spend) * 100) / 100 : null;
-      g.deltaPct = g.unitsPrev > 0 ? Math.round(((g.units - g.unitsPrev) / g.unitsPrev) * 100) : null;
+      g.roas =
+        g.spend != null && g.spend > 0 && g.revenue != null
+          ? Math.round((g.revenue / g.spend) * 100) / 100
+          : null;
+      g.deltaPct =
+        g.units != null && g.unitsPrev != null && g.unitsPrev > 0
+          ? Math.round(((g.units - g.unitsPrev) / g.unitsPrev) * 100)
+          : null;
       g.status = g.stock <= 0 ? 'pause' : g.stock <= 20 ? 'alert' : 'ok';
-      g.action = g.status === 'pause' ? 'out_of_stock' : g.status === 'alert' ? 'low_stock' : g.spend <= 0 ? 'no_spend' : 'ok';
-      g.products.sort((a, b) => b.spend - a.spend);
+      // null spend = unknown (unsynced window) — never claim "No Meta spend".
+      g.action =
+        g.status === 'pause' ? 'out_of_stock'
+        : g.status === 'alert' ? 'low_stock'
+        : g.spend != null && g.spend <= 0 ? 'no_spend'
+        : 'ok';
+      g.products.sort((a, b) => descNullLast(a.spend, b.spend));
     }
     return groups;
   }, [data]);
@@ -145,10 +173,10 @@ export function InventoryPage() {
     );
     return [...list].sort((a, b) => {
       if (sort === 'name') return a.name.localeCompare(b.name);
-      if (sort === 'units') return b.units - a.units;
+      if (sort === 'units') return descNullLast(a.units, b.units);
       if (sort === 'stock') return b.stock - a.stock;
-      if (sort === 'status') return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.spend - a.spend;
-      return b.spend - a.spend;
+      if (sort === 'status') return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || descNullLast(a.spend, b.spend);
+      return descNullLast(a.spend, b.spend);
     });
   }, [collections, search, sort, statusFilter]);
 
@@ -188,11 +216,17 @@ export function InventoryPage() {
   }
 
   const currency = data?.currency ?? selectedBrand?.baseCurrency ?? 'EUR';
-  const money = (v: number) => formatMoney(v, currency, { whole: true });
+  const money = (v: number | null | undefined) => formatMoney(v, currency, { whole: true });
   const s = data?.summary;
   const unitsDelta = s ? pctDelta(s.units, s.unitsPrev) : null;
   const attributedPct =
-    s && s.metaSpend > 0 ? Math.round((s.attributedSpend / s.metaSpend) * 100) : null;
+    s && s.metaSpend != null && s.metaSpend > 0 && s.attributedSpend != null
+      ? Math.round((s.attributedSpend / s.metaSpend) * 100)
+      : null;
+  // Whether Meta is connected — knowable from the dashboard brand row's
+  // platform list. When the list isn't present at all, err on showing the
+  // "spend isn't synced" banner rather than hiding a real gap.
+  const metaConnected = selectedBrand?.platforms ? selectedBrand.platforms.includes('meta') : true;
 
   return (
     <AppLayout title="Inventory intelligence" tag={data ? `${data.products.length}` : undefined}>
@@ -247,10 +281,14 @@ export function InventoryPage() {
                 groupMode === 'collection'
                   ? `${collections.length} collection${collections.length === 1 ? '' : 's'}`
                   : `${data.products.length} products`
-              } · Stock synced ${timeAgo(data.syncedAt)}`
+              }`
             : selectedBrand?.name}
         </span>
       </div>
+
+      {/* Data-freshness strip — stock/sales/spend recency ("Stock synced …"
+          moved here from the bar above so it isn't duplicated). */}
+      {data && <FreshnessStrip data={data} />}
 
       {/* View toggle + sort + status — segmented button groups (matches Ads). */}
       <div className="filter-bar mb-12">
@@ -322,7 +360,7 @@ export function InventoryPage() {
         <StateCard>Loading inventory…</StateCard>
       ) : data ? (
         <>
-          {data.unattributed.total > 0 && (
+          {data.unattributed != null && data.unattributed.total > 0 && (
             <div style={{ marginBottom: 16 }}>
               <Banner
                 variant="info"
@@ -337,6 +375,39 @@ export function InventoryPage() {
                 (dynamic / Advantage+ catalog, home and collection ads) — counted in the totals and shown here, not split
                 across the rows below.{attributedPct !== null ? ` ~${attributedPct}% of spend is attributed.` : ''}
               </Banner>
+            </div>
+          )}
+
+          {/* Ad-spend not synced for this window — say so explicitly so the
+              '—' cells read as "unknown", never as €0. Gated on Meta being
+              connected when the platform list is available. */}
+          {data.summary.metaSpend === null && metaConnected && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '10px 14px',
+                marginBottom: 16,
+                border: '1px solid var(--border)',
+                borderLeft: '3px solid var(--warning, #9a6700)',
+                borderRadius: 8,
+                background: 'var(--surface, transparent)',
+                fontSize: 13,
+              }}
+            >
+              <span
+                aria-hidden
+                style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--warning, #9a6700)', flexShrink: 0 }}
+              />
+              <span>
+                <strong>Meta product spend isn&rsquo;t synced for this window</strong>
+                <span className="muted">
+                  {' '}— spend and ROAS show &lsquo;—&rsquo;, not zero. Latest synced day:{' '}
+                  {data.dataThrough?.adSpend ?? 'none'}. The daily sync now keeps this fresh going forward; for
+                  history run the backfill from the coverage banner.
+                </span>
+              </span>
             </div>
           )}
 
@@ -372,6 +443,13 @@ export function InventoryPage() {
             />
           </div>
 
+          {data.spendCurrencyMismatch && (
+            <div className="text-xs muted" style={{ marginTop: -14, marginBottom: 20 }}>
+              Ad account currency differs from the store&rsquo;s — spend is shown in the ad account&rsquo;s currency;
+              ROAS is computed currency-correctly.
+            </div>
+          )}
+
           <div className="table-region">
           {groupMode === 'collection' ? (
             displayCollections.length > 0 ? (
@@ -394,6 +472,12 @@ export function InventoryPage() {
           )}
           </div>
 
+          {data.excludedInactive != null && data.excludedInactive > 0 && (
+            <div className="text-xs muted" style={{ marginTop: 10 }}>
+              {formatNumber(data.excludedInactive)} archived/draft products excluded.
+            </div>
+          )}
+
           <div className="text-xs muted" style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -406,6 +490,51 @@ export function InventoryPage() {
       ) : null}
       </div>
     </AppLayout>
+  );
+}
+
+/* ---- Data-freshness strip --------------------------------------------- */
+
+// Compact one-liner under the filter bar: how fresh each dataset is relative
+// to the SELECTED window. Amber = stale (commerce / ad-spend data ends before
+// the window's `to`; catalog snapshot older than 48h) or never synced. Muted
+// 12px text, no card chrome. Commerce / ad-spend segments only render once the
+// backend ships `dataThrough` (additive rollout); catalog falls back to the
+// legacy top-level `syncedAt`, which means the same thing.
+function FreshnessStrip({ data }: { data: InventoryResponse }) {
+  const dt = data.dataThrough;
+  const catalog = dt ? dt.catalog : data.syncedAt;
+  const catalogMs = catalog ? new Date(catalog).getTime() : NaN;
+  const catalogStale = !catalog || Number.isNaN(catalogMs) || Date.now() - catalogMs > 48 * 3600 * 1000;
+
+  const segs: Array<{ text: string; amber: boolean }> = [
+    { text: catalog ? `Stock synced ${timeAgo(catalog)}` : 'Stock not synced yet', amber: catalogStale },
+  ];
+  if (dt) {
+    // `commerce` / `adSpend` and `data.to` are Y-m-d — lexicographic compare
+    // is date order.
+    segs.push({
+      text: dt.commerce ? `Sales through ${dt.commerce}` : 'Sales not synced yet',
+      amber: !dt.commerce || dt.commerce < data.to,
+    });
+    segs.push({
+      text: dt.adSpend ? `Meta product spend through ${dt.adSpend}` : 'Meta product spend not synced yet',
+      amber: !dt.adSpend || dt.adSpend < data.to,
+    });
+  }
+
+  return (
+    <div
+      className="mb-12"
+      style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}
+    >
+      {segs.map((seg, i) => (
+        <span key={seg.text} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {i > 0 && <span aria-hidden>·</span>}
+          <span style={seg.amber ? { color: 'var(--warning)' } : undefined}>{seg.text}</span>
+        </span>
+      ))}
+    </div>
   );
 }
 

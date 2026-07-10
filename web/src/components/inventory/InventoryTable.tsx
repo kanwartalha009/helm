@@ -63,16 +63,18 @@ const SUBTLE = 'var(--surface-subtle)';
 
 // The metric fields shared by a product and a collection — lets one cell
 // renderer serve both a product row and an aggregated collection row.
+// Metric fields are null when the dataset (commerce / ad spend) has no synced
+// rows for the window — rendered '—', never 0 / €0.
 type MetricItem = {
   stock: number;
   status: InventoryStatus;
-  units: number;
-  unitsPrev: number;
+  units: number | null;
+  unitsPrev: number | null;
   deltaPct: number | null;
-  spend: number;
-  revenue: number;
+  spend: number | null;
+  revenue: number | null;
   roas: number | null;
-  ads: number;
+  ads: number | null;
   action: InventoryAction;
 };
 
@@ -90,7 +92,7 @@ export function InventoryTable(props: Props) {
       return next;
     });
 
-  const money = (v: number) => formatMoney(v, props.currency, { whole: true });
+  const money = (v: number | null) => formatMoney(v, props.currency, { whole: true });
   const collection = props.mode === 'collection';
 
   return (
@@ -162,7 +164,7 @@ function CollectionRows({
   rank: number;
   isOpen: boolean;
   onToggle: () => void;
-  money: (v: number) => string;
+  money: (v: number | null) => string;
 }) {
   return (
     <>
@@ -225,7 +227,7 @@ function CollectionRows({
 // collection members.
 function metricCells(
   item: MetricItem,
-  money: (v: number) => string,
+  money: (v: number | null) => string,
   opts: { colores?: ReactNode; child?: boolean },
 ): ReactNode {
   const bg = opts.child ? SUBTLE : undefined;
@@ -237,19 +239,30 @@ function metricCells(
       {opts.colores !== undefined && <td style={num}>{opts.colores}</td>}
       <td style={num}>
         <div style={{ fontWeight: 600 }}>{formatNumber(item.units)}</div>
-        <div style={{ fontSize: 11, fontWeight: 500, marginTop: 1 }}>
-          <DeltaBadge deltaPct={item.deltaPct} />
-        </div>
+        {/* Delta chip only when commerce data exists for the window — a null
+            units means "not synced", where even "new" would be a lie. */}
+        {item.units != null && (
+          <div style={{ fontSize: 11, fontWeight: 500, marginTop: 1 }}>
+            <DeltaBadge deltaPct={item.deltaPct} />
+          </div>
+        )}
       </td>
       <td style={{ ...num, color: 'var(--text-muted)' }}>{formatNumber(item.unitsPrev)}</td>
       <td style={num}>
-        {item.spend > 0 ? money(item.spend) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+        {/* null = spend not synced for the window; ≤0 = covered but nothing
+            spent. Both render '—' (never €0.00) — the page banner explains
+            which case applies. */}
+        {item.spend != null && item.spend > 0 ? (
+          money(item.spend)
+        ) : (
+          <span style={{ color: 'var(--text-muted)' }}>—</span>
+        )}
       </td>
       <td style={num}>{money(item.revenue)}</td>
       <td style={{ ...num, fontWeight: 600, color: item.roas != null && item.roas >= 3 ? 'var(--success)' : undefined }}>
         {item.roas != null ? formatRoas(item.roas) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
       </td>
-      <td style={num}>{item.ads}</td>
+      <td style={num}>{item.ads != null ? item.ads : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
       <td style={left}>
         <StatusPill status={item.status} />
       </td>

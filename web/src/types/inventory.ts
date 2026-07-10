@@ -24,16 +24,22 @@ export interface InventoryProduct {
   variantCount: number;
   variants: InventoryVariant[];
   stock: number;
-  units: number;
-  unitsPrev: number;
+  // units/unitsPrev/revenue are null when the window has NO commerce rows
+  // synced at all (data missing) — distinct from 0 (covered window, no sales).
+  units: number | null;
+  unitsPrev: number | null;
   // Percent change in units vs the prior equal-length window. null when the
-  // prior window had no sales (a genuine "new"/no-baseline case, not 0%).
+  // prior window had no sales (a genuine "new"/no-baseline case, not 0%) OR
+  // when commerce data is missing for the window.
   deltaPct: number | null;
-  spend: number;
-  revenue: number;
-  // null when the product had no attributed Meta spend (ROAS is undefined, not 0).
+  // spend/ads are null when the window has NO ad-product rows synced (data
+  // missing) — distinct from 0 (covered window, product genuinely spent nothing).
+  spend: number | null;
+  revenue: number | null;
+  // null when the product had no attributed Meta spend (ROAS is undefined, not 0)
+  // or when spend data is missing for the window.
   roas: number | null;
-  ads: number;
+  ads: number | null;
   status: InventoryStatus;
   action: InventoryAction;
 }
@@ -44,13 +50,15 @@ export interface InventorySummary {
   alert: number;
   ok: number;
   netStock: number;
-  units: number;
-  unitsPrev: number;
+  // null when no commerce rows are synced for the window — render '—', not 0.
+  units: number | null;
+  unitsPrev: number | null;
   // Total Meta spend for the brand = attributed + unattributed. The blended
   // ROAS below uses this (not attributedSpend) so the headline isn't flattered.
-  metaSpend: number;
-  attributedSpend: number;
-  revenue: number;
+  // null when no ad-product rows are synced for the window — render '—', not €0.
+  metaSpend: number | null;
+  attributedSpend: number | null;
+  revenue: number | null;
   roas: number | null;
 }
 
@@ -62,6 +70,15 @@ export interface InventoryUnattributed {
   total: number;
 }
 
+// How far each dataset actually reaches. `catalog` is an ISO timestamp (same
+// meaning as the legacy top-level syncedAt); `commerce`/`adSpend` are Y-m-d —
+// the latest day with synced rows. null = never synced.
+export interface InventoryDataThrough {
+  catalog: string | null;
+  commerce: string | null;
+  adSpend: string | null;
+}
+
 export interface InventoryResponse {
   brand: { id: number; name: string; slug: string; currency: string };
   period: InventoryPeriod;
@@ -70,8 +87,15 @@ export interface InventoryResponse {
   currency: string;
   syncedAt: string | null; // ISO — when the catalog (stock) was last snapshotted
   summary: InventorySummary;
-  unattributed: InventoryUnattributed;
+  // null when no ad-product rows are synced for the window (unknown, not €0).
+  unattributed: InventoryUnattributed | null;
   products: InventoryProduct[];
+  // -- Additive fields (backend rollout in parallel; all optional) ---------
+  dataThrough?: InventoryDataThrough;
+  // Ad-account currency ≠ store currency — spend shown in ad-account currency.
+  spendCurrencyMismatch?: boolean;
+  // Archived/draft products excluded server-side from the table.
+  excludedInactive?: number;
 }
 
 // A collection = every product sharing a model name (the first word of the
@@ -83,13 +107,15 @@ export interface CollectionGroup {
   name: string;         // display model (first word of a member title)
   productCount: number; // "Colores" — how many products roll up here
   stock: number;
-  units: number;
-  unitsPrev: number;
+  // Sums stay null when every member is null (dataset unsynced for the window)
+  // — a group of unknowns is unknown, not 0.
+  units: number | null;
+  unitsPrev: number | null;
   deltaPct: number | null;
-  spend: number;
-  revenue: number;
+  spend: number | null;
+  revenue: number | null;
   roas: number | null;
-  ads: number;
+  ads: number | null;
   status: InventoryStatus;
   action: InventoryAction;
   products: InventoryProduct[]; // members, shown when the row is expanded

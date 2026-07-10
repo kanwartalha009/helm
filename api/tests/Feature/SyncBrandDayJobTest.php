@@ -15,6 +15,7 @@ use App\Platforms\PlatformRegistry;
 use App\Platforms\Shopify\RevenueFetcher;
 use App\Platforms\Support\PlatformRateLimitedException;
 use App\Services\Currency\FxService;
+use App\Services\Sync\AdSetSync;
 use App\Services\Sync\CampaignSync;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\Job;
@@ -57,14 +58,15 @@ final class SyncBrandDayJobTest extends TestCase
         $registry = new PlatformRegistry(app(), ['shopify' => $adapter::class]);
         app()->instance($adapter::class, $adapter);
 
-        // Isolate the unit: the best-effort sub-syncs (campaigns, breakdowns,
-        // funnel, commerce) are not under test and must not attempt HTTP.
+        // Isolate the unit: the best-effort sub-syncs (campaigns, ad-sets,
+        // breakdowns, funnel, commerce) are not under test and must not attempt HTTP.
         $campaigns = Mockery::mock(CampaignSync::class)->shouldIgnoreMissing();
+        $adSets    = Mockery::mock(AdSetSync::class)->shouldIgnoreMissing();
         $revenue   = Mockery::mock(RevenueFetcher::class);
         $revenue->shouldReceive('funnelByDimensionRange')->andReturn([]);
         $revenue->shouldReceive('salesByDimensionRange')->andReturn([]);
 
-        $job->handle($registry, app(FxService::class), $campaigns, $revenue);
+        $job->handle($registry, app(FxService::class), $campaigns, $adSets, $revenue);
     }
 
     private function queuedLog(CarbonImmutable $date): SyncLog

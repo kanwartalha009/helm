@@ -18,7 +18,7 @@ use Throwable;
  * The tiny helpers are duplicated here rather than widening InsightsFetcher's
  * private surface while that adapter is under parallel edit.
  */
-final class AdSetFetcher
+class AdSetFetcher
 {
     /** Purchase action types, priority order — mirrors InsightsFetcher. */
     private const PURCHASE_ACTION_TYPES = [

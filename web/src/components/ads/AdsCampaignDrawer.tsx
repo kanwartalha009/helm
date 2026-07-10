@@ -1,7 +1,8 @@
 import { Drawer } from '@/components/ui';
 import { useAdsCampaign } from '@/hooks/useAdsCampaign';
+import { useAdsCampaignAdsets } from '@/hooks/useAdsCampaignAdsets';
 import { formatMoney, formatNumber, formatRoas } from '@/lib/formatters';
-import type { AdsPeriod, AdsPlatform, AdsSignal, AdsTrendPoint } from '@/types/ads';
+import type { AdSetRow, AdsPeriod, AdsPlatform, AdsSignal, AdsTrendPoint } from '@/types/ads';
 import '@/styles/ads.css';
 
 /**
@@ -25,6 +26,7 @@ export function AdsCampaignDrawer({
 }) {
   const open = campaign != null;
   const q = useAdsCampaign(slug, campaign?.id, period, open, platform);
+  const asets = useAdsCampaignAdsets(slug, campaign?.id, period, open, platform);
   const d = q.data;
   const currency = d ? (d.currency === 'usd' ? 'USD' : d.brand.baseCurrency || 'EUR') : 'EUR';
   const money = (v: number | null) => formatMoney(v, currency, { whole: true });
@@ -76,10 +78,100 @@ export function AdsCampaignDrawer({
               <div className="ads-psub">Revenue and impressions · {d.from} – {d.to}</div>
               <TrendMini trend={d.trend} currency={currency} />
             </div>
+            <AdSetsPanel
+              rows={asets.data?.adSets ?? null}
+              asOf={asets.data?.asOf ?? null}
+              isLoading={asets.isLoading}
+              isError={asets.isError}
+              baseCurrency={d.brand.baseCurrency || 'USD'}
+            />
           </>
         ) : null}
       </div>
     </Drawer>
+  );
+}
+
+/**
+ * Ad sets for the open campaign (spec §4 Phase 4) — a media buyer's view: budget,
+ * spend, ROAS, learning status and plain flags. Spend/ROAS/CPA are USD (the
+ * engine normalises every platform to one scale); budget is the native
+ * point-in-time snapshot, captioned "as of". Google PMax campaigns render asset
+ * groups with a tag + note. Its own loading/empty states so it never blocks the
+ * KPIs above it.
+ */
+function AdSetsPanel({ rows, asOf, isLoading, isError, baseCurrency }: {
+  rows: AdSetRow[] | null;
+  asOf: string | null;
+  isLoading: boolean;
+  isError: boolean;
+  baseCurrency: string;
+}) {
+  const usd = (v: number | null, whole = false) => formatMoney(v, 'USD', whole ? { whole: true } : undefined);
+  const hasAssetGroup = !!rows?.some((r) => r.entityKind === 'asset_group');
+  const asOfLabel = asOf ? new Date(asOf).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : null;
+
+  return (
+    <div className="ads-panel">
+      <div className="ads-ph"><h3>Ad sets</h3></div>
+      <div className="ads-psub">
+        Spend, ROAS &amp; CPA in USD · budget in {baseCurrency}{asOfLabel ? `, as of ${asOfLabel}` : ''}
+      </div>
+      {isError ? (
+        <div className="ads-empty">Couldn’t load ad sets. Try refreshing.</div>
+      ) : isLoading && rows === null ? (
+        <div className="ads-empty">Loading ad sets…</div>
+      ) : !rows || rows.length === 0 ? (
+        <div className="ads-empty">No ad-set rows yet — run the backfill on the brand page.</div>
+      ) : (
+        <>
+          {hasAssetGroup && (
+            <div className="aset-note">PMax has no ad groups — these are its asset groups (Google reports them instead).</div>
+          )}
+          <div className="aset-table-wrap">
+            <table className="aset-table">
+              <thead>
+                <tr>
+                  <th>Name</th><th>Status</th><th>Learning</th>
+                  <th className="num">Budget/day</th><th className="num">Spend</th>
+                  <th className="num">ROAS</th><th className="num">CPA</th><th className="num">Freq</th>
+                  <th>Flags</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.adSetId}>
+                    <td>
+                      <span className="aset-name">{r.name || r.adSetId}</span>
+                      {r.entityKind === 'asset_group' && <span className="aset-tag">Asset group</span>}
+                    </td>
+                    <td>{r.status ? <span className="aset-status">{r.status.replace(/_/g, ' ').toLowerCase()}</span> : '—'}</td>
+                    <td>{r.learningStatus ? <span className={`aset-learn${/LIMIT|FAIL/i.test(r.learningStatus) ? ' aset-learn-warn' : ''}`}>{r.learningStatus.replace(/_/g, ' ').toLowerCase()}</span> : '—'}</td>
+                    <td className="num">{r.dailyBudget != null ? formatMoney(r.dailyBudget, baseCurrency) : '—'}</td>
+                    <td className="num">{usd(r.spend, true)}</td>
+                    <td className="num">{formatRoas(r.roas)}</td>
+                    <td className="num">{r.cpa != null ? usd(r.cpa) : '—'}</td>
+                    <td className="num">{r.frequency != null ? `${r.frequency.toFixed(1)}×` : '—'}</td>
+                    <td><AdSetFlagChips flags={r.flags} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AdSetFlagChips({ flags }: { flags: AdSetRow['flags'] }) {
+  if (flags.length === 0) return <span className="aset-ok">—</span>;
+  return (
+    <span className="aset-flags">
+      {flags.map((f) => (
+        <span key={f.key} className={`aset-flag aset-flag-${f.severity}`} title={f.detail}>{f.label}</span>
+      ))}
+    </span>
   );
 }
 

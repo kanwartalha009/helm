@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdProductDaily;
 use App\Models\Brand;
 use App\Models\CommerceDailyMetric;
+use App\Models\DailyMetric;
 use App\Models\InventorySnapshot;
+use App\Models\ProductCatalog;
+use App\Platforms\Meta\AdProductFetcher;
 use App\Services\Rules\ProductFlags;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -81,13 +85,59 @@ class BrandProductsController extends Controller
         // computed over the whole window so ABC grading sees the full catalog.
         $flagMap = $this->flags->forBrand($brand->id, $start, $end);
 
-        $rows = $current->map(function ($r) use ($prior, $totalRevenue, $flagMap): array {
+        // Ad spend per product (spec §4 Phase 5). ad_product_daily keys by Shopify
+        // HANDLE; commerce rows key by product_title — bridge via product_catalog.
+        // All ad platforms summed; the reserved __other/__collection buckets are
+        // NOT product-specific, so they're excluded here (they still count against
+        // the "mapped %" denominator below). Native for display + a USD total (fx
+        // snapshot) for the losing_on_ads $100 evidence floor.
+        $adByHandle = AdProductDaily::query()
+            ->where('brand_id', $brand->id)
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->whereNotIn('product_key', [AdProductFetcher::RESERVED_OTHER, AdProductFetcher::RESERVED_COLLECTION])
+            ->groupBy('product_key')
+            ->selectRaw('product_key, COALESCE(SUM(spend), 0) as spend, COALESCE(SUM(spend * COALESCE(fx_rate_to_usd, 1)), 0) as spend_usd')
+            ->get()
+            ->keyBy('product_key');
+
+        $titleToHandle = [];
+        foreach (ProductCatalog::query()->where('brand_id', $brand->id)->get(['handle', 'title']) as $c) {
+            $t = $c->title !== null ? mb_strtolower(trim((string) $c->title)) : '';
+            if ($t !== '') {
+                $titleToHandle[$t] = (string) $c->handle;
+            }
+        }
+        $breakeven = $brand->breakevenRoas();
+
+        $rows = $current->map(function ($r) use ($prior, $totalRevenue, $flagMap, $adByHandle, $titleToHandle, $breakeven): array {
             $key     = (string) $r->dimension_key;
             $revenue = round((float) $r->revenue, 2);
             $refunds = round((float) $r->refunds, 2);
             $orders  = (int) $r->orders;
             $prevRev = $prior->has($key) ? round((float) $prior[$key]->revenue, 2) : null;
             $f       = $flagMap[$key] ?? null;
+            $flags   = $f['flags'] ?? [];
+
+            // Ad spend / ROAS for this product, mapped by handle. No handle match
+            // or no spend → null ("—"), never 0 — the row simply has no paid data.
+            $handle     = $titleToHandle[mb_strtolower(trim((string) ($r->label ?: $key)))] ?? null;
+            $ad         = $handle !== null ? ($adByHandle[$handle] ?? null) : null;
+            $adSpend    = $ad !== null ? round((float) $ad->spend, 2) : null;
+            $adSpendUsd = $ad !== null ? (float) $ad->spend_usd : 0.0;
+            $roas       = ($adSpend !== null && $adSpend > 0) ? round($revenue / $adSpend, 2) : null;
+
+            // losing_on_ads — real spend behind a below-water product. Evidence
+            // floor $100 USD mapped spend; ROAS floor is breakeven when a margin is
+            // set, else 1.0 (spec §4 Phase 5, both HELM DEFAULT).
+            if ($roas !== null && $adSpendUsd >= 100 && $roas < ($breakeven ?? 1.0)) {
+                $bar = $breakeven !== null ? number_format($breakeven, 2) . '× breakeven' : '1.00× (break-even on ad cost)';
+                $flags = array_merge($flags, [[
+                    'key'      => 'losing_on_ads',
+                    'severity' => 'warn',
+                    'label'    => 'Losing on ads',
+                    'detail'   => 'Product ROAS ' . number_format($roas, 2) . '× is under ' . $bar . ' on mapped ad spend — the ads for this product lose money at this efficiency.',
+                ]]);
+            }
 
             return [
                 'key'        => $key,
@@ -106,7 +156,11 @@ class BrandProductsController extends Controller
                 'abc'        => $f['abc'] ?? null,
                 'coverDays'  => $f['coverDays'] ?? null,
                 'sellThroughPct' => $f['sellThroughPct'] ?? null,
-                'flags'      => $f['flags'] ?? [],
+                // Phase 5 (additive): mapped ad spend + product ROAS (native), null
+                // when no ad landing URL maps to this product.
+                'adSpend'    => $adSpend,
+                'roas'       => $roas,
+                'flags'      => $flags,
             ];
         })->all();
 
@@ -120,6 +174,24 @@ class BrandProductsController extends Controller
             'cover'   => ($a['coverDays'] ?? PHP_INT_MAX) <=> ($b['coverDays'] ?? PHP_INT_MAX),
             default   => $b['revenue'] <=> $a['revenue'],
         });
+
+        // Ad-spend coverage footer (spec §4 Phase 5): what share of the brand's
+        // total ad spend this window is mapped to a product via landing URL.
+        // Unmapped spend (Google Shopping/PMax feeds, dynamic/Advantage+, home)
+        // is excluded from product ROAS, so product ROAS reads HIGH — the footer
+        // says so out loud. mappedSpend excludes __other/__collection (already
+        // filtered out of $adByHandle); totalSpend is every ad platform's spend.
+        $mappedSpend  = (float) $adByHandle->sum('spend');
+        $totalAdSpend = (float) DailyMetric::query()
+            ->where('brand_id', $brand->id)
+            ->whereIn('platform', ['meta', 'google', 'tiktok'])
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->sum('spend');
+        $adSpendMeta = [
+            'mappedSpend' => round($mappedSpend, 2),
+            'totalSpend'  => round($totalAdSpend, 2),
+            'mappedPct'   => $totalAdSpend > 0 ? round($mappedSpend / $totalAdSpend * 100, 1) : null,
+        ];
 
         // Freshness: when was the product dimension last pulled + the stock snapshot.
         $lastPulled = CommerceDailyMetric::query()
@@ -138,6 +210,7 @@ class BrandProductsController extends Controller
             'periodEnd'   => $end->toDateString(),
             'rows'        => $rows,
             'totalRevenue' => round($totalRevenue, 2),
+            'adSpend'     => $adSpendMeta,
             'hasData'     => $rows !== [],
             'lastPulledAt' => $lastPulled ? CarbonImmutable::parse((string) $lastPulled)->toIso8601String() : null,
             'inventorySnapshotAt' => $snapshotOn ? CarbonImmutable::parse((string) $snapshotOn)->toDateString() : null,

@@ -110,3 +110,40 @@ data-model, and product choices — not structural ones.
   commerce runs tracked in `backfill_runs`. Reruns resume (idempotent upserts).
 - **AI/LLM key CRUD** in Settings → Platform keys (add/rotate/reveal/delete/
   test) + provider picker (workspace setting `llm_provider` wins over env).
+
+## 2026-07-10 ad-set middle layer + product-level ROAS (spec feature-specs/product-audit-adset-underperformers.md)
+
+- **`ad_set_daily_metrics`** (additive migration) — the middle layer Helm was
+  blind to: Meta ad sets, Google ad groups + PMax **asset groups**
+  (`entity_kind`), TikTok ad groups. One row per (brand, platform, date,
+  ad_set_id). Reach/frequency are Meta-only (null elsewhere, never 0);
+  impression-share is Google-only. Budget/learning/status are point-in-time
+  snapshots ("as of last sync"). Written by **`AdSetSync`** (wired into
+  `SyncBrandDayJob`, same fx-snapshot pipeline as campaigns) + **`ads:backfill-
+  adsets`** (chunked); both ride the `campaigns` backfill dataset, so one
+  "Backfill" click fills campaign **and** ad-set grain. Fetchers live in
+  `app/Platforms/{Meta,Google,TikTok}/` (AdSetFetcher / AdGroupFetcher).
+- **Data-coverage** now requires BOTH grains for the `campaigns` card to read
+  "covered" — the ~80 live brands with backfilled campaigns but an empty
+  ad-set table are correctly re-prompted to backfill.
+- **`AdSetFlags`** engine (rules-only, `config/rules.adset`) — no_purchase_kill
+  (critical), below_breakeven, high_frequency (Meta), low_ctr, learning_limited
+  (Meta `LEARNING_LIMITED`), budget_starved (Google impression-share / TikTok
+  status / Meta full-budget days), account-level fragmentation. Verdict gate:
+  no performance flag under `min_evidence_usd`; status-based flags exempt.
+  Window frequency is a **blended proxy** (Σimpressions ÷ Σreach — conservative;
+  true deduped frequency needs a windowed pull), captioned as such.
+- **Endpoint** `GET brands/{brand}/ads/campaigns/{campaign}/adsets?period=&platform=`
+  → ad sets + flags + `asOf`; rendered in the campaign drawer (`AdsCampaignDrawer`)
+  as an "Ad sets" table (budget/spend/ROAS/CPA/freq/flags, PMax asset-group note).
+  The audit page consumes `AdSetFlags::forBrand` as `ads`-area rollup cards.
+- **Product-level ROAS** — `ad_product_daily` widened with a `platform` column
+  (default 'meta'; unique key swapped to include platform, index swap moves no
+  data). Google (`ad_group_ad` final URLs) + TikTok (`ad/get` landing URL)
+  attribute spend by the same landing-URL→handle regex as Meta; Shopping/PMax
+  feed spend stays UNMAPPED. Products page shows **Ad spend + ROAS** (mapped
+  only) with an always-on footer stating the mapped %, and a `losing_on_ads`
+  flag (≥$100 mapped spend below breakeven/1.0). Product ROAS is scoped to the
+  products page (not the audit rollup). `CampaignNameParser` ships as an
+  **OFF-by-default seam** (workspace setting `ad_product_name_rules`), not yet
+  wired into the fetchers. See ADR **D-021**.

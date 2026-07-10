@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Jobs\BackfillBrandDatasetJob;
+use App\Models\BackfillRun;
 use App\Models\Brand;
 use App\Models\PlatformConnection;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
@@ -111,6 +113,41 @@ final class DataCoverageTest extends TestCase
         $this->assertTrue($byKey['history']['running']);
         $this->assertTrue($byKey['creatives']['running']);
         $this->assertTrue($byKey['commerce']['running']);
+    }
+
+    public function test_campaigns_backfill_includes_ad_products_for_meta_brand(): void
+    {
+        // Product-attributed Meta spend (ad_product_daily) rides the campaigns
+        // dataset (2026-07-10) — it powers the Inventory Intelligence report,
+        // so a campaigns/all backfill must run meta:backfill-ad-products too
+        // for a meta-connected brand.
+        $run = BackfillRun::create([
+            'brand_id'     => $this->brand->id,
+            'dataset'      => 'campaigns',
+            'status'       => 'queued',
+            'window_start' => now('UTC')->subMonths(12)->toDateString(),
+        ]);
+        $since = $run->window_start->toDateString();
+
+        $calls = [];
+        Artisan::shouldReceive('call')->andReturnUsing(function (string $cmd, array $args) use (&$calls): int {
+            $calls[] = [$cmd, $args];
+
+            return 0;
+        });
+        Artisan::shouldReceive('output')->andReturn('ok');
+
+        (new BackfillBrandDatasetJob($this->brand, 'campaigns', $run->id))->handle();
+
+        $this->assertSame('done', $run->refresh()->status);
+        $this->assertContains(
+            ['ads:backfill-campaigns', ['brand' => (string) $this->brand->slug, '--since' => $since]],
+            $calls,
+        );
+        $this->assertContains(
+            ['meta:backfill-ad-products', ['brand' => (string) $this->brand->slug, '--since' => $since]],
+            $calls,
+        );
     }
 
     public function test_trigger_is_admin_manager_only(): void

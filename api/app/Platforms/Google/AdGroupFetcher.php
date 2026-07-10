@@ -20,7 +20,7 @@ use Google\Ads\GoogleAds\V24\Enums\AssetGroupStatusEnum\AssetGroupStatus;
  * V24 field/enum availability should be verified against the pinned google-ads-php
  * (^33.3 = API V24) on the server, per spec §2.3.
  */
-final class AdGroupFetcher
+class AdGroupFetcher
 {
     public function __construct(private readonly GoogleAdsClient $client) {}
 

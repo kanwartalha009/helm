@@ -111,6 +111,8 @@ export function BrandProductsPage() {
                   <th className="num">Orders</th>
                   <SortTh label="Units" col="units" sort={sort} setSort={setSort} />
                   <th className="num">AOV</th>
+                  <th className="num" title="Mapped ad spend (window) — spend on ads whose landing URL is this product">Ad spend</th>
+                  <th className="num" title="Product revenue ÷ mapped ad spend. Unmapped spend (Shopping/PMax) is excluded, so this reads high.">ROAS</th>
                   <SortTh label="Refund %" col="refunds" sort={sort} setSort={setSort} />
                   <SortTh label={snapshotStale ? 'Cover *' : 'Cover'} col="cover" sort={sort} setSort={setSort} amber={snapshotStale} />
                   <th>Flags</th>
@@ -129,6 +131,8 @@ export function BrandProductsPage() {
                     <td className="num">{r.orders.toLocaleString()}</td>
                     <td className="num">{r.units.toLocaleString()}</td>
                     <td className="num">{r.aov !== null ? formatMoney(r.aov, currency) : '—'}</td>
+                    <td className="num">{r.adSpend !== null ? formatMoney(r.adSpend, currency) : '—'}</td>
+                    <td className="num">{r.roas !== null ? `${r.roas.toFixed(2)}×` : '—'}</td>
                     <td className="num" style={r.refundRatePct !== null && r.refundRatePct > 5 ? { color: 'var(--warning)' } : undefined}>
                       {r.refundRatePct !== null ? `${r.refundRatePct}%` : '—'}
                     </td>
@@ -145,7 +149,7 @@ export function BrandProductsPage() {
                   </tr>
                 ))}
                 {data.rows.length === 0 && (
-                  <tr><td colSpan={11} className="muted" style={{ padding: 18 }}>No products match “{search}”.</td></tr>
+                  <tr><td colSpan={13} className="muted" style={{ padding: 18 }}>No products match “{search}”.</td></tr>
                 )}
               </tbody>
             </table>
@@ -162,6 +166,13 @@ export function BrandProductsPage() {
               {data.lastPulledAt ? `pulled ${new Date(data.lastPulledAt).toLocaleDateString()}` : 'pull time unknown'}
             </div>
           </div>
+
+          {data.adSpend.mappedPct !== null && (
+            <div className="text-xs muted mt-8" style={{ maxWidth: 760 }}>
+              {data.adSpend.mappedPct}% of ad spend this window is mapped to products via landing URLs — unmapped spend
+              (e.g. Google Shopping/PMax) is excluded, so product ROAS reads high. Blended truth lives on the dashboard.
+            </div>
+          )}
         </>
       )}
     </AppLayout>

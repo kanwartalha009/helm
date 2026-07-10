@@ -21,7 +21,7 @@ use Throwable;
  * stamped per ROW date (a ranged pull spans days), cached per (currency, date).
  * Best-effort: a platform hiccup logs and returns 0, never failing the caller.
  */
-final class AdSetSync
+class AdSetSync
 {
     public function __construct(
         private readonly MetaAdSetFetcher $meta,

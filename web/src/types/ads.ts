@@ -226,6 +226,45 @@ export interface AdsCampaignDetail {
   trend: AdsTrendPoint[];
 }
 
+// Ad-set drill-down (spec §4 Phase 4) — ad sets / Google ad groups + PMax asset
+// groups / TikTok ad groups for one campaign, with USD spend and rules-driven
+// underperformer flags from the AdSetFlags engine.
+export type AdSetFlagSeverity = 'critical' | 'warn' | 'info';
+
+export interface AdSetFlag {
+  key: string;
+  severity: AdSetFlagSeverity;
+  label: string;
+  detail: string;
+}
+
+export interface AdSetRow {
+  adSetId: string;
+  name: string;
+  campaignId: string | null;
+  platform: AdsPlatform;
+  entityKind: 'ad_set' | 'asset_group';
+  status: string | null;
+  learningStatus: string | null; // Meta only (LEARNING / LEARNING_LIMITED / SUCCESS)
+  dailyBudget: number | null;    // native currency, point-in-time snapshot ("as of")
+  spend: number;                 // USD, window total
+  roas: number | null;
+  cpa: number | null;            // USD
+  ctr: number | null;            // %
+  frequency: number | null;      // Meta only; "—" elsewhere
+  conversions: number;
+  flags: AdSetFlag[];
+  asOf: string | null;
+}
+
+export interface AdSetsResponse {
+  platform: AdsPlatform;
+  campaignId: string;
+  period: { start: string; end: string };
+  asOf: string | null; // latest pulled_at across the campaign's ad sets
+  adSets: AdSetRow[];
+}
+
 // Creatives (Phase D) — one ad-level card.
 export type AdsCreativeState = 'scaling' | 'declining' | 'holding' | 'testing' | 'hidden';
 

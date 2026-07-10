@@ -21,7 +21,7 @@ use Throwable;
  * Verify against a live BC (tiktok:diagnose): advertiser-id source + adgroup/get
  * field names, per spec §2.3/§6.2.
  */
-final class AdGroupFetcher
+class AdGroupFetcher
 {
     public function __construct(private readonly TikTokClient $client) {}
 
