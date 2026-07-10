@@ -306,12 +306,19 @@ final class MonthlyReport implements ReportType
 
         $totRevAll = 0.0;
         $totSpendAll = 0.0;
+        $unattributed = 0.0;
         $rows = [];
         foreach ($spend as $key => $s) {
-            // Meta returns spend with no country for Advantage+/automatic geo — it
-            // can't have a per-country efficiency, so it shows its spend with a "—"
-            // (not a misleading 0.0×) and is kept OUT of the blended benchmark.
-            $isUnattributed = mb_strtolower(trim((string) $key)) === 'unknown';
+            // Meta returns spend with no country for Advantage+/automatic geo. It
+            // can't have a per-country efficiency, so it's summed into one
+            // "unattributed" figure and footnoted — never shown as an empty country
+            // row a client would trip over.
+            if (mb_strtolower(trim((string) $key)) === 'unknown') {
+                foreach ($months as $m) {
+                    $unattributed += (float) ($s['byMonth'][$m] ?? 0);
+                }
+                continue;
+            }
             $revByM  = $rev[$key]['byMonth'] ?? [];
             $byMonth = [];
             $tRev = 0.0;
@@ -319,21 +326,19 @@ final class MonthlyReport implements ReportType
             foreach ($months as $m) {
                 $sp = (float) ($s['byMonth'][$m] ?? 0);
                 $rv = (float) ($revByM[$m] ?? 0);
-                $byMonth[$m] = ($isUnattributed || $sp <= 0) ? null : round($rv / $sp, 2);
+                $byMonth[$m] = $sp > 0 ? round($rv / $sp, 2) : null;
                 $tSpend += $sp;
                 $tRev   += $rv;
             }
-            if (! $isUnattributed) {
-                $totSpendAll += $tSpend;
-                $totRevAll   += $tRev;
-            }
+            $totSpendAll += $tSpend;
+            $totRevAll   += $tRev;
             $rows[] = [
                 'key'     => (string) $key,
                 // Prefer the commerce country name ("Spain") over Meta's bare code.
-                'label'   => $isUnattributed ? 'Automatic (Advantage+)' : (string) ($rev[$key]['label'] ?? $s['label']),
+                'label'   => (string) ($rev[$key]['label'] ?? $s['label']),
                 'byMonth' => $byMonth,
                 'spend'   => round($tSpend, 2),
-                'roas'    => ($isUnattributed || $tSpend <= 0) ? null : round($tRev / $tSpend, 2),
+                'roas'    => $tSpend > 0 ? round($tRev / $tSpend, 2) : null,
             ];
         }
 
@@ -343,9 +348,10 @@ final class MonthlyReport implements ReportType
         return [
             'status' => 'ready',
             'roas'   => [
-                'months'  => $months,
-                'rows'    => $rows,
-                'blended' => $totSpendAll > 0 ? round($totRevAll / $totSpendAll, 2) : null,
+                'months'       => $months,
+                'rows'         => $rows,
+                'blended'      => $totSpendAll > 0 ? round($totRevAll / $totSpendAll, 2) : null,
+                'unattributed' => $unattributed > 0 ? round($unattributed, 2) : null,
             ],
         ];
     }

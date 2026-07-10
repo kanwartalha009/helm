@@ -6,6 +6,9 @@ import type { MonthlyCustomerRow, MonthlyFunnelRow, MonthlyGenderRow, MonthlyKpi
 const DEFAULT_COMMENTARY =
   'Summarise the month for the store owner here — what moved, how it landed against targets, and the plan for next month. Editable before you send.';
 
+const DEFAULT_NEXTSTEPS =
+  'What to do next and anything to discuss on the next call — priorities, tests to run, decisions needed. Leave blank to hide this from the shared report.';
+
 const RIBBON: Record<string, { label: string; tone: string; desc: string }> = {
   coming: { label: 'Building next', tone: 'blue', desc: 'The data is already synced — this section lands in the next increment.' },
   needs_source: { label: 'Needs a data source', tone: 'amber', desc: 'Blocked on a data probe before it can be built honestly.' },
@@ -24,18 +27,23 @@ export function MonthlyReportDocument({
   data,
   editable = false,
   onCommentaryChange,
+  onNextStepsChange,
   onTargetsChange,
 }: {
   data: MonthlyReportData;
   editable?: boolean;
   onCommentaryChange?: (value: string) => void;
+  onNextStepsChange?: (value: string) => void;
   onTargetsChange?: (t: { blendedRoas: number | null; newCustomerRoas: number | null }) => void;
 }) {
   const { brand, currency, month, comparison, overall, sections } = data;
   const accent = data.branding?.accent || '#1f6f5c';
   const agencyName = data.branding?.agency_name || 'Roasdriven';
   const footerText = data.branding?.footer_text || 'Powered by novasolution.ae';
-  const commentary = data.content?.commentary ?? DEFAULT_COMMENTARY;
+  // Summary + Next steps are agency-written. In the shared/public report they only
+  // appear once actually written — an empty placeholder never goes to a client.
+  const commentaryRaw = (data.content?.commentary ?? '').trim();
+  const nextStepsRaw = (data.content?.nextSteps ?? '').trim();
 
   // Agency targets — editable in-app, saved with the share, read-only on the
   // public view. Drive the "Target X · met / near" note on the KPIs.
@@ -90,16 +98,18 @@ export function MonthlyReportDocument({
             <label>New-customer ROAS <input type="number" step="0.1" defaultValue={tNewCust ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); setTNewCust(v); push(tBlended, v); }} /></label>
           </div>
         )}
-        <div className="rpt-narrative">
-          <div className="rpt-ai-tag">Commentary{editable ? ' · editable' : ''}</div>
-          {editable ? (
-            <div className="rpt-note" contentEditable suppressContentEditableWarning onBlur={(e) => onCommentaryChange?.(e.currentTarget.textContent ?? '')}>
-              {commentary}
-            </div>
-          ) : (
-            <div className="rpt-note">{commentary}</div>
-          )}
-        </div>
+        {(editable || commentaryRaw) && (
+          <div className="rpt-narrative">
+            <div className="rpt-ai-tag">Summary{editable ? ' · editable' : ''}</div>
+            {editable ? (
+              <div className="rpt-note" contentEditable suppressContentEditableWarning onBlur={(e) => { const v = (e.currentTarget.textContent ?? '').trim(); onCommentaryChange?.(v === DEFAULT_COMMENTARY ? '' : v); }}>
+                {commentaryRaw || DEFAULT_COMMENTARY}
+              </div>
+            ) : (
+              <div className="rpt-note">{commentaryRaw}</div>
+            )}
+          </div>
+        )}
       </section>
 
       {/* Sections in the report's canonical order (mockup 1–11). Each renders a
@@ -128,6 +138,21 @@ export function MonthlyReportDocument({
       <div className="mrt-group"><span>Web</span></div>
       <SectionBlock num="10" title="Web funnel by country" sub="Sessions → cart → checkout → purchase." section={sections.funnelCountry} currency={currency} />
       <SectionBlock num="11" title="Web funnel by landing path" sub="Which entry pages convert — top entry pages with at least one purchase." section={sections.funnelLanding} currency={currency} foot="The entry page of each session. Visitors often complete the purchase on a different page, so purchases are attributed to where the journey started." />
+
+      {(editable || nextStepsRaw) && (
+        <section className="rpt-sec">
+          <div className="rpt-narrative">
+            <div className="rpt-ai-tag">Next steps{editable ? ' · editable' : ''}</div>
+            {editable ? (
+              <div className="rpt-note" contentEditable suppressContentEditableWarning onBlur={(e) => { const v = (e.currentTarget.textContent ?? '').trim(); onNextStepsChange?.(v === DEFAULT_NEXTSTEPS ? '' : v); }}>
+                {nextStepsRaw || DEFAULT_NEXTSTEPS}
+              </div>
+            ) : (
+              <div className="rpt-note">{nextStepsRaw}</div>
+            )}
+          </div>
+        </section>
+      )}
 
       <footer className="rpt-foot">
         <div>
@@ -203,10 +228,10 @@ function MoMTable({ data, currency }: { data: MonthlySeriesData; currency: strin
           {data.other && (
             <tr className="rpt-other">
               <td className="name"><div className="rpt-dim-label">Other</div><div className="rpt-dim-sub">{data.other.count} more</div></td>
-              {months.map((m) => <td className="r" key={m}>—</td>)}
+              {months.map((m) => <td className="r" key={m}>{cell(data.other!.byMonth[m] ?? null)}</td>)}
               <td className="r">{cell(data.other.total)}</td>
               <td className="r">{data.other.share == null ? '—' : `${(data.other.share * 100).toFixed(1)}%`}</td>
-              <td className="r">—</td>
+              <td className="r">{data.other.deltaYoY == null ? '—' : <span className={data.other.deltaYoY >= 0 ? 'up' : 'down'}>{data.other.deltaYoY > 0 ? '+' : ''}{data.other.deltaYoY.toFixed(0)}%</span>}</td>
             </tr>
           )}
         </tbody>
@@ -256,7 +281,7 @@ function RoasTable({ data, currency }: { data: MonthlyRoasData; currency: string
           </tbody>
         </table>
       </div>
-      <div className="rpt-cap">Green = above your blended ROAS{blended == null ? '' : ` (${blended.toFixed(1)}×)`}, red = below. Low-spend, high-ROAS countries are the scaling opportunity.</div>
+      <div className="rpt-cap">Shaded against the blended{blended == null ? ' benchmark' : ` ${blended.toFixed(1)}×`} — green is above, red below; low-spend, high-return countries are the scaling opportunity.{data.unattributed ? ` A further ${money(data.unattributed)} of Meta spend ran on Advantage+ automatic campaigns with no country and is excluded here.` : ''}</div>
     </>
   );
 }

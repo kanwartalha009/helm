@@ -122,7 +122,8 @@ export interface AdAuditSection {
 // editable before send. Every field optional: the report renders cleanly with
 // none of it (data-only), and richer as each slot is filled.
 export interface ReportContent {
-  commentary?: string;
+  commentary?: string; // the top "Summary" block
+  nextSteps?: string;  // end-of-report "Next steps / to discuss" block
   // Monthly report — agency-set targets for the Overall picture (editable, saved
   // with the share alongside the commentary).
   targets?: { blendedRoas?: number | null; newCustomerRoas?: number | null };
@@ -180,7 +181,7 @@ export interface MonthlySeriesRow {
 export interface MonthlySeriesData {
   months: string[]; // Y-m, chronological
   rows: MonthlySeriesRow[];
-  other: { total: number; share: number | null; count: number } | null;
+  other: { byMonth: Record<string, number | null>; total: number; yoyTotal: number; deltaYoY: number | null; share: number | null; count: number } | null;
   total: number;
 }
 
@@ -217,6 +218,7 @@ export interface MonthlyRoasData {
   months: string[];
   rows: MonthlyRoasRow[];
   blended: number | null;
+  unattributed?: number | null; // Advantage+ Meta spend with no country — footnoted, not a row
 }
 
 // Landing page × best sellers: Meta spend vs product revenue, with stock + a read.

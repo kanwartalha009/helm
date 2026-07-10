@@ -118,13 +118,34 @@ final class MonthlySeries
         $other = null;
         if ($tail !== []) {
             $otherTotal = 0.0;
+            $otherYoy   = 0.0;
+            // Sum the tail per month so the "Other" row shows a real trend (it can
+            // be the majority of revenue, e.g. 2,600+ products). A month stays null
+            // only if EVERY tail segment is unsynced for it, so "—" still means
+            // not-synced, never a hidden zero.
+            $otherByMonth = array_fill_keys($months, null);
             foreach ($tail as $s) {
                 $otherTotal += $s['total'];
+                $otherYoy   += $s['yoyTotal'];
+                foreach ($months as $m) {
+                    $v = $s['byMonth'][$m] ?? null;
+                    if ($v !== null) {
+                        $otherByMonth[$m] = ($otherByMonth[$m] ?? 0) + $v;
+                    }
+                }
+            }
+            foreach ($months as $m) {
+                if ($otherByMonth[$m] !== null) {
+                    $otherByMonth[$m] = round($otherByMonth[$m], 2);
+                }
             }
             $other = [
-                'total' => round($otherTotal, 2),
-                'share' => $grandTotal > 0 ? round($otherTotal / $grandTotal, 4) : null,
-                'count' => count($tail),
+                'byMonth'  => $otherByMonth,
+                'total'    => round($otherTotal, 2),
+                'yoyTotal' => round($otherYoy, 2),
+                'deltaYoY' => $this->pct($otherTotal, $otherYoy),
+                'share'    => $grandTotal > 0 ? round($otherTotal / $grandTotal, 4) : null,
+                'count'    => count($tail),
             ];
         }
 
