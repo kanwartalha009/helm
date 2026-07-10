@@ -113,13 +113,13 @@ export function MonthlyReportDocument({
       <div className="mrt-group"><span>Commerce</span></div>
       <SectionBlock num="01" title="Market revenue" sub="Revenue grouped into markets and tiers, month over month." section={sections.market} currency={currency} />
       <SectionBlock num="02" title="Country revenue" sub="Revenue by country, rolled to calendar months." section={sections.countryRevenue} currency={currency} />
-      <SectionBlock num="03" title="Best categories" sub="Revenue by product category, month over month." section={sections.categories} currency={currency} />
-      <SectionBlock num="04" title="Best sellers" sub="Top products by revenue, with stock context." section={sections.bestSellers} currency={currency} />
+      <SectionBlock num="03" title="Best categories" sub="Revenue by product category, month over month." section={sections.categories} currency={currency} foot="Product-tagged revenue only — orders without a product category are excluded, so this total runs below the order-level country and market totals above." />
+      <SectionBlock num="04" title="Best sellers" sub="Top products by revenue, with stock context." section={sections.bestSellers} currency={currency} foot="Line-item product revenue — excludes untagged items, so this total runs below the order-level country and market totals above." />
 
       <div className="mrt-group"><span>Advertising</span></div>
-      <SectionBlock num="05" title="ROAS by country" sub="Meta country spend ÷ commerce country revenue, shaded against blended ROAS." section={sections.roasByCountry} currency={currency} />
-      <SectionBlock num="06" title="Ad spend by placement" sub="Where the budget ran and how it performed — reach, ROAS and CPA by placement." section={sections.placement} currency={currency} />
-      <SectionBlock num="07" title="Ad spend by gender" sub="Spend, reach and ROAS by gender." section={sections.gender} currency={currency} />
+      <SectionBlock num="05" title="Revenue vs Meta spend by country" sub="All-channel revenue ÷ Meta spend per country — a blended efficiency, so it reads far higher than platform ROAS. Advantage+ spend with no country is shown separately as unattributed." section={sections.roasByCountry} currency={currency} tag="Meta spend" />
+      <SectionBlock num="06" title="Ad spend by placement" sub="Where the budget ran and how it performed — reach, ROAS and CPA by placement." section={sections.placement} currency={currency} tag="Meta only" />
+      <SectionBlock num="07" title="Ad spend by gender" sub="Spend, reach and ROAS by gender." section={sections.gender} currency={currency} tag="Meta only" />
       <SectionBlock num="08" title="Ad spend by landing page × best sellers" sub="Is the ad budget behind the winners?" section={sections.landingSellers} currency={currency} />
 
       <div className="mrt-group"><span>Customers</span></div>
@@ -127,7 +127,7 @@ export function MonthlyReportDocument({
 
       <div className="mrt-group"><span>Web</span></div>
       <SectionBlock num="10" title="Web funnel by country" sub="Sessions → cart → checkout → purchase." section={sections.funnelCountry} currency={currency} />
-      <SectionBlock num="11" title="Web funnel by landing path" sub="Which entry pages convert." section={sections.funnelLanding} currency={currency} />
+      <SectionBlock num="11" title="Web funnel by landing path" sub="Which entry pages convert — top entry pages with at least one purchase." section={sections.funnelLanding} currency={currency} foot="The entry page of each session. Visitors often complete the purchase on a different page, so purchases are attributed to where the journey started." />
 
       <footer className="rpt-foot">
         <div>
@@ -140,10 +140,10 @@ export function MonthlyReportDocument({
   );
 }
 
-function SectionBlock({ num, title, sub, section, currency }: { num: string; title: string; sub: string; section: MonthlyReportSection; currency: string }) {
+function SectionBlock({ num, title, sub, section, currency, tag, foot }: { num: string; title: string; sub: string; section: MonthlyReportSection; currency: string; tag?: string; foot?: string }) {
   return (
     <section className="rpt-sec">
-      <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>{title}</h2></div>
+      <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>{title}</h2>{tag && <span className="mrt-plat-tag">{tag}</span>}</div>
       <div className="rpt-sec-sub">{sub}</div>
       {section.status === 'ready' && section.data ? (
         <MoMTable data={section.data} currency={currency} />
@@ -162,6 +162,7 @@ function SectionBlock({ num, title, sub, section, currency }: { num: string; tit
       ) : (
         <Ribbon status={section.status} note={section.note} />
       )}
+      {section.status === 'ready' && foot && <div className="rpt-cap">{foot}</div>}
     </section>
   );
 }
@@ -365,7 +366,7 @@ function LandingTable({ rows, currency }: { rows: MonthlyLandingRow[]; currency:
               <td className="r">{money(r.revenue)}</td>
               <td className={`r ${gradeCol(r.roas, rows.map((x) => x.roas), 'high')}`}>{r.roas == null ? '—' : `${r.roas.toFixed(1)}×`}</td>
               <td className="r">{r.units.toLocaleString()}</td>
-              <td className={`r ${r.stock > 0 && r.stock <= 20 ? 'mrt-r1' : ''}`}>{r.stock.toLocaleString()}</td>
+              <td className={`r ${r.stock > 0 && r.stock <= 20 ? 'mrt-r1' : ''}`}>{Math.max(0, r.stock).toLocaleString()}</td>
               <td>{r.read}</td>
             </tr>
           ))}
@@ -573,6 +574,7 @@ const MONTHLY_CSS = `
 .rpt .mrt-legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--ink-3);margin:16px 0 30px}
 .rpt .mrt-legend .sw{width:20px;height:11px;border-radius:3px;display:inline-block}
 .rpt .mrt-legend b{color:var(--ink-2);font-weight:600}
+.rpt .mrt-plat-tag{align-self:center;font-size:10px;font-weight:600;letter-spacing:.04em;color:var(--ink-3);background:var(--paper);border:1px solid var(--line-2);border-radius:5px;padding:2px 8px;white-space:nowrap}
 .rpt .mrt-targets{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:-8px 0 20px;padding:10px 16px;background:var(--paper);border:1px dashed var(--line-2);border-radius:10px;font-size:12px}
 .rpt .mrt-targets-l{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
 .rpt .mrt-targets label{display:inline-flex;align-items:center;gap:7px;color:var(--ink-2)}

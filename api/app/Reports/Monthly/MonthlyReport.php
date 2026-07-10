@@ -308,6 +308,10 @@ final class MonthlyReport implements ReportType
         $totSpendAll = 0.0;
         $rows = [];
         foreach ($spend as $key => $s) {
+            // Meta returns spend with no country for Advantage+/automatic geo — it
+            // can't have a per-country efficiency, so it shows its spend with a "—"
+            // (not a misleading 0.0×) and is kept OUT of the blended benchmark.
+            $isUnattributed = mb_strtolower(trim((string) $key)) === 'unknown';
             $revByM  = $rev[$key]['byMonth'] ?? [];
             $byMonth = [];
             $tRev = 0.0;
@@ -315,19 +319,21 @@ final class MonthlyReport implements ReportType
             foreach ($months as $m) {
                 $sp = (float) ($s['byMonth'][$m] ?? 0);
                 $rv = (float) ($revByM[$m] ?? 0);
-                $byMonth[$m] = $sp > 0 ? round($rv / $sp, 2) : null;
+                $byMonth[$m] = ($isUnattributed || $sp <= 0) ? null : round($rv / $sp, 2);
                 $tSpend += $sp;
                 $tRev   += $rv;
             }
-            $totSpendAll += $tSpend;
-            $totRevAll   += $tRev;
+            if (! $isUnattributed) {
+                $totSpendAll += $tSpend;
+                $totRevAll   += $tRev;
+            }
             $rows[] = [
                 'key'     => (string) $key,
                 // Prefer the commerce country name ("Spain") over Meta's bare code.
-                'label'   => (string) ($rev[$key]['label'] ?? $s['label']),
+                'label'   => $isUnattributed ? 'Automatic (Advantage+)' : (string) ($rev[$key]['label'] ?? $s['label']),
                 'byMonth' => $byMonth,
                 'spend'   => round($tSpend, 2),
-                'roas'    => $tSpend > 0 ? round($tRev / $tSpend, 2) : null,
+                'roas'    => ($isUnattributed || $tSpend <= 0) ? null : round($tRev / $tSpend, 2),
             ];
         }
 
@@ -617,12 +623,21 @@ final class MonthlyReport implements ReportType
             return ['status' => 'needs_source', 'note' => 'Run shopify:backfill-funnel for this brand to populate the web funnel.'];
         }
 
+        // The landing-path funnel is a client "which entry pages convert" table, so
+        // raw Shopify paths are prettified and entry pages with zero direct purchases
+        // are dropped (a wall of 0/0/0 rows reads as broken). Country keeps every row.
+        $isLanding = $dimension === 'landing';
+
         $out = [];
         foreach ($rows as $r) {
             $sessions = (int) $r->sessions;
             $purchase = (int) $r->completed_checkout;
+            if ($isLanding && $purchase <= 0) {
+                continue;
+            }
+            $rawLabel = (string) ($r->label ?: $r->segment_key);
             $out[] = [
-                'label'    => (string) ($r->label ?: $r->segment_key),
+                'label'    => $isLanding ? $this->landingLabel($rawLabel) : $rawLabel,
                 'sessions' => $sessions,
                 'cart'     => (int) $r->cart_additions,
                 'checkout' => (int) $r->reached_checkout,
@@ -632,7 +647,38 @@ final class MonthlyReport implements ReportType
         }
         usort($out, static fn (array $a, array $b): int => $b['sessions'] <=> $a['sessions']);
 
+        if ($out === []) {
+            return ['status' => 'no_data'];
+        }
+
         return ['status' => 'ready', 'funnel' => array_slice($out, 0, 10)];
+    }
+
+    /**
+     * Prettify a raw Shopify landing path for the client funnel: "/" → "Home",
+     * "/collections/t-shirts" → "T shirts (collection)", "/products/foo-bar" →
+     * "Foo bar (product)". Query strings and fragments are dropped.
+     */
+    private function landingLabel(string $path): string
+    {
+        $p = trim($path);
+        if ($p === '' || $p === '/') {
+            return 'Home';
+        }
+        $p = (string) strtok($p, '?#');
+        $segs = array_values(array_filter(explode('/', trim($p, '/')), static fn (string $s): bool => $s !== ''));
+        if ($segs === []) {
+            return 'Home';
+        }
+
+        $suffix = '';
+        if (count($segs) >= 2 && in_array($segs[0], ['collections', 'products', 'pages', 'blogs'], true)) {
+            $suffix = ' (' . rtrim($segs[0], 's') . ')';
+        }
+        $last  = (string) end($segs);
+        $clean = ucfirst(trim(str_replace(['-', '_'], ' ', $last)));
+
+        return ($clean === '' ? $p : $clean) . $suffix;
     }
 
     /**
