@@ -28,6 +28,7 @@ import { ReportViewPage } from '@/routes/ReportViewPage';
 import { PublicReportPage } from '@/routes/PublicReportPage';
 import { InventoryPage } from '@/routes/InventoryPage';
 import { AdsPage } from '@/routes/AdsPage';
+import { ProductsPage } from '@/routes/ProductsPage';
 
 // /add-brand routes removed — brand creation is now an in-place drawer
 // triggered from the topbar / empty states / search palette.
@@ -120,6 +121,7 @@ export function App() {
           {/* Ads hub — per-brand ad-platform Overview (Meta today). Top-level hub
               with an in-page brand switcher; /brands/:slug/ads deep-links a brand. */}
           <Route path="/ads" element={<Guarded><AdsPage /></Guarded>} />
+          <Route path="/products" element={<Guarded><ProductsPage /></Guarded>} />
 
           {/* Reporting & Creative Intelligence (Phase 2, slice 2.0) */}
           <Route path="/reports" element={<Guarded><ReportsPage /></Guarded>} />
