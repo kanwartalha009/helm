@@ -198,7 +198,7 @@ export interface MonthlySeriesRow {
   label: string;
   byMonth: Record<string, number | null>; // Y-m => revenue (null = month not synced → "—")
   total: number;
-  yoyTotal: number;
+  yoyTotal: number | null; // null when any prior-year month is unsynced → "—"
   deltaYoY: number | null;
   orders: number;
   share?: number | null; // 0–1, top rows only
@@ -207,7 +207,7 @@ export interface MonthlySeriesRow {
 export interface MonthlySeriesData {
   months: string[]; // Y-m, chronological
   rows: MonthlySeriesRow[];
-  other: { byMonth: Record<string, number | null>; total: number; yoyTotal: number; deltaYoY: number | null; share: number | null; count: number } | null;
+  other: { byMonth: Record<string, number | null>; total: number; yoyTotal: number | null; deltaYoY: number | null; share: number | null; count: number } | null;
   total: number;
 }
 
@@ -366,13 +366,167 @@ export interface MonthlyReportData {
   branding: ReportBranding;
   content?: ReportContent | null;
   shared?: boolean;
-  // Monthly report is inherently the last complete month, so it has no freshness
-  // gate — kept optional so the view pages can read it across the report union.
+  // Same contract as the other reports: upToDate requires the latest complete
+  // Shopify day to reach the report month's end — the view pages gate on it.
   freshness?: { upToDate: boolean; lastSynced: string | null; staleDays: number; windowEnd: string };
 }
 
+// ── Weekly performance report (the Monday client email) ─────────────────────
+// The last COMPLETE Mon–Sun ISO week in the brand's timezone; build() ignores
+// the period filter (like monthly). Compared against the previous week, plus
+// the same week last year when the brand has rows that far back.
+export interface WeeklyKpi {
+  value: number | null;
+  previous: number | null; // previous week
+  deltaPct: number | null; // WoW, null for ratio KPIs
+  deltaAbs: number | null; // WoW, ratio KPIs only
+  lastYear: number | null; // same ISO week last year, null when no rows exist
+  yoyPct: number | null;
+  yoyAbs: number | null;
+}
+
+export interface WeeklyDay {
+  date: string;
+  revenue: number | null; // null when the day is unsynced or incomplete — never 0
+  spend: number | null; // null when no ad rows landed that day
+  complete: boolean;
+}
+
+export interface WeeklyCampaignMover {
+  platform: string;
+  id: string;
+  name: string;
+  spend: number;
+  revenue: number;
+  roas: number | null;
+  prevSpend: number | null;
+  spendDelta: number | null; // WoW %
+  prevRoas: number | null;
+  roasDelta: number | null; // WoW absolute ×
+}
+
+export interface WeeklyAction {
+  kind: 'stop' | 'fix' | 'scale';
+  title: string;
+  body: string;
+  platform: string;
+}
+
+export interface WeeklyReportData {
+  reportType: 'weekly';
+  narrative?: ReportNarrativePayload | null;
+  llm?: { enabled: boolean; provider: string };
+  brand: { name: string; slug: string; baseCurrency: string; timezone: string };
+  currency: string;
+  week: { label: string; start: string; end: string };
+  comparison: {
+    previous: { start: string; end: string };
+    lastYear: { start: string; end: string } | null;
+  };
+  kpis: {
+    totalRevenue: WeeklyKpi;
+    adSpend: WeeklyKpi;
+    blendedRoas: WeeklyKpi;
+    orders: WeeklyKpi;
+    aov: WeeklyKpi;
+  };
+  dailySeries: WeeklyDay[];
+  spendByPlatform: ReportPlatformSpend[];
+  spendComplete: boolean;
+  campaignMovers: WeeklyCampaignMover[];
+  actions: WeeklyAction[];
+  freshness?: { upToDate: boolean; lastSynced: string | null; staleDays: number; windowEnd: string };
+  branding: ReportBranding;
+  content?: ReportContent | null;
+  shared?: boolean;
+}
+
+// ── Creative performance report (ad_creative_daily grain) ───────────────────
+// One block per ad platform that has creative rows in the window (Meta today,
+// TikTok when its sync lands); platforms without rows are absent, never €0.
+export interface CreativeRankings {
+  quality: string | null; // Meta relevance diagnostics, e.g. 'above_average'
+  engagement: string | null;
+  conversion: string | null;
+  belowAverage: boolean; // any of the three is below average → warning badge
+}
+
+export interface CreativeRow {
+  id: string;
+  name: string;
+  mediaType: string | null; // image | video | null (unknown)
+  spend: number;
+  spendShare: number | null; // 0–1, of platform spend
+  revenue: number;
+  roas: number | null;
+  purchases: number;
+  cpa: number | null;
+  ctr: number | null; // %
+  thumbstop: number | null; // video_3s ÷ impressions %, null for image creatives
+  hold: number | null; // thruplays ÷ video_3s %, null for image creatives
+  addToCarts: number;
+  rankings: CreativeRankings;
+  prevRoas: number | null;
+  roasDelta: number | null; // absolute × vs the comparison window
+  spendDelta: number | null; // % vs the comparison window
+}
+
+export interface CreativeFatigueRow {
+  id: string;
+  name: string;
+  mediaType: string | null;
+  spend: number;
+  roas: number | null;
+  prevRoas: number | null;
+  ctr: number | null;
+  prevCtr: number | null;
+  reason: string; // which signal fell and by how much — rules-derived
+}
+
+export interface CreativeScaleRow {
+  id: string;
+  name: string;
+  mediaType: string | null;
+  spend: number;
+  spendShare: number | null;
+  roas: number | null;
+  platformMedian: number | null; // the median ROAS the rule compared against
+}
+
+export interface CreativeMediaMixRow {
+  mediaType: string; // image | video | unknown
+  spend: number;
+  share: number | null; // 0–1, of platform spend
+  creatives: number;
+}
+
+export interface CreativePlatformBlock {
+  platform: string;
+  summary: { creatives: number; spend: number; revenue: number; roas: number | null };
+  topCreatives: CreativeRow[];
+  totalCreatives: number;
+  fatigued: CreativeFatigueRow[];
+  scaleCandidates: CreativeScaleRow[];
+  mediaMix: CreativeMediaMixRow[];
+}
+
+export interface CreativeReportData {
+  reportType: 'creatives';
+  narrative?: ReportNarrativePayload | null;
+  llm?: { enabled: boolean; provider: string };
+  brand: { name: string; slug: string; baseCurrency: string; timezone: string };
+  currency: string;
+  period: { label: string; start: string; end: string };
+  comparison: { label: string | null; start: string; end: string } | null;
+  platforms: CreativePlatformBlock[];
+  freshness?: { upToDate: boolean; lastSynced: string | null; staleDays: number; windowEnd: string };
+  branding: ReportBranding;
+  content?: ReportContent | null;
+  shared?: boolean;
+}
+
 // The report pages accept any report type; they branch on `reportType`.
-export type AnyReportData = OverallPerformanceReportData | MonthlyReportData;
+export type AnyReportData = OverallPerformanceReportData | MonthlyReportData | WeeklyReportData | CreativeReportData;
 
 export interface ReportFiltersInput {
   period: 'last7' | 'last30' | 'mtd';

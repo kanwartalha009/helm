@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
+import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { Breadcrumb, Card, Chip } from '@/components/ui';
 import { useAuditFindings, useBrandDetail } from '@/hooks/useApiData';
 import type { AuditFinding } from '@/hooks/useApiData';
@@ -63,6 +64,8 @@ export function BrandAuditPage() {
           </div>
         </div>
       </div>
+
+      <DataCoverageCard slug={slug} compact />
 
       <div className="filter-bar mb-16" style={{ marginTop: 8 }}>
         {PERIODS.map((p) => (

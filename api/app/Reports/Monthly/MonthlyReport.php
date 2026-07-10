@@ -12,12 +12,11 @@ use App\Models\MetaBreakdownDaily;
 use App\Models\PlatformConnection;
 use App\Models\ProductCatalog;
 use App\Models\ShopifyFunnelDaily;
-use App\Platforms\Meta\InsightsFetcher;
 use App\Platforms\Shopify\RevenueFetcher;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Contracts\ReportType;
 use App\Reports\Support\MonthlySeries;
-use App\Services\Currency\FxService;
+use App\Reports\Support\SqlMonth;
 use App\Support\CountryCodes;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
@@ -53,8 +52,6 @@ final class MonthlyReport implements ReportType
     public function __construct(
         private readonly MonthlySeries $series,
         private readonly RevenueFetcher $revenue,
-        private readonly InsightsFetcher $insights,
-        private readonly FxService $fx,
     ) {}
 
     public function key(): string
@@ -136,16 +133,60 @@ final class MonthlyReport implements ReportType
                 'categories'     => $this->commerceSection('category', $brand->id, $months, $filters->usd, $limit),
                 'bestSellers'    => $this->commerceSection('product', $brand->id, $months, $filters->usd, $limit),
                 'market'         => $this->marketSection($brand->id, $months, $filters->usd),
-                'gender'         => $this->genderSection($brand, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
+                'gender'         => $this->genderSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'channelMix'     => $this->channelMixSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'roasByCountry'  => $this->roasByCountrySection($brand->id, $months, $filters->usd),
-                'placement'      => $this->placementSection($brand, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
-                'landingSellers' => $this->landingSellersSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString()),
+                'placement'      => $this->placementSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
+                'landingSellers' => $this->landingSellersSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'newVsExisting'  => $newVsExisting,
                 'funnelCountry'  => $this->funnelSection($brand->id, 'country', $monthStart->toDateString(), $monthEnd->toDateString()),
                 'funnelLanding'  => $this->funnelSection($brand->id, 'landing', $monthStart->toDateString(), $monthEnd->toDateString()),
             ],
+            // Is the data current through the report month's last day? Same
+            // contract as OverallPerformanceReport::freshness — the SPA (and the
+            // public share page) gate a stale report behind a "sync first" wall.
+            'freshness' => $this->freshness($brand->id, $monthEnd->toDateString()),
         ];
+    }
+
+    /**
+     * Is the report's data current? The report month is only trustworthy when
+     * the latest COMPLETE Shopify day on file reaches the month's end. Same
+     * payload contract as OverallPerformanceReport::freshness. FAILS CLOSED:
+     * if the check itself errors, the report reads as stale (never the other
+     * way round), so a freshness bug can't un-gate stale numbers.
+     *
+     * @return array<string, mixed>
+     */
+    private function freshness(int $brandId, string $monthEnd): array
+    {
+        try {
+            $lastComplete = DailyMetric::query()
+                ->where('brand_id', $brandId)
+                ->where('platform', 'shopify')
+                ->where('is_complete', true)
+                ->max('date');
+
+            $end  = CarbonImmutable::parse($monthEnd)->startOfDay();
+            $last = $lastComplete !== null ? CarbonImmutable::parse((string) $lastComplete)->startOfDay() : null;
+
+            return [
+                'upToDate'   => $last !== null && $last->greaterThanOrEqualTo($end),
+                'lastSynced' => $last?->toDateString(),
+                'staleDays'  => ($last !== null && $last->lessThan($end)) ? (int) $last->diffInDays($end) : 0,
+                'windowEnd'  => $end->toDateString(),
+            ];
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'freshness', 'error' => $e->getMessage()]);
+
+            return [
+                'upToDate'   => false,
+                'lastSynced' => null,
+                'staleDays'  => 0,
+                'windowEnd'  => $monthEnd,
+                'note'       => 'Freshness could not be verified — the report is held back until a sync confirms the data is current.',
+            ];
+        }
     }
 
     /**
@@ -212,22 +253,20 @@ final class MonthlyReport implements ReportType
     }
 
     /**
-     * Ad spend by gender for the report month — meta_breakdown_daily[age_gender]
-     * folded onto the gender axis (mirrors the dashboard Audience fold). Cost /
-     * clicks / CPC / CTR / CPM / share. Reach + frequency aren't stored on the
-     * breakdown yet, so they're intentionally absent (added with the Meta pull).
+     * Ad spend by gender for the report month — the STORED
+     * meta_breakdown_daily[age_gender] rows folded onto the gender axis
+     * (mirrors the dashboard Audience fold), never a live Meta call: build()
+     * runs on every view including public shares, so it must stay read-only.
+     * Cost / clicks / CPC / CTR / CPM / share; money converts per row × the
+     * stored fx snapshot in USD mode. 'no_data' until the breakdown backfill
+     * has landed rows for the month.
      *
      * @return array<string, mixed>
      */
-    private function genderSection(Brand $brand, string $start, string $end, bool $usd): array
+    private function genderSection(int $brandId, string $start, string $end, bool $usd): array
     {
-        $conn = $this->metaConnection($brand->id);
-        if ($conn === null) {
-            return ['status' => 'no_data'];
-        }
-
         try {
-            $segments = $this->insights->fetchBreakdownTotals($conn, ['age', 'gender'], CarbonImmutable::parse($start), CarbonImmutable::parse($end));
+            $segments = $this->breakdownTotalsFromStore($brandId, 'age_gender', $start, $end, $usd);
         } catch (Throwable $e) {
             Log::warning('monthly_report.section_failed', ['dimension' => 'gender', 'error' => $e->getMessage()]);
 
@@ -239,8 +278,8 @@ final class MonthlyReport implements ReportType
         }
 
         // Fold age × gender onto the gender axis. Age buckets are disjoint, so a
-        // person lands in exactly one age×gender cell — summing the cells for a
-        // gender gives that gender's unique reach (correct, unlike summing days).
+        // person lands in exactly one age×gender cell; daily reach rows re-count
+        // repeat viewers, so the summed reach is an upper bound (freq approximate).
         $folded = [];
         foreach ($segments as $s) {
             $g = $this->genderOf((string) $s['key']);
@@ -257,11 +296,10 @@ final class MonthlyReport implements ReportType
             $folded[$g]['conversion_value'] += (float) $s['conversion_value'];
         }
 
-        $fx    = $this->monthFx($brand, $start, $usd);
         $total = 0.0;
         $rows  = [];
         foreach ($folded as $s) {
-            $row    = $this->breakdownMetrics($s, $fx, 'gender');
+            $row    = $this->breakdownMetrics($s, 'gender');
             $total += $row['cost'];
             $rows[] = $row;
         }
@@ -273,6 +311,57 @@ final class MonthlyReport implements ReportType
         usort($rows, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
 
         return ['status' => 'ready', 'metrics' => $rows];
+    }
+
+    /**
+     * Segment totals for one breakdown axis over [start, end] from the stored
+     * meta_breakdown_daily rows — the report's read-only replacement for the
+     * live fetchBreakdownTotals call. Money is summed per row × the stored fx
+     * snapshot in USD mode (same pattern as roasByCountry), so mixed-currency
+     * days convert on the day's own rate. Reach is summed across days (upper
+     * bound); rows with a zero reach column read as "not captured".
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function breakdownTotalsFromStore(int $brandId, string $breakdownType, string $start, string $end, bool $usd): array
+    {
+        $money = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+
+        $rows = MetaBreakdownDaily::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'meta')
+            ->where('breakdown_type', $breakdownType)
+            ->whereBetween('date', [$start, $end])
+            ->groupBy('segment_key')
+            ->selectRaw("segment_key,
+                MAX(segment_label) AS label,
+                COALESCE(SUM({$money('spend')}), 0) AS spend,
+                COALESCE(SUM(impressions), 0) AS impressions,
+                COALESCE(SUM(clicks), 0) AS clicks,
+                COALESCE(SUM(reach), 0) AS reach,
+                COALESCE(SUM(conversions), 0) AS conversions,
+                COALESCE(SUM({$money('conversion_value')}), 0) AS conversion_value")
+            ->get();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $key = (string) $r->segment_key;
+            if ($key === '') {
+                continue;
+            }
+            $out[] = [
+                'key'              => $key,
+                'label'            => (string) ($r->label ?: $key),
+                'spend'            => (float) $r->spend,
+                'impressions'      => (int) $r->impressions,
+                'clicks'           => (int) $r->clicks,
+                'reach'            => (int) $r->reach,
+                'conversions'      => (int) $r->conversions,
+                'conversion_value' => (float) $r->conversion_value,
+            ];
+        }
+
+        return $out;
     }
 
     /**
@@ -356,7 +445,11 @@ final class MonthlyReport implements ReportType
         try {
             // Commerce revenue keyed by Shopify country NAME → normalise to ISO-2
             // so it joins Meta spend (which is keyed by ISO-2 country code).
-            $rev   = $this->series->rawByMonth($brandId, 'country', $start, $end, $usd, CountryCodes::toIso2(...));
+            // Revenue is pulled in USD regardless of display mode: the store and
+            // the ad account can run different native currencies, so the ROAS
+            // ratio is only meaningful computed from the USD columns. The spend
+            // COLUMN still displays in the report currency.
+            $rev   = $this->series->rawByMonth($brandId, 'country', $start, $end, true, CountryCodes::toIso2(...));
             $spend = $this->metaSpendByMonth($brandId, 'country', $start, $end, $usd);
         } catch (Throwable $e) {
             Log::warning('monthly_report.section_failed', ['dimension' => 'roasByCountry', 'error' => $e->getMessage()]);
@@ -379,30 +472,33 @@ final class MonthlyReport implements ReportType
             // row a client would trip over.
             if (mb_strtolower(trim((string) $key)) === 'unknown') {
                 foreach ($months as $m) {
-                    $unattributed += (float) ($s['byMonth'][$m] ?? 0);
+                    $unattributed += (float) ($s['byMonth'][$m]['disp'] ?? 0);
                 }
                 continue;
             }
             $revByM  = $rev[$key]['byMonth'] ?? [];
             $byMonth = [];
-            $tRev = 0.0;
-            $tSpend = 0.0;
+            $tRevUsd = 0.0;
+            $tSpendUsd = 0.0;
+            $tSpendDisp = 0.0;
             foreach ($months as $m) {
-                $sp = (float) ($s['byMonth'][$m] ?? 0);
-                $rv = (float) ($revByM[$m] ?? 0);
-                $byMonth[$m] = $sp > 0 ? round($rv / $sp, 2) : null;
-                $tSpend += $sp;
-                $tRev   += $rv;
+                $spUsd  = (float) ($s['byMonth'][$m]['usd'] ?? 0);
+                $spDisp = (float) ($s['byMonth'][$m]['disp'] ?? 0);
+                $rvUsd  = (float) ($revByM[$m] ?? 0);
+                $byMonth[$m] = $spUsd > 0 ? round($rvUsd / $spUsd, 2) : null;
+                $tSpendUsd  += $spUsd;
+                $tSpendDisp += $spDisp;
+                $tRevUsd    += $rvUsd;
             }
-            $totSpendAll += $tSpend;
-            $totRevAll   += $tRev;
+            $totSpendAll += $tSpendUsd;
+            $totRevAll   += $tRevUsd;
             $rows[] = [
                 'key'     => (string) $key,
                 // Prefer the commerce country name ("Spain") over Meta's bare code.
                 'label'   => (string) ($rev[$key]['label'] ?? $s['label']),
                 'byMonth' => $byMonth,
-                'spend'   => round($tSpend, 2),
-                'roas'    => $tSpend > 0 ? round($tRev / $tSpend, 2) : null,
+                'spend'   => round($tSpendDisp, 2),
+                'roas'    => $tSpendUsd > 0 ? round($tRevUsd / $tSpendUsd, 2) : null,
             ];
         }
 
@@ -421,25 +517,30 @@ final class MonthlyReport implements ReportType
     }
 
     /**
-     * Meta spend per segment per calendar month from meta_breakdown_daily, in
-     * display currency. Shape mirrors MonthlySeries::rawByMonth so the two pair up.
+     * Meta spend per segment per calendar month from meta_breakdown_daily —
+     * each month carries BOTH the display-currency figure ($usd flag, for the
+     * spend column) and the USD figure (for currency-correct ROAS ratios).
+     * Shape otherwise mirrors MonthlySeries::rawByMonth so the two pair up.
      *
-     * @return array<string, array{label: string, byMonth: array<string, float>}>
+     * @return array<string, array{label: string, byMonth: array<string, array{disp: float, usd: float}>}>
      */
     private function metaSpendByMonth(int $brandId, string $dimension, string $start, string $end, bool $usd): array
     {
-        $spend = $usd ? 'spend * COALESCE(fx_rate_to_usd, 1)' : 'spend';
+        $spendUsd  = 'spend * COALESCE(fx_rate_to_usd, 1)';
+        $spendDisp = $usd ? $spendUsd : 'spend';
+        $ym        = SqlMonth::expr('date');
 
         $rows = MetaBreakdownDaily::query()
             ->where('brand_id', $brandId)
             ->where('platform', 'meta')
             ->where('breakdown_type', $dimension)
             ->whereBetween('date', [$start, $end])
-            ->groupByRaw("segment_key, DATE_FORMAT(date, '%Y-%m')")
+            ->groupByRaw("segment_key, {$ym}")
             ->selectRaw("segment_key,
                 MAX(segment_label) AS label,
-                DATE_FORMAT(date, '%Y-%m') AS ym,
-                COALESCE(SUM({$spend}), 0) AS spend")
+                {$ym} AS ym,
+                COALESCE(SUM({$spendDisp}), 0) AS spend_disp,
+                COALESCE(SUM({$spendUsd}), 0) AS spend_usd")
             ->get();
 
         $out = [];
@@ -449,7 +550,10 @@ final class MonthlyReport implements ReportType
                 continue;
             }
             $out[$key] ??= ['label' => (string) ($r->label ?: $key), 'byMonth' => []];
-            $out[$key]['byMonth'][(string) $r->ym] = (float) $r->spend;
+            $out[$key]['byMonth'][(string) $r->ym] = [
+                'disp' => (float) $r->spend_disp,
+                'usd'  => (float) $r->spend_usd,
+            ];
         }
 
         return $out;
@@ -459,13 +563,17 @@ final class MonthlyReport implements ReportType
      * Ad spend by landing page × best sellers — "is the ad budget behind the
      * winners?". The Inventory report's join: product_catalog bridges Meta spend
      * (ad_product_daily, by product HANDLE) and commerce revenue/units (by product
-     * TITLE), plus current stock. Native currency (matches the Inventory report;
-     * ad_product_daily carries no fx). Ranked by revenue, top 8.
+     * TITLE), plus current stock. Revenue follows the report currency (× the
+     * stored fx snapshot in USD mode); Meta spend stays NATIVE because
+     * ad_product_daily carries no fx — the document footnotes the spend column
+     * instead of silently mislabelling it. Ranked by revenue, top 8.
      *
      * @return array<string, mixed>
      */
-    private function landingSellersSection(int $brandId, string $start, string $end): array
+    private function landingSellersSection(int $brandId, string $start, string $end, bool $usd): array
     {
+        $disp = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+
         try {
             $products = ProductCatalog::query()->where('brand_id', $brandId)->get();
             if ($products->isEmpty()) {
@@ -484,10 +592,10 @@ final class MonthlyReport implements ReportType
                 ->where('brand_id', $brandId)
                 ->where('dimension_type', 'product')
                 ->whereBetween('date', [$start, $end])
-                ->selectRaw('dimension_key,
-                    COALESCE(SUM(units), 0)          AS units,
-                    COALESCE(SUM(total_sales), 0)    AS total_sales,
-                    COALESCE(SUM(refunds_amount), 0) AS refunds')
+                ->selectRaw("dimension_key,
+                    COALESCE(SUM(units), 0)                     AS units,
+                    COALESCE(SUM({$disp('total_sales')}), 0)    AS total_sales,
+                    COALESCE(SUM({$disp('refunds_amount')}), 0) AS refunds")
                 ->groupBy('dimension_key')
                 ->get()
                 ->keyBy('dimension_key');
@@ -548,28 +656,21 @@ final class MonthlyReport implements ReportType
     }
 
     /**
-     * Ad spend by placement for the report month — meta_breakdown_daily[placement]
-     * (publisher × position, e.g. "IG · Feed"). Cost / reach / frequency / clicks
-     * / CPC / CTR / CPM / share. Reach + frequency are NULL until a re-sync
-     * captures reach (added to the breakdown pull in this increment); summed reach
-     * is an upper bound so frequency (impressions ÷ reach) is approximate.
+     * Ad spend by placement for the report month — the STORED
+     * meta_breakdown_daily[placement] rows (publisher × position, e.g.
+     * "IG · Feed"), never a live Meta call (build() runs on every view,
+     * including public shares). Cost / reach / frequency / clicks / CPC / CTR /
+     * CPM / share; money converts per row × the stored fx snapshot in USD mode.
+     * Summed daily reach is an upper bound so frequency is approximate; both
+     * are NULL until the pull captures reach. 'no_data' until the breakdown
+     * backfill has landed rows for the month.
      *
      * @return array<string, mixed>
      */
-    private function placementSection(Brand $brand, string $start, string $end, bool $usd): array
+    private function placementSection(int $brandId, string $start, string $end, bool $usd): array
     {
-        $conn = $this->metaConnection($brand->id);
-        if ($conn === null) {
-            return ['status' => 'no_data'];
-        }
-
         try {
-            $segments = $this->insights->fetchBreakdownTotals(
-                $conn,
-                (array) config('meta_breakdowns.placement', ['publisher_platform', 'platform_position']),
-                CarbonImmutable::parse($start),
-                CarbonImmutable::parse($end),
-            );
+            $segments = $this->breakdownTotalsFromStore($brandId, 'placement', $start, $end, $usd);
         } catch (Throwable $e) {
             Log::warning('monthly_report.section_failed', ['dimension' => 'placement', 'error' => $e->getMessage()]);
 
@@ -580,11 +681,10 @@ final class MonthlyReport implements ReportType
             return ['status' => 'no_data'];
         }
 
-        $fx    = $this->monthFx($brand, $start, $usd);
         $total = 0.0;
         $rows  = [];
         foreach ($segments as $s) {
-            $row    = $this->breakdownMetrics($s, $fx, 'placement');
+            $row    = $this->breakdownMetrics($s, 'placement');
             $total += $row['cost'];
             $rows[] = $row;
         }
@@ -598,47 +698,26 @@ final class MonthlyReport implements ReportType
         return ['status' => 'ready', 'placement' => array_slice($rows, 0, 10)];
     }
 
-    /** The brand's active Meta connection (brand eager-loaded for currency), or null. */
-    private function metaConnection(int $brandId): ?PlatformConnection
-    {
-        return PlatformConnection::query()
-            ->with('brand')
-            ->where('brand_id', $brandId)
-            ->where('platform', 'meta')
-            ->where('status', 'active')
-            ->first();
-    }
-
-    /** Native → display-currency fx multiplier for the report month (1.0 in native mode). */
-    private function monthFx(Brand $brand, string $start, bool $usd): float
-    {
-        if (! $usd) {
-            return 1.0;
-        }
-        $rate = $this->fx->cachedToUsd((string) ($brand->base_currency ?: 'USD'), CarbonImmutable::parse($start));
-
-        return $rate ?: 1.0;
-    }
-
     /**
-     * Shared placement/gender metric row from a fetchBreakdownTotals segment.
-     * $fx multiplies native money into display currency; cost metrics (CPC/CPM/CPA)
-     * and ROAS derive from the fx-adjusted cost/revenue so they're correct in either
-     * mode, while ratios (CTR/frequency) are currency-agnostic. The Advantage+
-     * unattributed placement bucket ("unknown" position) is relabelled honestly.
-     * `share` is filled by the caller once the section total is known.
+     * Shared placement/gender metric row from a breakdownTotalsFromStore
+     * segment (money already in display currency). Cost metrics (CPC/CPM/CPA)
+     * and ROAS derive from that cost/revenue so they're correct in either
+     * currency mode, while ratios (CTR/frequency) are currency-agnostic. The
+     * Advantage+ unattributed placement bucket ("unknown" position) is
+     * relabelled honestly. `share` is filled by the caller once the section
+     * total is known.
      *
      * @param  array<string, mixed>  $s
      * @return array<string, mixed>
      */
-    private function breakdownMetrics(array $s, float $fx, string $kind): array
+    private function breakdownMetrics(array $s, string $kind): array
     {
-        $cost  = round(((float) $s['spend']) * $fx, 2);
+        $cost  = round((float) $s['spend'], 2);
         $impr  = (int) $s['impressions'];
         $clk   = (int) $s['clicks'];
         $reach = (int) $s['reach'];
         $purch = (int) $s['conversions'];
-        $rev   = round(((float) $s['conversion_value']) * $fx, 2);
+        $rev   = round((float) $s['conversion_value'], 2);
 
         $raw   = (string) ($s['label'] ?: $s['key']);
         $label = $kind === 'placement' ? $this->placementLabel($raw) : $raw;

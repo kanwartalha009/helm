@@ -106,10 +106,12 @@ final class OverallPerformanceReport implements ReportType
             // (slice 2.1). Null until shopify:sync-inventory has run.
             'deadInventory' => $this->safely('deadInventory', fn () => $this->deadInventory($brand->id), null),
             // Is the data current for this window? The SPA prompts a fresh sync
-            // before trusting the numbers when this says we're behind. On error,
-            // default to "up to date" so a freshness glitch never blocks the view.
+            // before trusting the numbers when this says we're behind. On error
+            // the gate FAILS CLOSED (upToDate: false) — a freshness bug must
+            // never un-gate a stale report a client could receive.
             'freshness'  => $this->safely('freshness', fn () => $this->freshness($brand->id, $end), [
-                'upToDate' => true, 'lastSynced' => null, 'staleDays' => 0, 'windowEnd' => $end,
+                'upToDate' => false, 'lastSynced' => null, 'staleDays' => 0, 'windowEnd' => $end,
+                'note'     => 'Freshness could not be verified — the report is held back until a sync confirms the data is current.',
             ]),
         ];
     }
@@ -239,12 +241,14 @@ final class OverallPerformanceReport implements ReportType
                 ->where('brand_id', $brandId)
                 ->where('platform', $p)
                 ->whereBetween('date', [$start, $end])
-                ->selectRaw("COALESCE(SUM({$disp('spend')}), 0) AS spend, COALESCE(SUM({$usdc('spend')}), 0) AS spend_usd")
+                ->selectRaw("COUNT(*) AS n, COALESCE(SUM({$disp('spend')}), 0) AS spend, COALESCE(SUM({$usdc('spend')}), 0) AS spend_usd")
                 ->first();
             $sp    = round((float) ($s->spend ?? 0), 2);
             $spUsd = (float) ($s->spend_usd ?? 0);
 
-            $spendByPlatform[$p] = $sp;
+            // Missing ≠ zero: a connected platform with NO rows in the window
+            // hasn't synced yet — null (the SPA says "not synced"), never €0.
+            $spendByPlatform[$p] = ((int) ($s->n ?? 0)) > 0 ? $sp : null;
             $totalSpend    += $sp;
             $totalSpendUsd += $spUsd;
         }
@@ -333,7 +337,9 @@ final class OverallPerformanceReport implements ReportType
             $out[] = [
                 'platform'  => $p,
                 'connected' => $isConnected,
-                'spend'     => $isConnected ? ($cur['spendByPlatform'][$p] ?? 0.0) : null,
+                // Null both when the platform isn't connected AND when it's
+                // connected but has no synced rows in the window (missing ≠ 0).
+                'spend'     => $isConnected ? ($cur['spendByPlatform'][$p] ?? null) : null,
             ];
         }
 

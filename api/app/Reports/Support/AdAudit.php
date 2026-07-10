@@ -45,9 +45,11 @@ final class AdAudit
 
         $disp = static fn (array $r): float => $usd ? $r['spend_usd'] : $r['spend_native'];
 
-        // Account roll-up (USD for ROAS/CTR/CPM correctness).
-        $acc  = $this->totals($cur);
-        $accP = $prev !== [] ? $this->totals($prev) : null;
+        // Account roll-up. Money KPIs (spend, CPM) follow the report's display
+        // currency so they agree with the waste figure and the campaign rows;
+        // ROAS stays a USD ratio so it's currency-correct in either mode.
+        $acc  = $this->totals($cur, $usd);
+        $accP = $prev !== [] ? $this->totals($prev, $usd) : null;
 
         // Per-campaign verdicts, ranked by spend (where the money goes).
         usort($cur, static fn (array $a, array $b): int => $b['spend_usd'] <=> $a['spend_usd']);
@@ -133,23 +135,35 @@ final class AdAudit
         return $out;
     }
 
-    /** @param array<int|string, array<string, mixed>> $rows */
-    private function totals(array $rows): array
+    /**
+     * Account totals. `spend` and `cpm` are in the DISPLAY currency ($usd flag)
+     * so every money figure in the section (KPIs, waste, campaign rows) shares
+     * one currency; `spend_usd` is kept for share/ratio math and `roas` is the
+     * USD ratio so it's currency-correct in either mode.
+     *
+     * @param array<int|string, array<string, mixed>> $rows
+     */
+    private function totals(array $rows, bool $usd): array
     {
+        $spendNative = 0.0;
         $spendUsd = 0.0;
         $valueUsd = 0.0;
         $impr = 0;
         $clk = 0;
         $conv = 0;
         foreach ($rows as $r) {
-            $spendUsd += $r['spend_usd'];
-            $valueUsd += $r['value_usd'];
-            $impr     += $r['impressions'];
-            $clk      += $r['clicks'];
-            $conv     += $r['conversions'];
+            $spendNative += $r['spend_native'];
+            $spendUsd    += $r['spend_usd'];
+            $valueUsd    += $r['value_usd'];
+            $impr        += $r['impressions'];
+            $clk         += $r['clicks'];
+            $conv        += $r['conversions'];
         }
 
+        $spend = $usd ? $spendUsd : $spendNative;
+
         return [
+            'spend'       => $spend,
             'spend_usd'   => $spendUsd,
             'value_usd'   => $valueUsd,
             'impressions' => $impr,
@@ -157,7 +171,7 @@ final class AdAudit
             'conversions' => $conv,
             'roas'        => $spendUsd > 0 ? $valueUsd / $spendUsd : null,
             'ctr'         => $impr > 0 ? $clk / $impr * 100 : null,
-            'cpm'         => $impr > 0 ? $spendUsd / $impr * 1000 : null,
+            'cpm'         => $impr > 0 ? $spend / $impr * 1000 : null,
         ];
     }
 
@@ -169,7 +183,7 @@ final class AdAudit
     private function kpis(array $acc, ?array $prev): array
     {
         return [
-            'spend'     => $this->kpi($acc['spend_usd'], $prev['spend_usd'] ?? null),
+            'spend'     => $this->kpi($acc['spend'], $prev['spend'] ?? null),
             'purchases' => $this->kpi($acc['conversions'], $prev['conversions'] ?? null),
             'roas'      => $this->kpi($acc['roas'], $prev['roas'] ?? null, ratio: true),
             'ctr'       => $this->kpi($acc['ctr'], $prev['ctr'] ?? null),

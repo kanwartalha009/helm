@@ -1,6 +1,8 @@
 import { useParams } from 'react-router-dom';
 import { ReportDocument } from '@/components/reports/ReportDocument';
 import { MonthlyReportDocument } from '@/components/reports/MonthlyReportDocument';
+import { WeeklyReportDocument } from '@/components/reports/WeeklyReportDocument';
+import { CreativeReportDocument } from '@/components/reports/CreativeReportDocument';
 import { usePublicReport } from '@/hooks/useReports';
 
 /**
@@ -71,6 +73,10 @@ export function PublicReportPage() {
           </div>
         ) : data.reportType === 'monthly' ? (
           <MonthlyReportDocument data={data} editable={false} />
+        ) : data.reportType === 'weekly' ? (
+          <WeeklyReportDocument data={data} editable={false} />
+        ) : data.reportType === 'creatives' ? (
+          <CreativeReportDocument data={data} editable={false} />
         ) : (
           <ReportDocument data={data} editable={false} />
         ))}

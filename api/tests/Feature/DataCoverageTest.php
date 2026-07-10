@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Jobs\BackfillBrandDatasetJob;
-use App\Jobs\BackfillBrandRangeJob;
 use App\Models\Brand;
 use App\Models\PlatformConnection;
 use App\Models\User;
@@ -77,14 +76,41 @@ final class DataCoverageTest extends TestCase
             ->assertStatus(409);
         Queue::assertPushed(BackfillBrandDatasetJob::class, 1);
 
-        // History rides the existing per-day fan-out job.
+        // History is a single tracked ranged job too (2026-07-10) — never a
+        // per-day fan-out.
         $this->postJson("/api/brands/{$this->brand->slug}/backfill-dataset", ['dataset' => 'history'])
             ->assertStatus(202);
-        Queue::assertPushed(BackfillBrandRangeJob::class, 1);
+        Queue::assertPushed(BackfillBrandDatasetJob::class, 2);
 
         $this->assertDatabaseHas('backfill_runs', [
             'brand_id' => $this->brand->id, 'dataset' => 'creatives', 'status' => 'queued',
         ]);
+        $this->assertDatabaseHas('backfill_runs', [
+            'brand_id' => $this->brand->id, 'dataset' => 'history', 'status' => 'queued',
+        ]);
+    }
+
+    public function test_all_dataset_is_one_job_and_blocks_everything(): void
+    {
+        Queue::fake();
+
+        // 'all' → exactly ONE job covering every dataset + platform.
+        $this->postJson("/api/brands/{$this->brand->slug}/backfill-dataset", ['dataset' => 'all'])
+            ->assertStatus(202);
+        Queue::assertPushed(BackfillBrandDatasetJob::class, 1);
+
+        // While 'all' is active, every other dataset (and another 'all') is 409.
+        foreach (['all', 'history', 'creatives', 'commerce'] as $dataset) {
+            $this->postJson("/api/brands/{$this->brand->slug}/backfill-dataset", ['dataset' => $dataset])
+                ->assertStatus(409);
+        }
+        Queue::assertPushed(BackfillBrandDatasetJob::class, 1);
+
+        // Coverage reports every relevant dataset as running.
+        $byKey = collect($this->getJson("/api/brands/{$this->brand->slug}/data-coverage")->json('datasets'))->keyBy('key');
+        $this->assertTrue($byKey['history']['running']);
+        $this->assertTrue($byKey['creatives']['running']);
+        $this->assertTrue($byKey['commerce']['running']);
     }
 
     public function test_trigger_is_admin_manager_only(): void

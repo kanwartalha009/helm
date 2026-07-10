@@ -1,134 +1,145 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Button, Card } from '@/components/ui';
+import { Button } from '@/components/ui';
 import { useDataCoverage, useTriggerBackfill } from '@/hooks/useApiData';
 import type { CoverageDataset } from '@/hooks/useApiData';
 
 /**
- * Onboarding data coverage (2026-07-10). Renders ONLY when a connected
- * platform is missing history against the 12-month target or a backfill is
- * in flight — a fully covered brand never sees this card.
+ * Onboarding data coverage — compact banner (2026-07-10 rework). Renders ONLY
+ * when a connected platform is missing 12-month history or a backfill is in
+ * flight; a covered brand never sees it.
  *
- * Click feedback contract (2026-07-10 follow-up): the button flips to a
- * queued state IMMEDIATELY (local optimistic set — the history dataset can't
- * report "running" until its fan-out job writes sync_logs), a success toast
- * fires from the trigger hook, the card polls while anything is pending, and
- * each row disappears on its own once coverage reaches the target. A run
- * that finishes while a gap remains means the platform simply has no older
- * data — that renders as a terminal note, not an eternal button.
+ * One button, one job: "Backfill everything" runs a single tracked queued job
+ * covering every gapped dataset and every connected platform (ranged API
+ * pulls — never per-day fan-out). Per-dataset detail lives behind a
+ * disclosure. The banner polls while pending and removes itself when
+ * coverage reaches the target.
  */
 export function DataCoverageCard({ slug, compact = false }: { slug: string | undefined; compact?: boolean }) {
   const { data } = useDataCoverage(slug);
   const trigger = useTriggerBackfill(slug);
+  const [open, setOpen] = useState(false);
+  const [clicked, setClicked] = useState(false);
 
-  // Datasets clicked this page-visit, shown as queued until the server
-  // reports running (tracked runs) or the gap clears (history).
-  const [justTriggered, setJustTriggered] = useState<Set<string>>(new Set());
-
+  // Server truth caught up (running reported) or gaps resolved → drop the
+  // optimistic click state.
   useEffect(() => {
     if (!data) return;
-    setJustTriggered((prev) => {
-      if (prev.size === 0) return prev;
-      const next = new Set(prev);
-      for (const d of data.datasets) {
-        // Server truth has caught up — running flag set, or the gap resolved.
-        if (next.has(d.key) && (d.running || !d.needsBackfill)) next.delete(d.key);
-      }
-      return next.size === prev.size ? prev : next;
-    });
+    if (data.datasets.some((d) => d.running) || !data.anyGap) setClicked(false);
   }, [data]);
 
   if (!data || !data.anyGap) return null;
 
-  const visible = data.datasets.filter((d) => d.relevant && (d.needsBackfill || d.running));
-  if (visible.length === 0) return null;
+  const gapped = data.datasets.filter((d) => d.relevant && d.needsBackfill);
+  const running = clicked || data.datasets.some((d) => d.running);
+  const failed = !running && data.datasets.some((d) => d.lastRun?.status === 'failed');
+  // Every gapped dataset has a finished run → the platforms have no older
+  // data to give. Terminal: say so once, stop nagging.
+  const exhausted = !running && gapped.length > 0 && gapped.every((d) => d.lastRun?.status === 'done');
 
-  const run = (key: CoverageDataset['key']) => {
-    setJustTriggered((prev) => new Set(prev).add(key));
-    trigger.mutate(key, {
-      onError: () => setJustTriggered((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      }),
-    });
-  };
+  if (gapped.length === 0 && !running) return null;
 
   return (
-    <Card style={{ padding: 18, marginBottom: compact ? 16 : 24, borderLeft: '3px solid var(--warning, #9a6700)' }}>
-      <div style={{ fontWeight: 600, marginBottom: 2 }}>Historical data missing</div>
-      <div className="muted text-sm" style={{ marginBottom: 12, lineHeight: 1.55 }}>
-        Daily sync keeps data current going forward; these datasets have no history back to{' '}
-        <b>{data.targetStart}</b> ({data.targetMonths} months). Backfill once — each row disappears when its coverage
-        is complete.
-      </div>
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 10,
+        padding: '10px 14px',
+        marginBottom: compact ? 14 : 20,
+        border: '1px solid var(--border)',
+        borderLeft: '3px solid var(--warning, #9a6700)',
+        borderRadius: 8,
+        background: 'var(--surface, transparent)',
+        fontSize: 13,
+      }}
+    >
+      <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--warning, #9a6700)', flexShrink: 0 }} />
 
-      <div style={{ display: 'grid', gap: 8 }}>
-        {visible.map((d) => (
-          <DatasetRow
-            key={d.key}
-            d={d}
-            queuedLocally={justTriggered.has(d.key)}
-            onRun={() => run(d.key)}
-            busy={trigger.isPending}
-          />
-        ))}
-      </div>
-    </Card>
+      <span style={{ flex: 1, minWidth: 220 }}>
+        {running ? (
+          <b>Backfilling {data.targetMonths} months of history — one job, all platforms. This banner clears itself.</b>
+        ) : exhausted ? (
+          <>
+            <b>Backfill complete</b>
+            <span className="muted"> — the platforms hold no data older than what's on file.</span>
+          </>
+        ) : (
+          <>
+            <b>Historical data missing</b>
+            <span className="muted">
+              {' '}— {gapped.length} dataset{gapped.length === 1 ? '' : 's'} without history to {data.targetStart}
+              {failed ? ' · last run failed (safe to retry)' : ''}
+            </span>
+          </>
+        )}
+      </span>
+
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="muted text-xs"
+        style={{ background: 'transparent', border: 0, cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit' }}
+      >
+        {open ? 'Hide details' : 'Details'}
+      </button>
+
+      {!running && !exhausted && (
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={trigger.isPending}
+          onClick={() => {
+            setClicked(true);
+            trigger.mutate('all', { onError: () => setClicked(false) });
+          }}
+        >
+          {trigger.isPending ? 'Queuing…' : 'Backfill everything'}
+        </Button>
+      )}
+
+      {open && (
+        <div style={{ flexBasis: '100%', display: 'grid', gap: 4, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+          {data.datasets
+            .filter((d) => d.relevant)
+            .map((d) => (
+              <DetailRow key={d.key} d={d} />
+            ))}
+        </div>
+      )}
+    </div>
   );
 }
 
-function DatasetRow({
-  d,
-  queuedLocally,
-  onRun,
-  busy,
-}: {
-  d: CoverageDataset;
-  queuedLocally: boolean;
-  onRun: () => void;
-  busy: boolean;
-}) {
+function DetailRow({ d }: { d: CoverageDataset }) {
   const earliest = d.platforms.find((p) => p.earliest)?.earliest ?? null;
-  const pending = d.running || queuedLocally;
-
-  // A finished run with the gap still open = the platform has no older data
-  // to give (e.g. the ad account is younger than 12 months). Terminal state,
-  // not a button — otherwise this row nags forever.
-  const exhausted = !pending && d.lastRun?.status === 'done' && d.needsBackfill;
+  const state = d.running
+    ? 'backfilling…'
+    : !d.needsBackfill
+      ? 'covered'
+      : d.lastRun?.status === 'done'
+        ? 'no older data on the platform'
+        : d.lastRun?.status === 'failed'
+          ? `failed — retry via the button${d.lastRun.message ? ` (${d.lastRun.message.slice(0, 90)}…)` : ''}`
+          : 'missing';
 
   return (
-    <div className="flex items-center gap-12" style={{ padding: '8px 0', borderTop: '1px solid var(--border)' }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 500, fontSize: 13.5 }}>{d.label}</div>
-        <div className="text-xs muted">
-          {earliest ? `Data starts ${earliest}` : 'No historical rows yet'}
-          {d.lastRun?.status === 'failed' && !pending && (
-            <span style={{ color: 'var(--danger, #b3261e)' }}>
-              {' '}· last run failed — safe to retry{d.lastRun.message ? ` (${d.lastRun.message.slice(0, 120)}…)` : ''}
-            </span>
-          )}
-          {exhausted && ' · backfill ran — the platform has no older data than this'}
-        </div>
-      </div>
-
-      {pending ? (
-        <span className="text-xs" style={{ color: 'var(--warning, #9a6700)', fontWeight: 500 }}>
-          {d.key === 'history' ? (
-            <>Queued — one job per day per connection. <Link to="/sync-health" style={{ textDecoration: 'underline' }}>Track on Sync health</Link></>
-          ) : (
-            'Backfilling… this row updates itself'
-          )}
-        </span>
-      ) : exhausted ? (
-        <Button size="sm" variant="ghost" onClick={onRun} disabled={busy} title="Re-run anyway — reruns resume safely">
-          Run again
-        </Button>
-      ) : (
-        <Button size="sm" variant="secondary" onClick={onRun} disabled={busy}>
-          Backfill 12 months
-        </Button>
-      )}
+    <div className="text-xs" style={{ display: 'flex', gap: 8 }}>
+      <span style={{ minWidth: 220, fontWeight: 500 }}>{d.label}</span>
+      <span className="muted">{earliest ? `since ${earliest}` : 'no rows'}</span>
+      <span
+        style={{
+          color: d.running
+            ? 'var(--warning, #9a6700)'
+            : state === 'covered'
+              ? 'var(--success, #1f6f5c)'
+              : state.startsWith('failed')
+                ? 'var(--danger, #b3261e)'
+                : 'inherit',
+        }}
+      >
+        · {state}
+      </span>
     </div>
   );
 }

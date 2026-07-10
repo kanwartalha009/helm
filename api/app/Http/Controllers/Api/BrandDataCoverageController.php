@@ -6,10 +6,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\BackfillBrandDatasetJob;
-use App\Jobs\BackfillBrandRangeJob;
 use App\Models\BackfillRun;
 use App\Models\Brand;
-use App\Models\SyncLog;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,9 +22,10 @@ use Illuminate\Support\Facades\DB;
  * a fully covered brand shows nothing (the SPA hides the card entirely).
  *
  * Datasets:
- *  - history   — daily_metrics for every connected platform. Backfills via
- *                the existing per-day fan-out (BackfillBrandRangeJob →
- *                SyncBrandDayJob), visible on Sync health as it drains.
+ *  - all       — every dataset below in ONE tracked job (the default button).
+ *  - history   — daily_metrics for every connected platform via the RANGED
+ *                commands (shopify:backfill-sales, ads:backfill-spend,
+ *                tiktok:backfill-daily) — one job, not per-day fan-out.
  *  - campaigns — ad_campaign_daily_metrics   (ads:backfill-campaigns)
  *  - creatives — ad_creative_daily           (meta/tiktok:backfill-creatives)
  *  - commerce  — commerce_daily_metrics      (shopify:backfill-commerce)
@@ -83,23 +82,27 @@ class BrandDataCoverageController extends Controller
             ];
         }
 
-        // A history backfill in flight = queued/running sync_logs for dates
-        // older than the recent sync window (the daily cron never dispatches
-        // days older than 7 back, so anything older is a backfill draining).
-        $historyRunning = SyncLog::query()
-            ->where('brand_id', $brand->id)
-            ->whereIn('status', ['queued', 'running'])
-            ->where('target_date', '<', $today->subDays(8)->toDateString())
-            ->exists();
+        // Every dataset — history included — is a single tracked run since
+        // 2026-07-10 (no more per-day fan-out). An active 'all' run counts as
+        // running for every dataset.
+        $allRun     = $lastRuns['all'] ?? null;
+        $allActive  = $allRun !== null && in_array($allRun->status, ['queued', 'running'], true);
+        $runPayload = fn ($run) => $run ? [
+            'status'     => $run->status,
+            'startedAt'  => $run->started_at?->toIso8601String(),
+            'finishedAt' => $run->finished_at?->toIso8601String(),
+            'message'    => $run->message,
+        ] : null;
 
+        $historyRun = $lastRuns['history'] ?? null;
         $datasets[] = [
             'key'           => 'history',
             'label'         => 'Daily revenue & spend history',
             'relevant'      => $connected !== [],
             'needsBackfill' => $historyGap,
-            'running'       => $historyRunning,
+            'running'       => $allActive || ($historyRun !== null && in_array($historyRun->status, ['queued', 'running'], true)),
             'platforms'     => $historyPlatforms,
-            'lastRun'       => null, // tracked on Sync health, not backfill_runs
+            'lastRun'       => $runPayload($historyRun ?? ($allRun && $allRun->status !== 'queued' ? $allRun : null)),
         ];
 
         // --- tracked datasets -------------------------------------------------
@@ -141,14 +144,9 @@ class BrandDataCoverageController extends Controller
                 'relevant'      => $meta['relevant'],
                 'needsBackfill' => $meta['relevant']
                     && ($earliest === null || $earliest > $targetStart->addDays(self::GRACE_DAYS)->toDateString()),
-                'running'       => $lastRun !== null && in_array($lastRun->status, ['queued', 'running'], true),
+                'running'       => $allActive || ($lastRun !== null && in_array($lastRun->status, ['queued', 'running'], true)),
                 'platforms'     => [['platform' => $key === 'commerce' ? 'shopify' : implode('+', $adPlatforms), 'earliest' => $earliest, 'latest' => $latest, 'gap' => $earliest === null]],
-                'lastRun'       => $lastRun ? [
-                    'status'     => $lastRun->status,
-                    'startedAt'  => $lastRun->started_at?->toIso8601String(),
-                    'finishedAt' => $lastRun->finished_at?->toIso8601String(),
-                    'message'    => $lastRun->message,
-                ] : null,
+                'lastRun'       => $runPayload($lastRun ?? ($allRun && $allRun->status !== 'queued' ? $allRun : null)),
             ];
         }
 
@@ -166,7 +164,7 @@ class BrandDataCoverageController extends Controller
         $this->authorize('view', $brand);
 
         $data = $request->validate([
-            'dataset' => ['required', 'in:history,campaigns,creatives,commerce'],
+            'dataset' => ['required', 'in:all,history,campaigns,creatives,commerce'],
         ]);
         $dataset = $data['dataset'];
 
@@ -174,24 +172,15 @@ class BrandDataCoverageController extends Controller
         $today       = CarbonImmutable::now($tz)->startOfDay();
         $targetStart = $today->subMonths(self::TARGET_MONTHS);
 
-        if ($dataset === 'history') {
-            // Existing per-day fan-out; progress lives on Sync health.
-            BackfillBrandRangeJob::dispatch($brand, $targetStart, $today->subDay());
-
-            return response()->json([
-                'dataset' => 'history',
-                'message' => 'History backfill queued — one job per day per connection. Track it on Sync health.',
-            ], 202);
-        }
-
-        // One run at a time per (brand, dataset).
+        // One run at a time: 'all' conflicts with anything; a specific dataset
+        // conflicts with itself or an active 'all'.
         $active = BackfillRun::query()
             ->where('brand_id', $brand->id)
-            ->where('dataset', $dataset)
             ->whereIn('status', ['queued', 'running'])
+            ->when($dataset !== 'all', fn ($q) => $q->whereIn('dataset', [$dataset, 'all']))
             ->exists();
         if ($active) {
-            return response()->json(['message' => 'A backfill for this dataset is already running.'], 409);
+            return response()->json(['message' => 'A backfill for this brand is already running.'], 409);
         }
 
         $run = BackfillRun::create([

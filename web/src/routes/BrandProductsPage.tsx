@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
+import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { Breadcrumb, Button, Card, Chip, PageEmptyState } from '@/components/ui';
 import { useBrandDetail, useBrandProducts } from '@/hooks/useApiData';
 import { formatMoney } from '@/lib/formatters';
@@ -52,6 +53,8 @@ export function BrandProductsPage() {
           </div>
         </div>
       </div>
+
+      <DataCoverageCard slug={slug} compact />
 
       <div className="filter-bar mb-16" style={{ marginTop: 8 }}>
         {PERIODS.map((p) => (

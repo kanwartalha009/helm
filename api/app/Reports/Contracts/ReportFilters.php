@@ -41,6 +41,11 @@ final class ReportFilters
     /**
      * [start, end] date strings (brand tz) for the selected period.
      *
+     * mtd on the 1st of the month has no complete day yet (start would land
+     * AFTER yesterday, inverting the window), so it clamps to the full previous
+     * month. A custom `to` of today or later would include a partial day, so it
+     * clamps to yesterday.
+     *
      * @return array{0: string, 1: string}
      */
     public function window(string $tz): array
@@ -50,10 +55,12 @@ final class ReportFilters
 
         return match ($this->period) {
             'last7'  => [$yesterday->subDays(6)->toDateString(), $yesterday->toDateString()],
-            'mtd'    => [$now->startOfMonth()->toDateString(), $yesterday->toDateString()],
+            'mtd'    => $now->day === 1
+                ? [$yesterday->startOfMonth()->toDateString(), $yesterday->toDateString()]
+                : [$now->startOfMonth()->toDateString(), $yesterday->toDateString()],
             'custom' => [
                 $this->from ?? $yesterday->subDays(29)->toDateString(),
-                $this->to   ?? $yesterday->toDateString(),
+                min($this->to ?? $yesterday->toDateString(), $yesterday->toDateString()),
             ],
             default  => [$yesterday->subDays(29)->toDateString(), $yesterday->toDateString()], // last30
         };

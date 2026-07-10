@@ -15,15 +15,17 @@ use Illuminate\Support\Facades\Artisan;
 use Throwable;
 
 /**
- * Runs one dataset backfill (campaigns / creatives / commerce) for one brand
- * by driving the same artisan commands the operator would run by hand — one
- * code path for CLI and UI. Every command upserts, so a rerun resumes rather
- * than duplicates.
+ * ONE queued job per backfill click — 'all' covers every dataset and every
+ * connected platform for the brand (2026-07-10); 'history'/'campaigns'/
+ * 'creatives'/'commerce' run subsets. Drives the same RANGED artisan commands
+ * an operator would run by hand (weekly/monthly API chunks internally — never
+ * a per-day fan-out), so CLI and UI share one code path. Every command
+ * upserts: a rerun resumes rather than duplicates.
  *
- * Timeout: Horizon supervisors cap jobs at 600s. A 12-month pull normally
- * fits; if a rate-limited platform pushes past the cap the run is marked
- * failed with a "click again to resume" message — already-pulled rows are
- * kept (idempotent upserts), so the retry continues where data stops.
+ * Timeout: supervisors allow 3600s (horizon.php) and redis retry_after is
+ * 3700s (config/queue.php) — this job stops at 3500s. If a heavily
+ * rate-limited pull still hits the cap, the run is marked failed with a
+ * "click again to resume" message; already-pulled rows are kept.
  */
 class BackfillBrandDatasetJob implements ShouldQueue
 {
@@ -33,16 +35,21 @@ class BackfillBrandDatasetJob implements ShouldQueue
     use SerializesModels;
 
     public int $tries = 1;      // an operator retries via the button, never blind auto-retry
-    public int $timeout = 590;  // just under the Horizon supervisor's 600s cap
+    public int $timeout = 3500; // under the 3600s supervisor cap (horizon.php) and the 3700s retry_after (config/queue.php)
 
     public function __construct(
         public readonly Brand $brand,
         public readonly string $dataset,
         public readonly int $runId,
     ) {
-        // Ads datasets share the ads worker pool (and its rate-limit pacing);
-        // commerce hits ShopifyQL so it rides the shopify pool.
-        $this->onQueue($dataset === 'commerce' ? 'shopify-sync' : 'ads-sync');
+        // 'all'/'history' mix Shopify + ads commands → the light default pool,
+        // so a big onboarding pull never starves the daily sync pools. Pure ads
+        // datasets ride ads-sync; commerce rides shopify-sync.
+        $this->onQueue(match ($dataset) {
+            'commerce'         => 'shopify-sync',
+            'campaigns', 'creatives' => 'ads-sync',
+            default            => 'default', // history | all
+        });
     }
 
     public function handle(): void
@@ -56,13 +63,27 @@ class BackfillBrandDatasetJob implements ShouldQueue
         $since = $run->window_start->toDateString();
 
         // Which commands serve which dataset, gated on connected platforms.
+        // Every command here is RANGED (weekly/monthly API chunks internally) —
+        // one queued job per click, never a per-day fan-out (2026-07-10).
         $connected = $this->brand->connections()->where('status', 'active')->pluck('platform')->all();
         $commands  = [];
-        if ($this->dataset === 'campaigns') {
+        $wants     = fn (string $set): bool => $this->dataset === $set || $this->dataset === 'all';
+        if ($wants('history')) {
+            if (in_array('shopify', $connected, true)) {
+                $commands[] = ['shopify:backfill-sales', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+            }
+            if (array_intersect(['meta', 'google'], $connected) !== []) {
+                $commands[] = ['ads:backfill-spend', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+            }
+            if (in_array('tiktok', $connected, true)) {
+                $commands[] = ['tiktok:backfill-daily', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+            }
+        }
+        if ($wants('campaigns') && array_intersect(['meta', 'google', 'tiktok'], $connected) !== []) {
             // ads:backfill-campaigns handles meta|google|tiktok itself.
             $commands[] = ['ads:backfill-campaigns', ['brand' => (string) $this->brand->slug, '--since' => $since]];
         }
-        if ($this->dataset === 'creatives') {
+        if ($wants('creatives')) {
             if (in_array('meta', $connected, true)) {
                 $commands[] = ['meta:backfill-creatives', ['brand' => (string) $this->brand->slug, '--since' => $since]];
             }
@@ -70,7 +91,7 @@ class BackfillBrandDatasetJob implements ShouldQueue
                 $commands[] = ['tiktok:backfill-creatives', ['brand' => (string) $this->brand->slug, '--since' => $since]];
             }
         }
-        if ($this->dataset === 'commerce') {
+        if ($wants('commerce') && in_array('shopify', $connected, true)) {
             $commands[] = ['shopify:backfill-commerce', ['brand' => (string) $this->brand->slug, '--since' => $since]];
         }
 

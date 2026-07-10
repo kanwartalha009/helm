@@ -5,6 +5,8 @@ import { AppLayout } from '@/components/shell/AppLayout';
 import { Button, Card, Segmented } from '@/components/ui';
 import { ReportDocument } from '@/components/reports/ReportDocument';
 import { MonthlyReportDocument } from '@/components/reports/MonthlyReportDocument';
+import { WeeklyReportDocument } from '@/components/reports/WeeklyReportDocument';
+import { CreativeReportDocument } from '@/components/reports/CreativeReportDocument';
 import { useCreateShare, useGenerateNarrative, useReport, useSaveNarrative } from '@/hooks/useReports';
 import { useTriggerSync } from '@/hooks/useBrands';
 import { toast } from '@/stores/toastStore';
@@ -43,7 +45,10 @@ export function ReportViewPage() {
   useEffect(() => setNarrativeEdits(null), [period, compare, slug, type]);
 
   const effectiveNarrativeBlocks = (): NarrativeBlocksShape | null =>
-    narrativeEdits ?? (data?.reportType === 'overall-performance' ? data.narrative?.blocks ?? null : null);
+    narrativeEdits ??
+    (data?.reportType === 'overall-performance' || data?.reportType === 'weekly' || data?.reportType === 'creatives'
+      ? data.narrative?.blocks ?? null
+      : null);
 
   const onGenerateNarrative = () => {
     generateNarrative.mutate(
@@ -67,11 +72,16 @@ export function ReportViewPage() {
 
   const stale = !!data?.freshness && !data.freshness.upToDate;
 
-  // The monthly report is inherently the last complete calendar month with MoM +
-  // YoY built in — its build() ignores period and compare, so those selectors are
-  // dead controls here. Hide them for monthly; keep them for overall-performance.
+  // The monthly and weekly reports are inherently fixed windows (last complete
+  // calendar month / last complete Mon–Sun week) with their comparisons built
+  // in — their build() ignores period and compare, so those selectors are dead
+  // controls here. Hide them for both; keep them for overall-performance and
+  // creatives.
   const isMonthly = type === 'monthly' || data?.reportType === 'monthly';
   const monthLabel = data?.reportType === 'monthly' ? data.month.label : null;
+  const isWeekly = type === 'weekly' || data?.reportType === 'weekly';
+  const weekLabel = data?.reportType === 'weekly' ? data.week.label : null;
+  const hasFixedWindow = isMonthly || isWeekly;
 
   const onShare = () => {
     const narrativeBlocks = effectiveNarrativeBlocks() ?? undefined;
@@ -104,7 +114,7 @@ export function ReportViewPage() {
   return (
     <AppLayout title="Report">
       <div className="filter-bar mb-12" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        {!isMonthly && (
+        {!hasFixedWindow && (
           <>
             <Segmented
               options={[
@@ -126,6 +136,7 @@ export function ReportViewPage() {
           </>
         )}
         {isMonthly && monthLabel && <span className="muted text-sm">Last complete month · {monthLabel}</span>}
+        {isWeekly && weekLabel && <span className="muted text-sm">Week · {weekLabel}</span>}
         <span style={{ flex: 1 }} />
         <Button variant="secondary" onClick={() => window.print()} disabled={!data || (stale && !showAnyway)}>
           Export PDF
@@ -153,6 +164,24 @@ export function ReportViewPage() {
           />
         ) : data.reportType === 'monthly' ? (
           <MonthlyReportDocument data={data} editable onCommentaryChange={setCommentary} onNextStepsChange={setNextSteps} onTargetsChange={setTargets} />
+        ) : data.reportType === 'weekly' ? (
+          <WeeklyReportDocument
+            data={data}
+            editable
+            onCommentaryChange={setCommentary}
+            generatingNarrative={generateNarrative.isPending}
+            onGenerateNarrative={onGenerateNarrative}
+            onNarrativeBlockChange={onNarrativeBlockChange}
+          />
+        ) : data.reportType === 'creatives' ? (
+          <CreativeReportDocument
+            data={data}
+            editable
+            onCommentaryChange={setCommentary}
+            generatingNarrative={generateNarrative.isPending}
+            onGenerateNarrative={onGenerateNarrative}
+            onNarrativeBlockChange={onNarrativeBlockChange}
+          />
         ) : (
           <ReportDocument
             data={data}

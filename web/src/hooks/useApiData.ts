@@ -362,7 +362,7 @@ export function useDataCoverage(slug: string | undefined) {
 export function useTriggerBackfill(slug: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dataset: CoverageDataset['key']) => {
+    mutationFn: async (dataset: CoverageDataset['key'] | 'all') => {
       const { data } = await api.post<{ dataset: string; message?: string }>(
         `/brands/${slug}/backfill-dataset`,
         { dataset },

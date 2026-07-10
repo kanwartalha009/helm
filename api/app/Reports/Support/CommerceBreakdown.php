@@ -59,7 +59,7 @@ final class CommerceBreakdown
             $prevRev      = $prev[$key]['revenue'] ?? null;
             $row['previous'] = $prevRev !== null ? round((float) $prevRev, 2) : null;
             $row['deltaPct'] = $this->pct($row['revenue'], $prevRev);
-            $row['trend']    = $hasCompare ? $this->trend($row['deltaPct'], $prevRev) : null;
+            $row['trend']    = $hasCompare ? $this->trend($row['deltaPct'], $prevRev, $row['revenue']) : null;
         }
         unset($row);
 
@@ -110,14 +110,16 @@ final class CommerceBreakdown
         ];
     }
 
-    /** Classify a row's trajectory from its Δ% and prior revenue. */
-    private function trend(?float $deltaPct, float|int|null $previous): string
+    /** Classify a row's trajectory from its Δ%, prior revenue and current revenue. */
+    private function trend(?float $deltaPct, float|int|null $previous, float $revenue): string
     {
         if ($previous === null) {
             return 'new';            // no prior revenue → first-time
         }
         if ($deltaPct === null) {
-            return 'growing';        // grew from zero
+            // Prior revenue was zero: only call it "growing" when there IS
+            // current revenue — 0 → 0 is flat, never a growth badge.
+            return $revenue > 0 ? 'growing' : 'stable';
         }
         if ($deltaPct <= self::DEAD) {
             return 'dead';
@@ -164,15 +166,17 @@ final class CommerceBreakdown
 
     /**
      * Sum revenue + orders per dimension_key over the window, in display
-     * currency. Revenue is total_sales (the report's headline revenue) × the
-     * stored fx snapshot when USD is requested — never converted at read time
-     * without the stored rate (spec rule 7).
+     * currency. Revenue follows D-005 (total_sales with refunds added back —
+     * the report's headline revenue basis, so the sections reconcile to it),
+     * × the stored fx snapshot when USD is requested — never converted at read
+     * time without the stored rate (spec rule 7).
      *
      * @return array<string, array{key: string, label: string, revenue: float, orders: int}>
      */
     private function aggregate(int $brandId, string $dimensionType, string $start, string $end, bool $usd): array
     {
-        $rev = $usd ? 'total_sales * COALESCE(fx_rate_to_usd, 1)' : 'total_sales';
+        $revCol = '(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))';
+        $rev    = $usd ? "{$revCol} * COALESCE(fx_rate_to_usd, 1)" : $revCol;
 
         $rows = CommerceDailyMetric::query()
             ->where('brand_id', $brandId)

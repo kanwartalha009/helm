@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AppLayout } from '@/components/shell/AppLayout';
+import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { Banner } from '@/components/ui';
 import { InventoryTable } from '@/components/inventory/InventoryTable';
 import { useInventory } from '@/hooks/useInventory';
@@ -195,6 +196,7 @@ export function InventoryPage() {
 
   return (
     <AppLayout title="Inventory intelligence" tag={data ? `${data.products.length}` : undefined}>
+      <DataCoverageCard slug={selectedSlug} compact />
       <div className="page-scroll">
       {/* Filter bar — brand, manager, period, product search. */}
       <div className="filter-bar mb-12">

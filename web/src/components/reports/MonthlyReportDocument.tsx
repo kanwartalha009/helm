@@ -121,24 +121,24 @@ export function MonthlyReportDocument({
       </div>
 
       <div className="mrt-group"><span>Commerce</span></div>
-      <SectionBlock num="01" title="Market revenue" sub="Revenue grouped into markets and tiers, month over month." section={sections.market} currency={currency} />
-      <SectionBlock num="02" title="Country revenue" sub="Revenue by country, rolled to calendar months." section={sections.countryRevenue} currency={currency} />
-      <SectionBlock num="03" title="Best categories" sub="Revenue by product category, month over month." section={sections.categories} currency={currency} foot="Product-tagged revenue only — orders without a product category are excluded, so this total runs below the order-level country and market totals above." />
-      <SectionBlock num="04" title="Best sellers" sub="Top products by revenue, with stock context." section={sections.bestSellers} currency={currency} foot="Line-item product revenue — excludes untagged items, so this total runs below the order-level country and market totals above." />
+      <SectionBlock num="01" title="Market revenue" sub="Revenue grouped into markets and tiers, month over month." section={sections.market} currency={currency} editable={editable} />
+      <SectionBlock num="02" title="Country revenue" sub="Revenue by country, rolled to calendar months." section={sections.countryRevenue} currency={currency} editable={editable} />
+      <SectionBlock num="03" title="Best categories" sub="Revenue by product category, month over month." section={sections.categories} currency={currency} editable={editable} foot="Product-tagged revenue only — orders without a product category are excluded, so this total runs below the order-level country and market totals above." />
+      <SectionBlock num="04" title="Best sellers" sub="Top products by revenue, with stock context." section={sections.bestSellers} currency={currency} editable={editable} foot="Line-item product revenue — excludes untagged items, so this total runs below the order-level country and market totals above." />
 
       <div className="mrt-group"><span>Advertising</span></div>
-      <SectionBlock num="05" title="Channel mix" sub="Meta, Google and TikTok side by side — spend, purchases, revenue, ROAS and CPA for the month." section={sections.channelMix} currency={currency} tag="All platforms" />
-      <SectionBlock num="06" title="Revenue vs Meta spend by country" sub="All-channel revenue ÷ Meta spend per country — a blended efficiency, so it reads far higher than platform ROAS. Advantage+ spend with no country is shown separately as unattributed." section={sections.roasByCountry} currency={currency} tag="Meta spend" />
-      <SectionBlock num="07" title="Ad spend by placement" sub="Where the budget ran and how it performed — reach, ROAS and CPA by placement." section={sections.placement} currency={currency} tag="Meta only" />
-      <SectionBlock num="08" title="Ad spend by gender" sub="Spend, reach and ROAS by gender." section={sections.gender} currency={currency} tag="Meta only" />
-      <SectionBlock num="09" title="Ad spend by landing page × best sellers" sub="Is the ad budget behind the winners?" section={sections.landingSellers} currency={currency} />
+      <SectionBlock num="05" title="Channel mix" sub="Meta, Google and TikTok side by side — spend, purchases, revenue, ROAS and CPA for the month." section={sections.channelMix} currency={currency} editable={editable} tag="All platforms" />
+      <SectionBlock num="06" title="Revenue vs Meta spend by country" sub="All-channel revenue ÷ Meta spend per country — a blended efficiency, so it reads far higher than platform ROAS. Advantage+ spend with no country is shown separately as unattributed." section={sections.roasByCountry} currency={currency} editable={editable} tag="Meta spend" />
+      <SectionBlock num="07" title="Ad spend by placement" sub="Where the budget ran and how it performed — reach, ROAS and CPA by placement." section={sections.placement} currency={currency} editable={editable} tag="Meta only" />
+      <SectionBlock num="08" title="Ad spend by gender" sub="Spend, reach and ROAS by gender." section={sections.gender} currency={currency} editable={editable} tag="Meta only" />
+      <SectionBlock num="09" title="Ad spend by landing page × best sellers" sub="Is the ad budget behind the winners?" section={sections.landingSellers} currency={currency} editable={editable} foot="Meta spend is reported in the ad account's native currency (the product-level pull carries no fx rate); revenue follows the report currency, so treat the ROAS as approximate when the two differ." />
 
       <div className="mrt-group"><span>Customers</span></div>
-      <SectionBlock num="10" title="New vs existing customers" sub="New vs returning counts, retention, CAC and blended ROAS by month." section={sections.newVsExisting} currency={currency} />
+      <SectionBlock num="10" title="New vs existing customers" sub="New vs returning counts, retention, CAC and blended ROAS by month." section={sections.newVsExisting} currency={currency} editable={editable} />
 
       <div className="mrt-group"><span>Web</span></div>
-      <SectionBlock num="11" title="Web funnel by country" sub="Sessions → cart → checkout → purchase." section={sections.funnelCountry} currency={currency} />
-      <SectionBlock num="12" title="Web funnel by landing path" sub="Which entry pages convert — top entry pages with at least one purchase." section={sections.funnelLanding} currency={currency} foot="The entry page of each session. Visitors often complete the purchase on a different page, so purchases are attributed to where the journey started." />
+      <SectionBlock num="11" title="Web funnel by country" sub="Sessions → cart → checkout → purchase." section={sections.funnelCountry} currency={currency} editable={editable} />
+      <SectionBlock num="12" title="Web funnel by landing path" sub="Which entry pages convert — top entry pages with at least one purchase." section={sections.funnelLanding} currency={currency} editable={editable} foot="The entry page of each session. Visitors often complete the purchase on a different page, so purchases are attributed to where the journey started." />
 
       {(editable || nextStepsRaw) && (
         <section className="rpt-sec">
@@ -166,7 +166,10 @@ export function MonthlyReportDocument({
   );
 }
 
-function SectionBlock({ num, title, sub, section, currency, tag, foot }: { num: string; title: string; sub: string; section: MonthlyReportSection; currency: string; tag?: string; foot?: string }) {
+function SectionBlock({ num, title, sub, section, currency, tag, foot, editable = false }: { num: string; title: string; sub: string; section: MonthlyReportSection; currency: string; tag?: string; foot?: string; editable?: boolean }) {
+  // Roadmap "coming" ribbons are internal build-status notes for the agency —
+  // they render only in the editable in-app view, never on a shared/public report.
+  if (section.status === 'coming' && !editable) return null;
   return (
     <section className="rpt-sec">
       <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>{title}</h2>{tag && <span className="mrt-plat-tag">{tag}</span>}</div>

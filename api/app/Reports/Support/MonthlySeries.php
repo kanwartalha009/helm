@@ -70,7 +70,19 @@ final class MonthlySeries
 
         // The Y-m keys for the same-month-last-year YoY total (whole trailing set,
         // shifted back a year) so "Rev 25" sums the comparable prior months.
+        // The YoY comparison only holds when EVERY prior-year month is actually
+        // synced (same syncedMonths rule as the trailing cells): a missing month
+        // would zero-fill into the total and inflate the delta, so the YoY
+        // total/delta go null instead (missing ≠ zero — the SPA renders "—").
         $yoyMonths = array_map(static fn (string $m): string => CarbonImmutable::parse($m . '-01')->subYear()->format('Y-m'), $months);
+
+        $yoyAvailable = true;
+        foreach ($yoyMonths as $m) {
+            if (! isset($syncedMonths[$m])) {
+                $yoyAvailable = false;
+                break;
+            }
+        }
 
         $segments = [];
         foreach ($rows as $key => $r) {
@@ -85,9 +97,12 @@ final class MonthlySeries
                 $byMonth[$m] = $v;
                 $curTotal   += $v;
             }
-            $yoyTotal = 0.0;
-            foreach ($yoyMonths as $m) {
-                $yoyTotal += (float) ($r['byMonth'][$m] ?? 0);
+            $yoyTotal = null;
+            if ($yoyAvailable) {
+                $yoyTotal = 0.0;
+                foreach ($yoyMonths as $m) {
+                    $yoyTotal += (float) ($r['byMonth'][$m] ?? 0);
+                }
             }
 
             $segments[] = [
@@ -95,8 +110,8 @@ final class MonthlySeries
                 'label'     => $r['label'],
                 'byMonth'   => $byMonth,          // Y-m => revenue
                 'total'     => round($curTotal, 2),
-                'yoyTotal'  => round($yoyTotal, 2),
-                'deltaYoY'  => $this->pct($curTotal, $yoyTotal),
+                'yoyTotal'  => $yoyTotal !== null ? round($yoyTotal, 2) : null,
+                'deltaYoY'  => $yoyTotal !== null ? $this->pct($curTotal, $yoyTotal) : null,
                 'orders'    => $r['ordersTotal'],
             ];
         }
@@ -118,7 +133,7 @@ final class MonthlySeries
         $other = null;
         if ($tail !== []) {
             $otherTotal = 0.0;
-            $otherYoy   = 0.0;
+            $otherYoy   = $yoyAvailable ? 0.0 : null;
             // Sum the tail per month so the "Other" row shows a real trend (it can
             // be the majority of revenue, e.g. 2,600+ products). A month stays null
             // only if EVERY tail segment is unsynced for it, so "—" still means
@@ -126,7 +141,9 @@ final class MonthlySeries
             $otherByMonth = array_fill_keys($months, null);
             foreach ($tail as $s) {
                 $otherTotal += $s['total'];
-                $otherYoy   += $s['yoyTotal'];
+                if ($otherYoy !== null) {
+                    $otherYoy += (float) ($s['yoyTotal'] ?? 0);
+                }
                 foreach ($months as $m) {
                     $v = $s['byMonth'][$m] ?? null;
                     if ($v !== null) {
@@ -142,8 +159,8 @@ final class MonthlySeries
             $other = [
                 'byMonth'  => $otherByMonth,
                 'total'    => round($otherTotal, 2),
-                'yoyTotal' => round($otherYoy, 2),
-                'deltaYoY' => $this->pct($otherTotal, $otherYoy),
+                'yoyTotal' => $otherYoy !== null ? round($otherYoy, 2) : null,
+                'deltaYoY' => $otherYoy !== null ? $this->pct($otherTotal, $otherYoy) : null,
                 'share'    => $grandTotal > 0 ? round($otherTotal / $grandTotal, 4) : null,
                 'count'    => count($tail),
             ];
@@ -177,16 +194,21 @@ final class MonthlySeries
      */
     private function aggregate(int $brandId, string $dimensionType, string $start, string $end, bool $usd, ?callable $keyMap = null): array
     {
-        $rev = $usd ? 'total_sales * COALESCE(fx_rate_to_usd, 1)' : 'total_sales';
+        // D-005 total revenue: total_sales already nets returns out, so refunds
+        // are added back — the same basis as the report's headline revenue, so
+        // the heatmap month totals reconcile to it.
+        $revCol = '(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))';
+        $rev    = $usd ? "{$revCol} * COALESCE(fx_rate_to_usd, 1)" : $revCol;
+        $ym     = SqlMonth::expr('date');
 
         $rows = CommerceDailyMetric::query()
             ->where('brand_id', $brandId)
             ->where('dimension_type', $dimensionType)
             ->whereBetween('date', [$start, $end])
-            ->groupByRaw("dimension_key, DATE_FORMAT(date, '%Y-%m')")
+            ->groupByRaw("dimension_key, {$ym}")
             ->selectRaw("dimension_key,
                 MAX(dimension_label) AS label,
-                DATE_FORMAT(date, '%Y-%m') AS ym,
+                {$ym} AS ym,
                 COALESCE(SUM({$rev}), 0) AS revenue,
                 COALESCE(SUM(orders), 0) AS orders")
             ->get();

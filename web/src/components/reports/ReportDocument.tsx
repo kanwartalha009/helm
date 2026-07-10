@@ -97,7 +97,7 @@ export function ReportDocument({
   const nextNum = () => String(secN++).padStart(2, '0');
   const sections: React.ReactNode[] = [];
   if (data.byRegion)
-    sections.push(<RegionSection key="region" num={nextNum()} section={data.byRegion} currency={currency} hasComparison={hasComparison} read={content?.regionRead} />);
+    sections.push(<RegionSection key="region" num={nextNum()} section={data.byRegion} currency={currency} hasComparison={hasComparison} periodLabel={period.label} read={content?.regionRead} />);
   if (data.byProduct)
     sections.push(<ProductSection key="product" num={nextNum()} section={data.byProduct} currency={currency} hasComparison={hasComparison} read={content?.productRead} />);
   if (data.byCategory)
@@ -233,7 +233,11 @@ export function ReportDocument({
                 <span className={`rpt-tag ${p.connected ? 'live' : 'pending'}`}>{p.connected ? 'Live' : 'Not connected'}</span>
               </div>
               {p.connected ? (
-                <div className="rpt-plat-spend">{fmt(p.spend)}</div>
+                p.spend === null ? (
+                  <div className="rpt-plat-empty">Not synced for this period yet — no spend rows in the window, never shown as €0.</div>
+                ) : (
+                  <div className="rpt-plat-spend">{fmt(p.spend)}</div>
+                )
               ) : (
                 <div className="rpt-plat-empty">No connection on this brand yet — connect it and spend appears here, never as €0.</div>
               )}
@@ -297,19 +301,21 @@ function RegionSection({
   section,
   currency,
   hasComparison,
+  periodLabel,
   read,
 }: {
   num: string;
   section: CommerceSection;
   currency: string;
   hasComparison: boolean;
+  periodLabel: string;
   read?: string;
 }) {
   const money = (v: number | null) => (v === null ? '—' : formatMoney(v, currency));
   return (
     <section className="rpt-sec">
       <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>Performance by region</h2></div>
-      <div className="rpt-sec-sub">Where orders came from this period vs last, classified by 30-day trajectory.</div>
+      <div className="rpt-sec-sub">Where orders came from this period vs last, classified by trajectory over {periodLabel.toLowerCase()}.</div>
 
       {section.matrix && (
         <div className="rpt-matrix">

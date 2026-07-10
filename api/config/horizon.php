@@ -62,7 +62,7 @@ return [
             'maxJobs'              => 0,
             'memory'               => 256,
             'tries'                => 3,
-            'timeout'              => 600,
+            'timeout'              => 3600, // raised 2026-07-10 for single-job ranged backfills; retry_after=3700 in config/queue.php stays above this
             'nice'                 => 0,
         ],
         'supervisor-shopify' => [
@@ -75,7 +75,7 @@ return [
             'maxJobs'              => 0,
             'memory'               => 256,
             'tries'                => 3,
-            'timeout'              => 600,
+            'timeout'              => 3600, // raised 2026-07-10 for single-job ranged backfills; retry_after=3700 in config/queue.php stays above this
             'nice'                 => 0,
         ],
         'supervisor-ads' => [
@@ -88,7 +88,7 @@ return [
             'maxJobs'              => 0,
             'memory'               => 256,
             'tries'                => 3,
-            'timeout'              => 600,
+            'timeout'              => 3600, // raised 2026-07-10 for single-job ranged backfills; retry_after=3700 in config/queue.php stays above this
             'nice'                 => 0,
         ],
         'supervisor-aggregation' => [
@@ -101,7 +101,7 @@ return [
             'maxJobs'              => 0,
             'memory'               => 256,
             'tries'                => 3,
-            'timeout'              => 600,
+            'timeout'              => 3600, // raised 2026-07-10 for single-job ranged backfills; retry_after=3700 in config/queue.php stays above this
             'nice'                 => 0,
         ],
     ],
