@@ -351,8 +351,11 @@ export function useDataCoverage(slug: string | undefined) {
       const { data } = await api.get<DataCoverageResponse>(`/brands/${slug}/data-coverage`);
       return data;
     },
-    refetchInterval: (query) =>
-      query.state.data?.datasets.some((d) => d.running) ? 10_000 : false,
+    // Poll while anything is pending OR the card is visible at all — the
+    // history dataset can't report "running" until its fan-out job writes
+    // sync_logs, so gap-open is the safest poll signal. Stops by itself once
+    // coverage is complete (the card unmounts and the query goes stale).
+    refetchInterval: (query) => (query.state.data?.anyGap ? 12_000 : false),
   });
 }
 
@@ -360,10 +363,20 @@ export function useTriggerBackfill(slug: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (dataset: CoverageDataset['key']) => {
-      const { data } = await api.post(`/brands/${slug}/backfill-dataset`, { dataset });
+      const { data } = await api.post<{ dataset: string; message?: string }>(
+        `/brands/${slug}/backfill-dataset`,
+        { dataset },
+      );
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['brand', slug, 'data-coverage'] }),
+    onSuccess: (data) => {
+      toast.success(
+        'Backfill queued',
+        data.message ??
+          'Pulling 12 months of history on the queue — this row updates itself and disappears when coverage is complete.',
+      );
+      qc.invalidateQueries({ queryKey: ['brand', slug, 'data-coverage'] });
+    },
     onError: (err: any) =>
       toast.error('Couldn\u2019t start the backfill', err?.response?.data?.message ?? err?.message ?? 'Unknown error'),
   });
