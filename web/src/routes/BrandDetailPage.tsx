@@ -1572,6 +1572,11 @@ function SettingsTab({ brand }: { brand: Brand }) {
   const [baseCurrency, setBaseCurrency] = useState(brand.baseCurrency);
   const [groupTag, setGroupTag] = useState(brand.groupTag ?? '');
   const [status, setStatus] = useState<Brand['status']>(brand.status);
+  // Phase 0 — margin/CPA as strings so empty = "not set" (never coerced to 0).
+  const marginSeed = brand.grossMarginPct != null ? String(brand.grossMarginPct) : '';
+  const cpaSeed = brand.targetCpa != null ? String(brand.targetCpa) : '';
+  const [grossMargin, setGrossMargin] = useState(marginSeed);
+  const [targetCpa, setTargetCpa] = useState(cpaSeed);
 
   // Re-seed when the underlying brand changes (e.g. after an upstream refetch).
   useEffect(() => {
@@ -1580,7 +1585,9 @@ function SettingsTab({ brand }: { brand: Brand }) {
     setBaseCurrency(brand.baseCurrency);
     setGroupTag(brand.groupTag ?? '');
     setStatus(brand.status);
-  }, [brand.id, brand.name, brand.timezone, brand.baseCurrency, brand.groupTag, brand.status]);
+    setGrossMargin(brand.grossMarginPct != null ? String(brand.grossMarginPct) : '');
+    setTargetCpa(brand.targetCpa != null ? String(brand.targetCpa) : '');
+  }, [brand.id, brand.name, brand.timezone, brand.baseCurrency, brand.groupTag, brand.status, brand.grossMarginPct, brand.targetCpa]);
 
   const updateBrand = useUpdateBrand();
 
@@ -1589,7 +1596,9 @@ function SettingsTab({ brand }: { brand: Brand }) {
     timezone !== brand.timezone ||
     baseCurrency !== brand.baseCurrency ||
     (groupTag || '') !== (brand.groupTag || '') ||
-    status !== brand.status;
+    status !== brand.status ||
+    grossMargin !== marginSeed ||
+    targetCpa !== cpaSeed;
 
   const onSave = () => {
     const patch: Record<string, unknown> = {};
@@ -1598,6 +1607,8 @@ function SettingsTab({ brand }: { brand: Brand }) {
     if (baseCurrency !== brand.baseCurrency) patch.base_currency = baseCurrency;
     if ((groupTag || null) !== (brand.groupTag || null)) patch.group_tag = groupTag || null;
     if (status !== brand.status) patch.status = status;
+    if (grossMargin !== marginSeed) patch.gross_margin_pct = grossMargin === '' ? null : Number(grossMargin);
+    if (targetCpa !== cpaSeed) patch.target_cpa = targetCpa === '' ? null : Number(targetCpa);
 
     if (Object.keys(patch).length === 0) return;
     updateBrand.mutate({ slug: brand.slug, patch });
@@ -1609,6 +1620,8 @@ function SettingsTab({ brand }: { brand: Brand }) {
     setBaseCurrency(brand.baseCurrency);
     setGroupTag(brand.groupTag ?? '');
     setStatus(brand.status);
+    setGrossMargin(marginSeed);
+    setTargetCpa(cpaSeed);
   };
 
   return (
@@ -1682,6 +1695,22 @@ function SettingsTab({ brand }: { brand: Brand }) {
             <option value="paused">Paused — keep visible, stop syncing</option>
             <option value="archived">Archived — hide from dashboard</option>
           </select>
+        </div>
+      </div>
+      <div className="field" style={{ marginTop: 8 }}>
+        <label className="field-label">Performance rules</label>
+        <span className="field-hint">Optional. Set these to switch on margin- and CPA-based flags across products, ad sets and the audit. Left empty, those flags stay off — Helm never guesses your numbers.</span>
+      </div>
+      <div className="form-grid form-grid-2">
+        <div className="field">
+          <label className="field-label">Gross margin %</label>
+          <input className="input" type="number" min={1} max={99} step="0.1" value={grossMargin} onChange={(e) => setGrossMargin(e.target.value)} placeholder="e.g. 55" />
+          <span className="field-hint">What's left of revenue after product cost.{grossMargin !== '' && Number(grossMargin) > 0 ? ` Breakeven ROAS ${(100 / Number(grossMargin)).toFixed(2)}×.` : ' Sets your breakeven ROAS.'}</span>
+        </div>
+        <div className="field">
+          <label className="field-label">Target CPA ({brand.baseCurrency})</label>
+          <input className="input" type="number" min={0} step="0.01" value={targetCpa} onChange={(e) => setTargetCpa(e.target.value)} placeholder="optional" />
+          <span className="field-hint">Target cost per purchase — flags ad sets that spend past this with no sales.</span>
         </div>
       </div>
       <div className="flex items-center gap-8 mt-16">

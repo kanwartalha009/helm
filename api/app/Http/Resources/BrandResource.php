@@ -25,6 +25,11 @@ class BrandResource extends JsonResource
             'groupTag'     => $this->group_tag,
             'status'       => $this->status,
             'initials'     => $this->computeInitials(),
+            // Phase 0 — agency-set inputs + the derived breakeven ROAS. Null until
+            // the agency fills them in Settings; margin-based rules stay off (§4).
+            'grossMarginPct' => $this->gross_margin_pct !== null ? (float) $this->gross_margin_pct : null,
+            'targetCpa'      => $this->target_cpa !== null ? (float) $this->target_cpa : null,
+            'breakevenRoas'  => $this->resource->breakevenRoas(),
             // group_tag stands in for region until we add a real column.
             'region'       => $this->group_tag ?? '—',
             // Shop domain comes from the active Shopify connection. If the

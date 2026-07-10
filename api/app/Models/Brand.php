@@ -26,16 +26,33 @@ class Brand extends Model
 
     protected $fillable = [
         'name', 'slug', 'timezone', 'base_currency', 'group_tag', 'status',
-        'shopify_app',
+        'shopify_app', 'gross_margin_pct', 'target_cpa',
     ];
 
     protected $casts = [
-        'timezone'      => 'string',
-        'base_currency' => 'string',
+        'timezone'         => 'string',
+        'base_currency'    => 'string',
+        'gross_margin_pct' => 'decimal:2',
+        'target_cpa'       => 'decimal:2',
         // Per-brand Shopify Partner app credentials. Encrypted at the
         // application layer — never logged, never serialized via BrandResource.
-        'shopify_app'   => 'encrypted:array',
+        'shopify_app'      => 'encrypted:array',
     ];
+
+    /**
+     * Breakeven ROAS = 1 ÷ gross margin (spec §3, SOURCED Triple Whale, algebraic):
+     * at 50% margin you break even at 2.0×. Null when the brand has no margin set —
+     * margin-based rules stay silently off (never guessed).
+     */
+    public function breakevenRoas(): ?float
+    {
+        $margin = $this->gross_margin_pct !== null ? (float) $this->gross_margin_pct : null;
+        if ($margin === null || $margin <= 0.0) {
+            return null;
+        }
+
+        return round(100 / $margin, 2);
+    }
 
     // Belt-and-suspenders: never accidentally serialize the encrypted blob.
     protected $hidden = ['shopify_app'];

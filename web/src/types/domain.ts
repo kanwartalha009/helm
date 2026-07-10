@@ -55,6 +55,11 @@ export interface Brand {
   status: BrandStatus;
   initials: string;
   region: string;
+  // Phase 0 — agency-set inputs + derived breakeven ROAS. Null until set;
+  // margin-based rules stay off (never guessed).
+  grossMarginPct?: number | null;
+  targetCpa?: number | null;
+  breakevenRoas?: number | null;
   shopDomain?: string;
   // True when the brand has its own Shopify Partner app credentials stored.
   // Drives the OAuth flow UI — when false, the Client ID + Secret fields

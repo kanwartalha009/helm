@@ -22,6 +22,9 @@ class UpdateBrandRequest extends FormRequest
             'base_currency' => ['sometimes', 'string', 'size:3'],
             'group_tag'     => ['sometimes', 'nullable', 'string', 'max:60'],
             'status'        => ['sometimes', 'in:active,paused,archived'],
+            // Phase 0 — margin-based rules stay off until set (spec §4 Phase 0).
+            'gross_margin_pct' => ['sometimes', 'nullable', 'numeric', 'between:1,99'],
+            'target_cpa'       => ['sometimes', 'nullable', 'numeric', 'min:0'],
         ];
     }
 }
