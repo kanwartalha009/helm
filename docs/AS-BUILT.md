@@ -97,3 +97,16 @@ data-model, and product choices — not structural ones.
   rows — `shopify:backfill-commerce`).
 - **Store audit page is real** and rules-only (campaign verdicts, dead
   stock, freshness — spec §4.3: badges are deterministic, never LLM).
+
+## 2026-07-10 ads 10/10 pass + onboarding backfill + LLM key CRUD
+
+- **Ads audit** vs current Meta/Google/TikTok APIs: `audits/ADS_AUDIT_2026-07-10.md`.
+  All FREE/CHEAP gaps implemented same day (3 additive migrations); new fields
+  populate on the next sync/backfill and render em-dashes until then.
+- **Onboarding backfill**: GET `brands/{brand}/data-coverage` + POST
+  `brands/{brand}/backfill-dataset` (admin/manager). Coverage card on the
+  brand page + ads views renders ONLY where 12-month history is missing;
+  history rides the existing per-day fan-out (Sync health), campaign/creative/
+  commerce runs tracked in `backfill_runs`. Reruns resume (idempotent upserts).
+- **AI/LLM key CRUD** in Settings → Platform keys (add/rotate/reveal/delete/
+  test) + provider picker (workspace setting `llm_provider` wins over env).

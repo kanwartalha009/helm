@@ -174,13 +174,26 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
             <EffStat label="6-sec views" value={formatNumber(data.tiktokNative.video.watched6s)} />
             <EffStat label="Completed" value={formatNumber(data.tiktokNative.video.p100)} />
             <EffStat label="Completion" value={data.tiktokNative.video.completionRate != null ? `${data.tiktokNative.video.completionRate}%` : '—'} />
+            <EffStat label="Avg watch" value={data.tiktokNative.video.avgWatchSec != null ? `${data.tiktokNative.video.avgWatchSec}s` : '—'} />
           </div>
+          <VideoDropoff
+            plays={data.tiktokNative.video.plays}
+            p25={data.tiktokNative.video.p25}
+            p50={data.tiktokNative.video.p50}
+            p75={data.tiktokNative.video.p75}
+            p100={data.tiktokNative.video.p100}
+          />
           <div className="ads-eff" style={{ marginTop: 10 }}>
             <EffStat label="Likes" value={formatNumber(data.tiktokNative.social.likes)} />
             <EffStat label="Comments" value={formatNumber(data.tiktokNative.social.comments)} />
             <EffStat label="Shares" value={formatNumber(data.tiktokNative.social.shares)} />
             <EffStat label="Follows" value={formatNumber(data.tiktokNative.social.follows)} />
             <EffStat label="Profile visits" value={formatNumber(data.tiktokNative.social.profileVisits)} />
+          </div>
+          {/* Mid-funnel web events — "—" (not 0) until a synced day carries them */}
+          <div className="ads-eff" style={{ marginTop: 10 }}>
+            <EffStat label="Add to cart" value={data.tiktokNative.funnel.addToCarts != null ? formatNumber(data.tiktokNative.funnel.addToCarts) : '—'} />
+            <EffStat label="Checkout started" value={data.tiktokNative.funnel.checkoutsInitiated != null ? formatNumber(data.tiktokNative.funnel.checkoutsInitiated) : '—'} />
           </div>
         </div>
       )}
@@ -198,12 +211,26 @@ export function AdsOverviewView({ data, slug, period, platform }: { data: AdsOve
             <EffStat label="ThruPlays" value={formatNumber(data.metaNative.video.thruplays)} />
             <EffStat label="Completed" value={formatNumber(data.metaNative.video.p100)} />
             <EffStat label="Completion" value={data.metaNative.video.completionRate != null ? `${data.metaNative.video.completionRate}%` : '—'} />
+            <EffStat label="Avg watch" value={data.metaNative.video.avgWatchSec != null ? `${data.metaNative.video.avgWatchSec}s` : '—'} />
           </div>
+          <VideoDropoff
+            plays={data.metaNative.video.plays}
+            p25={data.metaNative.video.p25}
+            p50={data.metaNative.video.p50}
+            p75={data.metaNative.video.p75}
+            p100={data.metaNative.video.p100}
+          />
           <div className="ads-eff" style={{ marginTop: 10 }}>
             <EffStat label="Likes" value={formatNumber(data.metaNative.social.likes)} />
             <EffStat label="Comments" value={formatNumber(data.metaNative.social.comments)} />
             <EffStat label="Shares" value={formatNumber(data.metaNative.social.shares)} />
             <EffStat label="Page likes" value={formatNumber(data.metaNative.social.pageLikes)} />
+          </div>
+          {/* Click quality — unique is a daily unique (windowed sum = upper
+              bound, like reach); "—" until a synced day carries the fields */}
+          <div className="ads-eff" style={{ marginTop: 10 }}>
+            <EffStat label="Unique clicks" value={data.metaNative.clicks.unique != null ? formatNumber(data.metaNative.clicks.unique) : '—'} />
+            <EffStat label="Outbound clicks" value={data.metaNative.clicks.outbound != null ? formatNumber(data.metaNative.clicks.outbound) : '—'} />
           </div>
         </div>
       )}
@@ -430,6 +457,38 @@ function Funnel({ steps }: { steps: AdsFunnelStep[] }) {
   );
 }
 
+/* ---- Video drop-off -------------------------------------------------- */
+
+// Four-bar watch-depth row (25 / 50 / 75 / 100% of the video) shared by the
+// Meta and TikTok engagement panels. Bars are sized against p25 — the first
+// quartile is always the tallest, so the drop-off reads left to right. The %
+// under each bar is share of plays (hidden when plays weren't synced).
+function VideoDropoff({ plays, p25, p50, p75, p100 }: { plays: number; p25: number; p50: number; p75: number; p100: number }) {
+  const steps = [
+    { label: '25%', value: p25 },
+    { label: '50%', value: p50 },
+    { label: '75%', value: p75 },
+    { label: '100%', value: p100 },
+  ];
+  const max = Math.max(...steps.map((s) => s.value));
+  if (max <= 0) return null; // quartiles not synced for this window — no row, no fake zeros
+
+  return (
+    <div className="adrop">
+      <div className="adrop-title">Watch depth</div>
+      <div className="adrop-bars">
+        {steps.map((s) => (
+          <div className="adrop-step" key={s.label}>
+            <div className="adrop-track"><div className="adrop-bar" style={{ height: `${Math.max(4, (s.value / max) * 100)}%` }} /></div>
+            <div className="adrop-val">{formatNumber(s.value)}</div>
+            <div className="adrop-lbl">{s.label}{plays > 0 ? ` · ${Math.round((s.value / plays) * 100)}%` : ''}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---- Device donut ---------------------------------------------------- */
 
 function DeviceDonut({ device }: { device: AdsByDevice }) {
@@ -489,7 +548,14 @@ function CampaignTable({ rows, money, unit, onView }: { rows: AdsCampaignRow[]; 
       <tbody>
         {rows.map((r) => (
           <tr key={r.id}>
-            <td className="l acamp-name">{r.name}{r.signal && <> <SignalBadge signal={r.signal} /></>}</td>
+            <td className="l acamp-name">
+              {r.name}
+              {r.signal && <> <SignalBadge signal={r.signal} /></>}
+              {/* Google enrichment chips — status + real channel type. Null on
+                  Meta/TikTok and on rows synced before the columns → no chip. */}
+              {r.status && <> <span className={`acamp-chip${r.status === 'enabled' ? ' on' : ''}`}>{prettyToken(r.status)}</span></>}
+              {r.channelType && <> <span className="acamp-chip">{prettyToken(r.channelType)}</span></>}
+            </td>
             <td className="l">
               <span className="acamp-barcell">
                 <span className="acamp-num">{money(r.spend)}</span>
@@ -520,6 +586,12 @@ function IconBag() { return <svg viewBox="0 0 24 24" width="15" height="15" fill
 function shortDate(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+/** 'performance_max' → 'Performance max' — for status/channel chips. */
+function prettyToken(s: string): string {
+  const t = s.replace(/_/g, ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
 /* ---- Issues & fixes -------------------------------------------------- */
@@ -572,7 +644,11 @@ function BrandSplit({ bd, currency, from, to }: { bd: AdsByCountry; currency: st
 }
 
 // Google-only channel mix: campaigns folded into PMax / Search·Brand / Search·
-// Generic / Shopping / … by name. Reuses the Audience .abrk bar layout.
+// Generic / Shopping / … by NAME (server-side googleChannel()). Note: the real
+// advertising_channel_type is now stored on ad_campaign_daily_metrics
+// (channel_type) — a future pass can swap the name-guessing for it once history
+// is re-backfilled; the brand/generic Search split will still need the name.
+// Reuses the Audience .abrk bar layout.
 function ChannelMix({ bd, currency, from, to }: { bd: AdsByCountry; currency: string; from: string; to: string }) {
   const money = (v: number | null) => formatMoney(v, currency, { whole: true });
   const rows = bd.rows.slice(0, 8);

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Banner, Button, Card, Dot, Input, Modal, Tag } from '@/components/ui';
+import { Banner, Button, Card, Dot, Input, Modal, Segmented, Tag } from '@/components/ui';
 import {
   useSaveCredential,
   useRevokeCredential,
@@ -7,20 +7,26 @@ import {
   useTestConnection,
   usePlatformCredentialSchemaLive,
   usePlatformCredentialsLive,
+  useUpdateWorkspaceSettings,
+  useWorkspaceSettings,
   type ConnectionTestResult,
 } from '@/hooks/useSettings';
+import { toast } from '@/stores/toastStore';
 import type {
   PlatformCredential,
   PlatformCredentialSchemaItem,
 } from '@/types/domain';
 
-type PlatformKey = 'shopify' | 'meta' | 'google' | 'tiktok';
+type PlatformKey = 'shopify' | 'meta' | 'google' | 'tiktok' | 'llm';
 
 const PLATFORMS: { key: PlatformKey; label: string; sub: string }[] = [
   { key: 'shopify', label: 'Shopify',    sub: 'Partner app credentials — used for the OAuth install on each store.' },
   { key: 'meta',    label: 'Meta Ads',   sub: 'System User token covers every ad account in your Business Manager.' },
   { key: 'google',  label: 'Google Ads', sub: 'MCC OAuth refresh token + developer token + client credentials.' },
   { key: 'tiktok',  label: 'TikTok Ads', sub: 'Business Center owner token covers every advertiser under the BC.' },
+  // D-016: the agency adds the key for its provider of choice; only the
+  // ACTIVE provider's key is required (the other row is optional).
+  { key: 'llm',     label: 'AI / LLM',   sub: 'Powers the report narrative and \u201cAsk the data\u201d. Pick a provider, paste that provider\u2019s key.' },
 ];
 
 interface EditState {
@@ -101,14 +107,19 @@ export function PlatformKeysSection() {
                   </div>
                   <ConnectionStatus
                     rows={rowsForPlatform}
-                    expected={items.length}
+                    // LLM: one key (the active provider's) is a full setup —
+                    // the second provider's row is optional.
+                    expected={platform.key === 'llm' ? 1 : items.length}
                     testResult={testResult}
                   />
                   <Button
                     size="sm"
                     variant="secondary"
                     onClick={() => handleTest(platform.key)}
-                    disabled={testMutation.isPending || rowsForPlatform.length < items.length}
+                    disabled={
+                      testMutation.isPending ||
+                      rowsForPlatform.length < (platform.key === 'llm' ? 1 : items.length)
+                    }
                   >
                     {testMutation.isPending && testMutation.variables === platform.key
                       ? 'Testing…'
@@ -116,6 +127,8 @@ export function PlatformKeysSection() {
                   </Button>
                 </div>
               </div>
+
+              {platform.key === 'llm' && <LlmProviderRow />}
 
               <table className="data-table" style={{ fontSize: 13.5 }}>
                 <thead>
@@ -479,5 +492,45 @@ function EditCredentialModal({ state, onClose }: { state: EditState; onClose: ()
         </div>
       </form>
     </Modal>
+  );
+}
+
+
+/**
+ * Provider choice for the AI / LLM card (D-016): which driver serves the
+ * report narrative and chat. Saved to workspace settings (wins over the
+ * HELM_LLM_PROVIDER env default) so switching provider needs no deploy —
+ * paste the other provider's key below and flip this.
+ */
+function LlmProviderRow() {
+  const { data: settings } = useWorkspaceSettings();
+  const update = useUpdateWorkspaceSettings();
+  const current = ((settings as Record<string, unknown> | undefined)?.llm_provider as string) || 'anthropic';
+
+  return (
+    <div
+      className="flex items-center gap-12"
+      style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)' }}
+    >
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 500, fontSize: 13.5 }}>Provider</div>
+        <div className="text-xs muted mt-4">
+          Narrative + chat use this provider's key. Only the selected provider's key is required.
+        </div>
+      </div>
+      <Segmented
+        options={[
+          { value: 'anthropic', label: 'Anthropic' },
+          { value: 'openai', label: 'OpenAI' },
+        ]}
+        value={current}
+        onChange={(v) => {
+          update.mutate({ llm_provider: v } as never, {
+            onSuccess: () =>
+              toast.success('Provider updated', `Narrative and chat now use ${v === 'openai' ? 'OpenAI' : 'Anthropic'}.`),
+          });
+        }}
+      />
+    </div>
   );
 }

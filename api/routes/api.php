@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\BrandAuditFindingsController;
 use App\Http\Controllers\Api\BrandChatController;
 use App\Http\Controllers\Api\BrandProductsController;
 use App\Http\Controllers\Api\BrandController;
+use App\Http\Controllers\Api\BrandDataCoverageController;
 use App\Http\Controllers\Api\ConnectionController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\InventoryController;
@@ -94,6 +95,11 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         // rules-only store audit findings.
         Route::get('brands/{brand}/products',       [BrandProductsController::class, 'index']);
         Route::get('brands/{brand}/audit-findings', [BrandAuditFindingsController::class, 'index']);
+        // Onboarding data coverage + manual 12-month backfill (2026-07-10).
+        // Trigger is admin/manager-only — backfills hammer platform APIs.
+        Route::get('brands/{brand}/data-coverage', [BrandDataCoverageController::class, 'index']);
+        Route::middleware('role:master_admin,manager')
+            ->post('brands/{brand}/backfill-dataset', [BrandDataCoverageController::class, 'store']);
 
         // Inventory Intelligence — per-product stock × Meta spend for one brand.
         Route::get('brands/{brand}/inventory', [InventoryController::class, 'show']);

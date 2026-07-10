@@ -315,3 +315,56 @@ export function useAuditFindings(slug: string | undefined, period: string) {
     },
   });
 }
+
+/* ---- Onboarding data coverage + manual backfill (2026-07-10) ---------- */
+
+export interface CoveragePlatformRow {
+  platform: string;
+  earliest: string | null;
+  latest: string | null;
+  gap: boolean;
+}
+
+export interface CoverageDataset {
+  key: 'history' | 'campaigns' | 'creatives' | 'commerce';
+  label: string;
+  relevant: boolean;
+  needsBackfill: boolean;
+  running: boolean;
+  platforms: CoveragePlatformRow[];
+  lastRun: { status: string; startedAt: string | null; finishedAt: string | null; message: string | null } | null;
+}
+
+export interface DataCoverageResponse {
+  targetStart: string;
+  targetMonths: number;
+  datasets: CoverageDataset[];
+  anyGap: boolean;
+}
+
+/** GET /api/brands/{slug}/data-coverage — poll faster while a backfill runs. */
+export function useDataCoverage(slug: string | undefined) {
+  return useQuery({
+    queryKey: ['brand', slug, 'data-coverage'],
+    enabled: !!slug,
+    queryFn: async (): Promise<DataCoverageResponse> => {
+      const { data } = await api.get<DataCoverageResponse>(`/brands/${slug}/data-coverage`);
+      return data;
+    },
+    refetchInterval: (query) =>
+      query.state.data?.datasets.some((d) => d.running) ? 10_000 : false,
+  });
+}
+
+export function useTriggerBackfill(slug: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dataset: CoverageDataset['key']) => {
+      const { data } = await api.post(`/brands/${slug}/backfill-dataset`, { dataset });
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['brand', slug, 'data-coverage'] }),
+    onError: (err: any) =>
+      toast.error('Couldn\u2019t start the backfill', err?.response?.data?.message ?? err?.message ?? 'Unknown error'),
+  });
+}

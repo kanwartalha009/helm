@@ -46,6 +46,8 @@ export function AdsCampaignDrawer({
         ) : d ? (
           <>
             {d.campaign.status && <span className="acamp-status">{d.campaign.status}</span>}
+            {/* Real Google channel type (null on Meta/TikTok → no chip) */}
+            {d.campaign.channelType && <span className="acamp-status" style={{ marginLeft: 6 }}>{d.campaign.channelType.replace(/_/g, ' ')}</span>}
             <div className="adrawer-kpis">
               <Cell label="Spend" value={money(d.summary.spend)} v={d.summary.delta?.spend ?? null} goodUp={false} series={d.trend.map((t) => t.spend)} color="#22C55E" />
               <Cell label="Revenue" value={money(d.summary.revenue)} v={d.summary.delta?.revenue ?? null} goodUp series={d.trend.map((t) => t.revenue)} color="#2563EB" />
@@ -57,6 +59,18 @@ export function AdsCampaignDrawer({
               <Cell label="CPC" value={unit(d.summary.cpc)} v={d.summary.delta?.cpc ?? null} goodUp={false} series={d.trend.map((t) => (t.clicks > 0 ? t.spend / t.clicks : 0))} color="#64748B" />
               <Cell label="CTR" value={d.summary.ctr != null ? `${d.summary.ctr}%` : '—'} v={d.summary.delta?.ctr ?? null} goodUp series={d.trend.map((t) => (t.impressions > 0 ? (t.clicks / t.impressions) * 100 : 0))} color="#0EA5B7" />
             </div>
+            {/* Search/Shopping impression share (window average) — Google fills
+                it only where it applies, so a null row is simply hidden. Google
+                floors sub-10% share at 9.99%. */}
+            {d.campaign.searchImpressionShare != null && (
+              <div className="adrawer-is">
+                <span className="adrawer-is-l">Search impression share</span>
+                <span className="adrawer-is-v num">{d.campaign.searchImpressionShare}%</span>
+                {d.campaign.searchBudgetLostIs != null && (
+                  <span className="adrawer-is-lost">· lost to budget {d.campaign.searchBudgetLostIs}%</span>
+                )}
+              </div>
+            )}
             <div className="ads-panel">
               <div className="ads-ph"><h3>Daily trend</h3></div>
               <div className="ads-psub">Revenue and impressions · {d.from} – {d.to}</div>

@@ -39,6 +39,7 @@ class AdCreativeDaily extends Model
         'brand_id', 'platform', 'date', 'ad_id', 'ad_name', 'campaign_id', 'thumbnail_url', 'media_type',
         'spend', 'impressions', 'clicks', 'conversions', 'conversion_value',
         'video_3s', 'thruplays', 'add_to_cart',
+        'quality_ranking', 'engagement_ranking', 'conversion_ranking',
         'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at',
     ];
 

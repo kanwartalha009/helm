@@ -71,7 +71,7 @@ final class MetaCreativeFetcher
                 try {
                     $body = $this->client->get($accountId . '/insights', [
                         'level'                      => 'ad',
-                        'fields'                     => 'ad_id,ad_name,campaign_id,spend,impressions,clicks,actions,action_values,video_thruplay_watched_actions,account_currency',
+                        'fields'                     => 'ad_id,ad_name,campaign_id,spend,impressions,clicks,actions,action_values,video_thruplay_watched_actions,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,account_currency',
                         'action_attribution_windows' => json_encode([self::ATTRIBUTION_WINDOW]),
                         'time_range'                 => json_encode(['since' => $day, 'until' => $day]),
                         'limit'                      => 500,
@@ -102,6 +102,12 @@ final class MetaCreativeFetcher
                         'video_3s'         => (int) round(self::attributedTotal($r['actions'] ?? [], self::VIDEO_3S_ACTION_TYPES)),
                         'thruplays'        => (int) round(self::sumFieldValues($r['video_thruplay_watched_actions'] ?? [])),
                         'add_to_cart'      => (int) round(self::attributedTotal($r['actions'] ?? [], self::ADD_TO_CART_ACTION_TYPES)),
+                        // Relevance diagnostics — 'UNKNOWN' (not enough recent
+                        // impressions to rank) is stored as null so the card's
+                        // below-average badge never fires on unranked ads.
+                        'quality_ranking'    => self::ranking($r['quality_ranking'] ?? null),
+                        'engagement_ranking' => self::ranking($r['engagement_rate_ranking'] ?? null),
+                        'conversion_ranking' => self::ranking($r['conversion_rate_ranking'] ?? null),
                         'currency'         => strtoupper((string) ($r['account_currency'] ?? $fallbackCcy)),
                         'thumbnail_url'    => null,
                         'media_type'       => 'image',
@@ -247,6 +253,20 @@ final class MetaCreativeFetcher
         }
 
         return 0.0;
+    }
+
+    /**
+     * Normalize a Meta relevance ranking to a lower-case token ('above_average',
+     * 'average', 'below_average_10', …) or null when absent/UNKNOWN — the UI's
+     * warning badge keys off the 'below' prefix, so unranked must stay null.
+     */
+    private static function ranking(mixed $value): ?string
+    {
+        if (! is_string($value) || $value === '' || strtoupper($value) === 'UNKNOWN') {
+            return null;
+        }
+
+        return mb_substr(strtolower($value), 0, 32);
     }
 
     /**

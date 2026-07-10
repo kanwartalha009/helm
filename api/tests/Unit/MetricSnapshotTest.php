@@ -55,6 +55,41 @@ final class MetricSnapshotTest extends TestCase
         $this->assertContains('net_sales', $snap->updateableFields());
     }
 
+    public function test_to_row_carries_funnel_steps_and_they_are_updateable(): void
+    {
+        $snap = new MetricSnapshot(
+            brandId: 3,
+            platform: 'meta',
+            date: CarbonImmutable::parse('2026-07-09'),
+            currency: 'EUR',
+            spend: 500.0,
+            addToCarts: 240,
+            checkoutsInitiated: 95,
+        );
+
+        $row = $snap->toRow(1.1);
+
+        $this->assertSame(240, $row['add_to_carts']);
+        $this->assertSame(95, $row['checkouts_initiated']);
+        $this->assertContains('add_to_carts', $snap->updateableFields());
+        $this->assertContains('checkouts_initiated', $snap->updateableFields());
+    }
+
+    public function test_funnel_steps_default_null_so_missing_data_is_not_zero(): void
+    {
+        $snap = new MetricSnapshot(
+            brandId: 1,
+            platform: 'shopify',
+            date: CarbonImmutable::parse('2026-07-09'),
+            currency: 'EUR',
+        );
+
+        $row = $snap->toRow(1.0);
+
+        $this->assertNull($row['add_to_carts']);
+        $this->assertNull($row['checkouts_initiated']);
+    }
+
     public function test_ad_snapshot_leaves_sales_columns_null(): void
     {
         $snap = new MetricSnapshot(

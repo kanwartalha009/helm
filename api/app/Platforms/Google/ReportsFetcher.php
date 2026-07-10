@@ -8,6 +8,8 @@ use App\Models\PlatformConnection;
 use App\Platforms\Contracts\MetricSnapshot;
 use App\Services\Currency\FxService;
 use Carbon\CarbonImmutable;
+use Google\Ads\GoogleAds\V24\Enums\AdvertisingChannelTypeEnum\AdvertisingChannelType;
+use Google\Ads\GoogleAds\V24\Enums\CampaignStatusEnum\CampaignStatus;
 use Google\Ads\GoogleAds\V24\Enums\DeviceEnum\Device;
 
 /**
@@ -181,8 +183,15 @@ final class ReportsFetcher
 
         $baseCurrency = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
 
-        $gaql = "SELECT campaign.id, campaign.name, customer.currency_code, segments.date, "
-            . "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value "
+        // Enrichment beyond the core counters: status + channel type (so the UI
+        // stops guessing the channel from campaign names), all/view-through
+        // conversions, and the Search/Shopping impression-share pair (Google
+        // returns them only where they apply; elsewhere they're unset → null).
+        $gaql = "SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, "
+            . "customer.currency_code, segments.date, "
+            . "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, "
+            . "metrics.all_conversions, metrics.view_through_conversions, "
+            . "metrics.search_impression_share, metrics.search_budget_lost_impression_share "
             . "FROM campaign WHERE segments.date BETWEEN '{$from->toDateString()}' AND '{$to->toDateString()}'";
 
         $out = [];
@@ -204,11 +213,20 @@ final class ReportsFetcher
                     'date'             => $day,
                     'campaign_id'      => $cid,
                     'campaign_name'    => (string) $campaign->getName(),
+                    'status'           => self::enumToken(CampaignStatus::name($campaign->getStatus())),
+                    'channel_type'     => self::enumToken(AdvertisingChannelType::name($campaign->getAdvertisingChannelType())),
                     'spend'            => round(((int) $metrics->getCostMicros()) / 1_000_000, 2),
                     'impressions'      => (int) $metrics->getImpressions(),
                     'clicks'           => (int) $metrics->getClicks(),
                     'conversions'      => (int) round((float) $metrics->getConversions()),
                     'conversion_value' => round((float) $metrics->getConversionsValue(), 2),
+                    'all_conversions'  => round((float) $metrics->getAllConversions(), 2),
+                    'view_through_conversions' => (int) $metrics->getViewThroughConversions(),
+                    // Optional proto fields — the hazzer keeps "not applicable"
+                    // (non-Search/Shopping campaigns) as null, never a fake 0.
+                    // Google floors sub-10% share at 0.0999.
+                    'search_impression_share' => $metrics->hasSearchImpressionShare() ? round((float) $metrics->getSearchImpressionShare(), 4) : null,
+                    'search_budget_lost_is'   => $metrics->hasSearchBudgetLostImpressionShare() ? round((float) $metrics->getSearchBudgetLostImpressionShare(), 4) : null,
                     'currency'         => strtoupper((string) ($row->getCustomer()?->getCurrencyCode() ?: $baseCurrency)),
                 ];
             }
@@ -304,6 +322,18 @@ final class ReportsFetcher
         }
 
         return $out;
+    }
+
+    /**
+     * Google enum name → stored token: lower-case, with the UNSPECIFIED/UNKNOWN
+     * sentinels folded to null so "Google didn't say" reads as missing data,
+     * not a value.
+     */
+    private static function enumToken(string $name): ?string
+    {
+        $token = strtolower($name);
+
+        return in_array($token, ['unspecified', 'unknown', ''], true) ? null : $token;
     }
 
     /** Google Device enum name (lower-case) → display label. */

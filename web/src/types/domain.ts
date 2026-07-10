@@ -360,6 +360,7 @@ export type PlatformCredentialSchema = {
   meta: PlatformCredentialSchemaItem[];
   google: PlatformCredentialSchemaItem[];
   tiktok: PlatformCredentialSchemaItem[];
+  llm: PlatformCredentialSchemaItem[]; // D-016 — AI provider keys
 };
 
 export type CompareBaseline =

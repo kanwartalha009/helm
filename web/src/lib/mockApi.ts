@@ -208,6 +208,10 @@ export async function getPlatformCredentialSchema(): Promise<PlatformCredentialS
     tiktok: [
       { key: 'bc_token', label: 'Business Center access token', sensitive: true },
     ],
+  llm: [
+    { key: 'anthropic_api_key', label: 'Anthropic API key', sensitive: true },
+    { key: 'openai_api_key', label: 'OpenAI API key', sensitive: true },
+  ],
   };
 }
 

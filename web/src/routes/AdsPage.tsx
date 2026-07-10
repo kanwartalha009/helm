@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { cn } from '@/lib/cn';
 import { AdsBrandOverview } from '@/components/ads/AdsBrandOverview';
+import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { AdPlatformToggle, adPlatformsOf } from '@/components/ads/AdPlatformToggle';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { useCurrentUser } from '@/hooks/useSettings';
@@ -98,6 +99,7 @@ export function AdsPage() {
         <AdPlatformToggle available={available} value={platform} onChange={setPlatform} />
       </div>
 
+      <DataCoverageCard slug={selectedSlug} compact />
       <AdsBrandOverview slug={selectedSlug} period={period} platform={platform} />
     </AppLayout>
   );

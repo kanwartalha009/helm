@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
+import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import {
   Avatar,
   Banner,
@@ -185,6 +186,8 @@ export function BrandDetailPage() {
           </>
         }
       />
+
+      <DataCoverageCard slug={brand.slug} />
 
       <Tabs
         tabs={[

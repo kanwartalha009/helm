@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAdsCreatives } from '@/hooks/useAdsCreatives';
-import { formatMoney, formatPercent, formatRoas } from '@/lib/formatters';
+import { formatMoney, formatNumber, formatPercent, formatRoas } from '@/lib/formatters';
 import type { AdsCreative, AdsCreativeState, AdsPeriod, AdsPlatform } from '@/types/ads';
 import '@/styles/ads.css';
 
@@ -53,6 +53,9 @@ export function AdsCreativesView({ slug, period, platform }: { slug?: string; pe
   const d = q.data;
   const currency = d ? (d.currency === 'usd' ? 'USD' : d.baseCurrency || 'EUR') : 'EUR';
   const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+  // Per-unit money (CPA) keeps its cents — whole-number rounding would blur
+  // small CPAs into each other.
+  const unit = (v: number | null) => formatMoney(v, currency);
 
   const rows = useMemo(() => d?.rows ?? [], [d]);
   const filtered = useMemo(
@@ -153,7 +156,7 @@ export function AdsCreativesView({ slug, period, platform }: { slug?: string; pe
           <>
             <div className="acrea-grid">
               {shown.map((c) => (
-                <CreativeCard key={c.adId} c={c} platform={platform} money={money} wRoas={kpi.roas} spendDenom={kpi.spend} onPlay={() => setPlaying(c)} />
+                <CreativeCard key={c.adId} c={c} platform={platform} money={money} unit={unit} wRoas={kpi.roas} spendDenom={kpi.spend} onPlay={() => setPlaying(c)} />
               ))}
             </div>
             {sorted.length > RENDER_CAP && (
@@ -215,11 +218,12 @@ function Spark({ series, color }: { series: number[]; color: string }) {
 }
 
 function CreativeCard({
-  c, platform, money, wRoas, spendDenom, onPlay,
+  c, platform, money, unit, wRoas, spendDenom, onPlay,
 }: {
   c: AdsCreative;
   platform: AdsPlatform;
   money: (v: number | null) => string;
+  unit: (v: number | null) => string;
   wRoas: number | null;
   spendDenom: number;
   onPlay: () => void;
@@ -234,6 +238,13 @@ function CreativeCard({
   // ROAS colored against the set's weighted ROAS: green ≥ weighted, red < 90% of it.
   const roasTone = c.roas == null || wRoas == null || wRoas <= 0 ? '' : c.roas >= wRoas ? ' pos' : c.roas < 0.9 * wRoas ? ' neg' : '';
   const wowTone = c.wow == null ? '' : c.wow > 0 ? ' pos' : c.wow < 0 ? ' neg' : '';
+  // Meta relevance rankings surface ONLY as a warning — a badge when any axis is
+  // below average. Average/above-average is the normal state and stays quiet.
+  const belowAvg = ([
+    ['quality', c.qualityRanking],
+    ['engagement', c.engagementRanking],
+    ['conversion', c.conversionRanking],
+  ] as const).filter(([, v]) => v != null && v.startsWith('below')).map(([label]) => label);
 
   return (
     <div className={`acrea-card${isVideo ? ' is-video' : ''}`}>
@@ -257,11 +268,18 @@ function CreativeCard({
       </div>
       <div className="acrea-body">
         <div className="acrea-name" title={c.name}>{c.name}</div>
+        {belowAvg.length > 0 && (
+          <div className="acrea-rank-warn" title="Meta ad relevance diagnostics, latest synced day">
+            Below average: {belowAvg.join(', ')}
+          </div>
+        )}
         <div className="acrea-stats">
           <Stat label="Spend" value={money(c.spend)} />
           <Stat label="Spend%" value={spendPct != null ? `${spendPct.toFixed(1)}%` : '—'} />
           <Stat label="ROAS" value={formatRoas(c.roas)} tone={roasTone} />
           <Stat label="CTR" value={c.ctr != null ? `${c.ctr.toFixed(2)}%` : '—'} />
+          <Stat label="Purch." value={formatNumber(c.purchases)} />
+          <Stat label="CPA" value={c.cpa != null ? unit(c.cpa) : '—'} />
           {isVideo ? (
             <>
               <Stat label="TS" value={c.ts != null ? `${c.ts.toFixed(1)}%` : '—'} />

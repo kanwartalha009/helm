@@ -112,6 +112,50 @@ final class SyncBrandDayJobTest extends TestCase
         $this->assertNull($this->conn->last_error);
     }
 
+    public function test_funnel_step_fields_land_in_daily_metrics_columns(): void
+    {
+        $date = CarbonImmutable::now('UTC')->subDay()->startOfDay();
+        $log  = $this->queuedLog($date);
+
+        // Snapshot→row threading for the mid-funnel commerce steps (item: Meta
+        // ATC/checkout): addToCarts / checkoutsInitiated must land in the new
+        // nullable daily_metrics columns via the job's toRow() upsert.
+        $adapter = new FakeShopifyAdapter(fn () => new MetricSnapshot(
+            brandId: $this->brand->id,
+            platform: 'shopify',
+            date: $date,
+            currency: 'EUR',
+            spend: 321.0,
+            addToCarts: 240,
+            checkoutsInitiated: 95,
+        ));
+
+        $this->runJob(new SyncBrandDayJob($this->brand, $this->conn, $date, $log->id), $adapter);
+
+        $metric = DailyMetric::where('brand_id', $this->brand->id)->where('platform', 'shopify')->first();
+        $this->assertNotNull($metric);
+        $this->assertSame(240, (int) $metric->add_to_carts);
+        $this->assertSame(95, (int) $metric->checkouts_initiated);
+
+        // Missing data stays null (not 0): a snapshot without the fields leaves
+        // the columns untouched on re-upsert only when it also sends null —
+        // assert the write path preserves null on a fresh row.
+        $other = $this->queuedLog($date->subDay());
+        $plain = new FakeShopifyAdapter(fn () => new MetricSnapshot(
+            brandId: $this->brand->id,
+            platform: 'shopify',
+            date: $date->subDay(),
+            currency: 'EUR',
+            spend: 10.0,
+        ));
+        $this->runJob(new SyncBrandDayJob($this->brand, $this->conn, $date->subDay(), $other->id), $plain);
+
+        $prev = DailyMetric::where('brand_id', $this->brand->id)->where('date', $date->subDay()->toDateString())->first();
+        $this->assertNotNull($prev);
+        $this->assertNull($prev->add_to_carts);
+        $this->assertNull($prev->checkouts_initiated);
+    }
+
     public function test_failure_marks_log_failed_and_stamps_connection_error(): void
     {
         $date = CarbonImmutable::now('UTC')->subDay()->startOfDay();

@@ -20,8 +20,9 @@ class LlmDiagnoseCommand extends Command
 
     public function handle(LlmManager $llm): int
     {
-        $provider = config('llm.provider');
-        $this->line("Provider (HELM_LLM_PROVIDER): <info>{$provider}</info>");
+        $provider = $llm->providerName();
+        $source   = \App\Models\WorkspaceSetting::getValue('llm_provider') ? 'Settings UI' : 'HELM_LLM_PROVIDER env';
+        $this->line("Provider: <info>{$provider}</info> (from {$source})");
         $this->line('Model: <info>' . config("llm.{$provider}.model") . '</info>'
             . ' (override via ' . ($provider === 'anthropic' ? 'HELM_LLM_MODEL_ANTHROPIC' : 'HELM_LLM_MODEL_OPENAI') . ')');
         $this->line('Key on file: ' . ($llm->enabled() ? '<info>yes</info> (DB or env)' : '<error>NO</error>'));

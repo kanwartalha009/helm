@@ -41,6 +41,19 @@ final class InsightsFetcher
         'landing_page_view',
     ];
 
+    /** Add-to-cart action types in priority order — first present wins. */
+    private const ADD_TO_CART_TYPES = [
+        'omni_add_to_cart',
+        'add_to_cart',
+        'offsite_conversion.fb_pixel_add_to_cart',
+    ];
+
+    /** Initiate-checkout action types in priority order — first present wins. */
+    private const INITIATE_CHECKOUT_TYPES = [
+        'omni_initiated_checkout',
+        'initiate_checkout',
+    ];
+
     /**
      * Video-watch insight fields (each a [{action_type,value}] array) → the flat
      * metadata['meta'] key it stores as. Feeds the "Meta engagement" panel. Meta
@@ -57,6 +70,10 @@ final class InsightsFetcher
         'video_p50_watched_actions'  => 'video_p50',
         'video_p75_watched_actions'  => 'video_p75',
         'video_p100_watched_actions' => 'video_p100',
+        // Average seconds watched per play. It's a MEAN, not a count — summing it
+        // across days/accounts is meaningless, so the reader (metaNative) averages
+        // it over the days that carry it instead of summing.
+        'video_avg_time_watched_actions' => 'video_avg_time_watched',
     ];
 
     /**
@@ -96,7 +113,7 @@ final class InsightsFetcher
         foreach ($accountIds as $accountId) {
             $body = $this->client->get(self::normalizeAccountId($accountId) . '/insights', [
                 'level'                           => 'account',
-                'fields'                          => 'spend,impressions,clicks,reach,inline_link_clicks,actions,action_values,account_currency',
+                'fields'                          => 'spend,impressions,clicks,reach,inline_link_clicks,unique_clicks,outbound_clicks,actions,action_values,account_currency',
                 'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
                 'time_range'                      => json_encode(['since' => $day, 'until' => $day]),
                 'time_increment'                  => 1,
@@ -214,7 +231,7 @@ final class InsightsFetcher
         foreach ($accountIds as $accountId) {
             $rows = $this->client->paged(self::normalizeAccountId($accountId) . '/insights', [
                 'level'                           => 'account',
-                'fields'                          => 'spend,impressions,clicks,reach,inline_link_clicks,actions,action_values,account_currency',
+                'fields'                          => 'spend,impressions,clicks,reach,inline_link_clicks,unique_clicks,outbound_clicks,actions,action_values,account_currency',
                 'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
                 'time_range'                      => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
                 'time_increment'                  => 1,
@@ -522,6 +539,8 @@ final class InsightsFetcher
         $reach            = 0;
         $linkClicks       = 0;
         $landingPageViews = 0;
+        $addToCarts         = 0;
+        $checkoutsInitiated = 0;
         $spendByCcy  = [];
         $valueByCcy  = [];
 
@@ -532,6 +551,17 @@ final class InsightsFetcher
             $reach            += (int) ($s->reach ?? 0);
             $linkClicks       += (int) ($s->linkClicks ?? 0);
             $landingPageViews += (int) ($s->landingPageViews ?? 0);
+            $addToCarts         += (int) ($s->addToCarts ?? 0);
+            $checkoutsInitiated += (int) ($s->checkoutsInitiated ?? 0);
+
+            // Unique/outbound clicks live in each account's clicks_detail metadata
+            // (see mapInsightRow); fold them into the same flat map the engagement
+            // pull fills, so metaNative() reads one place.
+            foreach ((array) ($s->metadata['clicks_detail'] ?? []) as $k => $v) {
+                if (is_numeric($v)) {
+                    $engagement[$k] = ($engagement[$k] ?? 0) + (float) $v;
+                }
+            }
 
             $ccy = strtoupper($s->currency);
             $spendByCcy[$ccy] = ($spendByCcy[$ccy] ?? 0.0) + (float) ($s->spend ?? 0.0);
@@ -586,6 +616,8 @@ final class InsightsFetcher
             reach: $reach,
             linkClicks: $linkClicks,
             landingPageViews: $landingPageViews,
+            addToCarts: $addToCarts,
+            checkoutsInitiated: $checkoutsInitiated,
         );
     }
 
@@ -620,6 +652,29 @@ final class InsightsFetcher
         $linkClicks       = (int) ($row['inline_link_clicks'] ?? 0);
         $landingPageViews = (int) round(self::plainActionTotal($row['actions'] ?? [], self::LANDING_PAGE_VIEW_TYPES));
 
+        // Mid-funnel commerce steps from the same `actions` payload — plain (not
+        // window-attributed) totals, matching landing_page_views: they're funnel
+        // steps, not conversions.
+        $addToCarts         = (int) round(self::plainActionTotal($row['actions'] ?? [], self::ADD_TO_CART_TYPES));
+        $checkoutsInitiated = (int) round(self::plainActionTotal($row['actions'] ?? [], self::INITIATE_CHECKOUT_TYPES));
+
+        // Unique + outbound clicks ride metadata (no columns — they're panel
+        // stats, not query dimensions). Only set when Meta returned the field, so
+        // a pre-existing day without them reads "—", never 0. unique_clicks is a
+        // daily unique — summed over a window it's an upper bound, like reach.
+        $clicksDetail = [];
+        if (isset($row['unique_clicks'])) {
+            $clicksDetail['unique_clicks'] = (int) $row['unique_clicks'];
+        }
+        if (isset($row['outbound_clicks'])) {
+            $clicksDetail['outbound_clicks'] = (int) round(self::sumActionField($row['outbound_clicks']));
+        }
+
+        $metadata = ['attribution_window' => self::ATTRIBUTION_WINDOW];
+        if ($clicksDetail !== []) {
+            $metadata['clicks_detail'] = $clicksDetail;
+        }
+
         return new MetricSnapshot(
             brandId: $brandId,
             platform: 'meta',
@@ -630,11 +685,13 @@ final class InsightsFetcher
             clicks: $clicks,
             conversions: $conversions,
             conversionValue: $conversionValue,
-            metadata: ['attribution_window' => self::ATTRIBUTION_WINDOW],
+            metadata: $metadata,
             isComplete: $isComplete,
             reach: $reach,
             linkClicks: $linkClicks,
             landingPageViews: $landingPageViews,
+            addToCarts: $addToCarts,
+            checkoutsInitiated: $checkoutsInitiated,
         );
     }
 

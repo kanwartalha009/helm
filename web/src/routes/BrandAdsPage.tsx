@@ -5,6 +5,7 @@ import { Breadcrumb } from '@/components/ui';
 import { AdsBrandOverview } from '@/components/ads/AdsBrandOverview';
 import { AdPlatformToggle, adPlatformsOf } from '@/components/ads/AdPlatformToggle';
 import { useBrandDetail } from '@/hooks/useApiData';
+import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import type { AdsPeriod, AdsPlatform } from '@/types/ads';
 
 const PERIODS: { key: AdsPeriod; label: string }[] = [
@@ -55,6 +56,7 @@ export function BrandAdsPage() {
         <AdPlatformToggle available={available} value={platform} onChange={setPlatform} />
       </div>
 
+      <DataCoverageCard slug={slug} compact />
       <AdsBrandOverview slug={slug} period={period} platform={platform} />
     </AppLayout>
   );

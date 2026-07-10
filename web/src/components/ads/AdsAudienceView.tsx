@@ -162,6 +162,7 @@ function BreakdownPanel({
   prettify: (s: string) => string;
 }) {
   const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+  const unit = (v: number | null) => formatMoney(v, currency);
   const rows = bd.rows.slice(0, 8);
   const max = Math.max(1, ...rows.map((r) => r.spend));
 
@@ -169,12 +170,16 @@ function BreakdownPanel({
     <div className="ads-panel">
       <div className="ads-ph"><h3>{title}</h3></div>
       <div className="ads-psub">{subtitle}</div>
-      <div className="abrk">
+      {/* abrk-x2 widens the grid for the CTR + CPM columns without touching the
+          5-column layout the Overview's brand-split / channel-mix panels reuse. */}
+      <div className="abrk abrk-x2">
         <div className="abrk-row abrk-head">
           <span>Segment</span>
           <span />
           <span className="abrk-val">Spend</span>
           <span className="abrk-pct">%</span>
+          <span className="abrk-ctr">CTR</span>
+          <span className="abrk-cpm">CPM</span>
           <span className="abrk-roas">ROAS</span>
         </div>
         {rows.map((r) => (
@@ -183,6 +188,8 @@ function BreakdownPanel({
             <span className="abrk-track"><span className="abrk-bar" style={{ width: `${Math.max(3, (r.spend / max) * 100)}%` }} /></span>
             <span className="abrk-val num">{money(r.spend)}</span>
             <span className="abrk-pct num">{`${r.pct}%`}</span>
+            <span className="abrk-ctr num">{r.ctr != null ? `${r.ctr}%` : '—'}</span>
+            <span className="abrk-cpm num">{r.cpm != null ? unit(r.cpm) : '—'}</span>
             <span className="abrk-roas num">{formatRoas(r.roas)}</span>
           </div>
         ))}

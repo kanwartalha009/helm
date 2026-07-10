@@ -42,7 +42,7 @@ class DailyMetric extends Model
         'brand_id', 'platform', 'date',
         'revenue', 'revenue_net', 'net_sales', 'total_sales', 'orders', 'refunds_amount', 'refunded_orders',
         'spend', 'impressions', 'clicks', 'conversions', 'conversion_value',
-        'reach', 'link_clicks', 'landing_page_views',
+        'reach', 'link_clicks', 'landing_page_views', 'add_to_carts', 'checkouts_initiated',
         'currency', 'fx_rate_to_usd', 'metadata', 'is_complete', 'pulled_at',
     ];
 
@@ -63,6 +63,8 @@ class DailyMetric extends Model
         'reach'              => 'integer',
         'link_clicks'        => 'integer',
         'landing_page_views' => 'integer',
+        'add_to_carts'        => 'integer',
+        'checkouts_initiated' => 'integer',
         'fx_rate_to_usd'   => 'decimal:6',
         'metadata'         => 'array',
         'is_complete'      => 'boolean',

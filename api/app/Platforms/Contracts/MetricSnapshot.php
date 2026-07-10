@@ -43,6 +43,12 @@ final class MetricSnapshot
         public readonly ?int $reach = null,
         public readonly ?int $linkClicks = null,
         public readonly ?int $landingPageViews = null,
+        // Mid-funnel commerce steps (add to cart → checkout started), parsed from
+        // Meta's `actions` payload. Nullable for the same reason as reach/linkClicks:
+        // rows synced before the columns existed must stay distinguishable from a
+        // real zero, so the funnel renders "—", never a fake 0.
+        public readonly ?int $addToCarts = null,
+        public readonly ?int $checkoutsInitiated = null,
     ) {}
 
     /**
@@ -85,6 +91,8 @@ final class MetricSnapshot
             'reach'              => $this->reach,
             'link_clicks'        => $this->linkClicks,
             'landing_page_views' => $this->landingPageViews,
+            'add_to_carts'        => $this->addToCarts,
+            'checkouts_initiated' => $this->checkoutsInitiated,
             'currency'         => $this->currency,
             'fx_rate_to_usd'   => $fxRateToUsd,
             'metadata'         => $metadata,
@@ -99,7 +107,7 @@ final class MetricSnapshot
         return [
             'revenue', 'revenue_net', 'net_sales', 'total_sales', 'orders', 'refunds_amount', 'refunded_orders',
             'spend', 'impressions', 'clicks', 'conversions', 'conversion_value',
-            'reach', 'link_clicks', 'landing_page_views',
+            'reach', 'link_clicks', 'landing_page_views', 'add_to_carts', 'checkouts_initiated',
             'currency', 'fx_rate_to_usd', 'metadata', 'is_complete', 'pulled_at',
         ];
     }

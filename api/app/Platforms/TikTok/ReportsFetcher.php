@@ -42,6 +42,10 @@ final class ReportsFetcher
     private const NATIVE_METRICS = [
         'video_play_actions', 'video_watched_2s', 'video_watched_6s',
         'video_views_p25', 'video_views_p50', 'video_views_p75', 'video_views_p100',
+        // average_video_play is a per-play MEAN (seconds) — the overview query
+        // averages it across days instead of summing. The two web events feed the
+        // engagement panel's mid-funnel stats (add to cart / checkout started).
+        'average_video_play', 'initiate_checkout', 'web_event_add_to_cart',
         'likes', 'comments', 'shares', 'follows', 'profile_visits',
     ];
 

@@ -26,7 +26,20 @@ final class LlmManager
 
     public function providerName(): string
     {
-        $provider = (string) config('llm.provider', 'anthropic');
+        // Settings UI choice first (workspace_settings.llm_provider — the
+        // agency picks in Settings → Platform keys → AI / LLM), then the
+        // HELM_LLM_PROVIDER env default. Wrapped so a missing table during
+        // early bootstrap/tests falls back to config cleanly.
+        try {
+            $fromSettings = \App\Models\WorkspaceSetting::getValue('llm_provider');
+        } catch (\Throwable) {
+            $fromSettings = null;
+        }
+
+        $provider = is_string($fromSettings) && $fromSettings !== ''
+            ? $fromSettings
+            : (string) config('llm.provider', 'anthropic');
+
         if (! in_array($provider, ['anthropic', 'openai'], true)) {
             throw new InvalidArgumentException("Unknown LLM provider: {$provider} (expected anthropic|openai).");
         }

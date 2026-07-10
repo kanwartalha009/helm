@@ -147,9 +147,13 @@ final class AdsOverviewQuery
                  COALESCE(SUM(reach), 0)                              AS reach,
                  COALESCE(SUM(link_clicks), 0)                        AS link_clicks,
                  COALESCE(SUM(landing_page_views), 0)                 AS landing_page_views,
+                 COALESCE(SUM(add_to_carts), 0)                       AS add_to_carts,
+                 COALESCE(SUM(checkouts_initiated), 0)                AS checkouts_initiated,
                  COUNT(reach)                                         AS reach_n,
                  COUNT(link_clicks)                                   AS lc_n,
                  COUNT(landing_page_views)                            AS lpv_n,
+                 COUNT(add_to_carts)                                  AS atc_n,
+                 COUNT(checkouts_initiated)                           AS ic_n,
                  SUM(CASE WHEN is_complete THEN 1 ELSE 0 END)         AS complete_days"
             )
             ->first();
@@ -282,13 +286,28 @@ final class AdsOverviewQuery
 
         $lcN  = (int) ($cur->lc_n ?? 0);
         $lpvN = (int) ($cur->lpv_n ?? 0);
+        $atcN = (int) ($cur->atc_n ?? 0);
+        $icN  = (int) ($cur->ic_n ?? 0);
 
-        return [
+        $steps = [
             $impressions,
             ['key' => 'link_clicks',        'label' => 'Link clicks',   'value' => $lcN > 0 ? (int) $cur->link_clicks : null,        'pending' => $lcN === 0],
             ['key' => 'landing_page_views', 'label' => 'Landing views', 'value' => $lpvN > 0 ? (int) $cur->landing_page_views : null, 'pending' => $lpvN === 0],
-            $purchases,
         ];
+
+        // Mid-funnel commerce steps are APPENDED only once the window has synced
+        // data (their COUNT > 0) — unlike the two Meta steps above they never show
+        // a "soon" placeholder, so brands that predate the columns keep the
+        // original four-step funnel instead of two permanently-pending rows.
+        if ($atcN > 0) {
+            $steps[] = ['key' => 'add_to_carts', 'label' => 'Add to cart', 'value' => (int) $cur->add_to_carts, 'pending' => false];
+        }
+        if ($icN > 0) {
+            $steps[] = ['key' => 'checkouts_initiated', 'label' => 'Checkout started', 'value' => (int) $cur->checkouts_initiated, 'pending' => false];
+        }
+        $steps[] = $purchases;
+
+        return $steps;
     }
 
     /**
@@ -356,9 +375,11 @@ final class AdsOverviewQuery
      * Classify a Google campaign into a channel segment from its name. Order
      * matters: GENERIC is tested before BRAND because "BRAND-GENERIC" contains
      * both tokens. Convention-based (fits the NP_<cc>_GADS_<CHANNEL>_… scheme);
-     * anything unrecognised falls to Other. Not white-label-proof — a later pass
-     * can store the real advertising_channel_type on the campaign row for channel
-     * certainty independent of naming.
+     * anything unrecognised falls to Other. Not white-label-proof — note that
+     * ad_campaign_daily_metrics.channel_type now stores Google's real
+     * advertising_channel_type, so a future pass can swap this name-parsing for
+     * the stored value once history has been re-backfilled. Deliberately not
+     * rewritten here (the brand/generic SEARCH split still needs the name).
      *
      * @return array{0: string, 1: string} [key, label]
      */
@@ -511,6 +532,7 @@ final class AdsOverviewQuery
                 'roas'        => $spend > 0 ? round($rev / $spend, 2) : null,
                 'cpa'         => $purch > 0 ? round($spend / $purch, 2) : null,
                 'ctr'         => $impr > 0 ? round($clk / $impr * 100, 2) : null,
+                'cpm'         => $impr > 0 ? round($spend / $impr * 1000, 2) : null,
                 'pct'         => $total > 0 ? round($spend / $total * 100, 1) : 0.0,
             ];
         })->sortByDesc('spend')->values();
@@ -664,6 +686,7 @@ final class AdsOverviewQuery
             ->pluck('metadata');
 
         $sum = [];
+        $cnt = [];
         foreach ($metas as $meta) {
             $native = is_array($meta) ? ($meta['tiktok'] ?? null) : null;
             if (! is_array($native)) {
@@ -672,6 +695,7 @@ final class AdsOverviewQuery
             foreach ($native as $k => $v) {
                 if (is_numeric($v)) {
                     $sum[(string) $k] = ($sum[(string) $k] ?? 0) + (float) $v;
+                    $cnt[(string) $k] = ($cnt[(string) $k] ?? 0) + 1;
                 }
             }
         }
@@ -682,6 +706,12 @@ final class AdsOverviewQuery
 
         $plays = (float) ($sum['video_play_actions'] ?? 0);
         $g     = static fn (string $k): int => (int) round((float) ($sum[$k] ?? 0));
+        // Counts can be summed over the window; a per-play MEAN can't — so avg
+        // watch is the unweighted mean of the day values that carry it, an
+        // approximation the label owns. Null (→ "—") until any day has synced it.
+        $avgWatch = ($cnt['average_video_play'] ?? 0) > 0
+            ? round(((float) $sum['average_video_play']) / $cnt['average_video_play'], 1)
+            : null;
 
         return [
             'hasData' => true,
@@ -694,6 +724,7 @@ final class AdsOverviewQuery
                 'p75'            => $g('video_views_p75'),
                 'p100'           => $g('video_views_p100'),
                 'completionRate' => $plays > 0 ? round(((float) ($sum['video_views_p100'] ?? 0)) / $plays * 100, 1) : null,
+                'avgWatchSec'    => $avgWatch,
             ],
             'social'  => [
                 'likes'         => $g('likes'),
@@ -701,6 +732,12 @@ final class AdsOverviewQuery
                 'shares'        => $g('shares'),
                 'follows'       => $g('follows'),
                 'profileVisits' => $g('profile_visits'),
+            ],
+            // Mid-funnel commerce steps — null (not 0) until any synced day
+            // carries the metric, so a pre-existing window reads "—".
+            'funnel'  => [
+                'addToCarts'         => isset($sum['web_event_add_to_cart']) ? $g('web_event_add_to_cart') : null,
+                'checkoutsInitiated' => isset($sum['initiate_checkout']) ? $g('initiate_checkout') : null,
             ],
         ];
     }
@@ -724,6 +761,7 @@ final class AdsOverviewQuery
             ->pluck('metadata');
 
         $sum = [];
+        $cnt = [];
         foreach ($metas as $meta) {
             $native = is_array($meta) ? ($meta['meta'] ?? null) : null;
             if (! is_array($native)) {
@@ -732,6 +770,7 @@ final class AdsOverviewQuery
             foreach ($native as $k => $v) {
                 if (is_numeric($v)) {
                     $sum[(string) $k] = ($sum[(string) $k] ?? 0) + (float) $v;
+                    $cnt[(string) $k] = ($cnt[(string) $k] ?? 0) + 1;
                 }
             }
         }
@@ -742,6 +781,12 @@ final class AdsOverviewQuery
 
         $plays = (float) ($sum['video_play_actions'] ?? 0);
         $g     = static fn (string $k): int => (int) round((float) ($sum[$k] ?? 0));
+        // Avg seconds watched is a per-play MEAN — summing day means is wrong, so
+        // it's averaged over the days that carry it (unweighted; an approximation
+        // for multi-account brands). Null (→ "—") until any day has synced it.
+        $avgWatch = ($cnt['video_avg_time_watched'] ?? 0) > 0
+            ? round(((float) $sum['video_avg_time_watched']) / $cnt['video_avg_time_watched'], 1)
+            : null;
 
         return [
             'hasData' => true,
@@ -754,12 +799,20 @@ final class AdsOverviewQuery
                 'p75'            => $g('video_p75'),
                 'p100'           => $g('video_p100'),
                 'completionRate' => $plays > 0 ? round(((float) ($sum['video_p100'] ?? 0)) / $plays * 100, 1) : null,
+                'avgWatchSec'    => $avgWatch,
             ],
             'social'  => [
                 'likes'     => $g('likes'),
                 'comments'  => $g('comments'),
                 'shares'    => $g('shares'),
                 'pageLikes' => $g('page_likes'),
+            ],
+            // Unique clicks (daily uniques — a windowed sum is an upper bound,
+            // like reach) + outbound clicks, from metadata clicks_detail. Null
+            // (→ "—") until any day in the window has synced them.
+            'clicks'  => [
+                'unique'   => isset($sum['unique_clicks']) ? $g('unique_clicks') : null,
+                'outbound' => isset($sum['outbound_clicks']) ? $g('outbound_clicks') : null,
             ],
         ];
     }
@@ -828,6 +881,7 @@ final class AdsOverviewQuery
                 'campaign_id,
                  MAX(campaign_name) AS campaign_name,
                  MAX(status)        AS status,
+                 MAX(channel_type)  AS channel_type,
                  COALESCE(SUM(' . $money('spend') . "), 0)            AS spend,
                  COALESCE(SUM(" . $money('conversion_value') . "), 0) AS revenue,
                  COALESCE(SUM(conversions), 0)                        AS purchases,
@@ -872,6 +926,10 @@ final class AdsOverviewQuery
                 'id'               => (string) $r->campaign_id,
                 'name'             => (string) ($r->campaign_name ?: $r->campaign_id),
                 'status'           => $r->status ? (string) $r->status : null,
+                // Google's advertising_channel_type ('search' / 'shopping' /
+                // 'performance_max' / …); null on Meta/TikTok and on rows synced
+                // before the column existed.
+                'channelType'      => $r->channel_type ? (string) $r->channel_type : null,
                 'spend'            => $spend,
                 'revenue'          => $rev,
                 'purchases'        => $purch,
@@ -956,11 +1014,14 @@ final class AdsOverviewQuery
             ->selectRaw(
                 'MAX(campaign_name) AS campaign_name,
                  MAX(status)        AS status,
+                 MAX(channel_type)  AS channel_type,
                  COALESCE(SUM(' . $money('spend') . "), 0)            AS spend,
                  COALESCE(SUM(" . $money('conversion_value') . "), 0) AS revenue,
                  COALESCE(SUM(conversions), 0)                        AS purchases,
                  COALESCE(SUM(impressions), 0)                        AS impressions,
-                 COALESCE(SUM(clicks), 0)                             AS clicks"
+                 COALESCE(SUM(clicks), 0)                             AS clicks,
+                 AVG(search_impression_share)                         AS search_impression_share,
+                 AVG(search_budget_lost_is)                           AS search_budget_lost_is"
             )
             ->first();
 
@@ -1004,9 +1065,15 @@ final class AdsOverviewQuery
 
         return [
             'campaign' => [
-                'id'     => $campaignId,
-                'name'   => (string) ($cur->campaign_name ?: $campaignId),
-                'status' => $cur->status ? (string) $cur->status : null,
+                'id'          => $campaignId,
+                'name'        => (string) ($cur->campaign_name ?: $campaignId),
+                'status'      => $cur->status ? (string) $cur->status : null,
+                'channelType' => $cur->channel_type ? (string) $cur->channel_type : null,
+                // Search/Shopping impression share, averaged over the days that
+                // carry it (AVG skips nulls). Null — and hidden by the drawer —
+                // for other channel types and for rows synced before the column.
+                'searchImpressionShare' => $cur->search_impression_share !== null ? round((float) $cur->search_impression_share * 100, 1) : null,
+                'searchBudgetLostIs'    => $cur->search_budget_lost_is !== null ? round((float) $cur->search_budget_lost_is * 100, 1) : null,
             ],
             'period'   => strtolower((string) ($params['period'] ?? 'last30')),
             'from'     => $start,
@@ -1070,6 +1137,26 @@ final class AdsOverviewQuery
             return $base + ['hasData' => false, 'count' => 0, 'totalSpend' => 0.0, 'trend' => [], 'rows' => []];
         }
 
+        // Latest Meta relevance rankings per ad — rankings are categorical
+        // strings, so they can't ride the SUM/MAX aggregate above (MAX would sort
+        // 'below_average_10' vs 'unknown' alphabetically, not by meaning). One
+        // ordered fetch, first (= most recent) non-null row per ad wins.
+        $rankings = [];
+        $rankRows = AdCreativeDaily::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', $platform)
+            ->whereBetween('date', [$start, $end])
+            ->where(static function ($q): void {
+                $q->whereNotNull('quality_ranking')
+                    ->orWhereNotNull('engagement_ranking')
+                    ->orWhereNotNull('conversion_ranking');
+            })
+            ->orderByDesc('date')
+            ->get(['ad_id', 'quality_ranking', 'engagement_ranking', 'conversion_ranking']);
+        foreach ($rankRows as $rr) {
+            $rankings[(string) $rr->ad_id] ??= $rr;
+        }
+
         // Prior equal-length window, spend per ad — the baseline for WoW% and the
         // blended state. One grouped query, keyed by ad for O(1) lookup.
         $prior = AdCreativeDaily::query()
@@ -1087,7 +1174,7 @@ final class AdsOverviewQuery
         $totalRev   = (float) $rows->sum(static fn ($r) => (float) $r->revenue);
         $wRoas      = $totalSpend > 0 ? $totalRev / $totalSpend : 0.0;
 
-        $mapped = $rows->map(function ($r) use ($prior, $totalSpend, $wRoas) {
+        $mapped = $rows->map(function ($r) use ($prior, $rankings, $totalSpend, $wRoas) {
             $spend   = round((float) $r->spend, 2);
             $rev     = round((float) $r->revenue, 2);
             $purch   = (int) $r->purchases;
@@ -1131,6 +1218,11 @@ final class AdsOverviewQuery
                 // CtATC = add-to-cart / clicks.
                 'ctp'         => $clk > 0 ? round($purch / $clk * 100, 2) : null,
                 'ctatc'       => $clk > 0 ? round($atc / $clk * 100, 2) : null,
+                // Meta relevance rankings (latest synced day) — the card only
+                // badges below-average values; null = unranked / never synced.
+                'qualityRanking'    => ($rk = $rankings[(string) $r->ad_id] ?? null) && $rk->quality_ranking ? (string) $rk->quality_ranking : null,
+                'engagementRanking' => $rk && $rk->engagement_ranking ? (string) $rk->engagement_ranking : null,
+                'conversionRanking' => $rk && $rk->conversion_ranking ? (string) $rk->conversion_ranking : null,
             ];
         })->sortByDesc('spend')->values()->take(200)->all();
 

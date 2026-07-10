@@ -105,7 +105,7 @@ class MetaBackfillCreativesCommand extends Command
                         AdCreativeDaily::upsert(
                             $chunk,
                             ['brand_id', 'platform', 'date', 'ad_id'],
-                            ['ad_name', 'campaign_id', 'thumbnail_url', 'media_type', 'spend', 'impressions', 'clicks', 'video_3s', 'thruplays', 'add_to_cart', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+                            ['ad_name', 'campaign_id', 'thumbnail_url', 'media_type', 'spend', 'impressions', 'clicks', 'video_3s', 'thruplays', 'add_to_cart', 'quality_ranking', 'engagement_ranking', 'conversion_ranking', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                         );
                     }
                     $rows += count($records);
@@ -167,6 +167,9 @@ class MetaBackfillCreativesCommand extends Command
                 'video_3s'         => (int) ($r['video_3s'] ?? 0),
                 'thruplays'        => (int) ($r['thruplays'] ?? 0),
                 'add_to_cart'      => (int) ($r['add_to_cart'] ?? 0),
+                'quality_ranking'    => $r['quality_ranking'] ?? null,
+                'engagement_ranking' => $r['engagement_ranking'] ?? null,
+                'conversion_ranking' => $r['conversion_ranking'] ?? null,
                 'conversions'      => (int) ($r['conversions'] ?? 0),
                 'conversion_value' => (float) ($r['conversion_value'] ?? 0),
                 'currency'         => $rowCcy,

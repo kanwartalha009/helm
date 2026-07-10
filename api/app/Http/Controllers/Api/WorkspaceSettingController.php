@@ -42,6 +42,9 @@ class WorkspaceSettingController extends Controller
             'report_branding.agency_name' => ['sometimes', 'string', 'max:120'],
             'report_branding.accent'      => ['sometimes', 'string', 'max:32'],
             'report_branding.footer_text' => ['sometimes', 'string', 'max:200'],
+            // LLM provider choice (D-016) — which driver serves narrative + chat.
+            // Stored here so the agency picks in the UI; env is the fallback.
+            'llm_provider' => ['sometimes', Rule::in(['anthropic', 'openai'])],
         ]);
 
         // Filter out empty/null so we never overwrite real values with blanks

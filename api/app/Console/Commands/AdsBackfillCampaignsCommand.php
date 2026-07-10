@@ -117,7 +117,7 @@ class AdsBackfillCampaignsCommand extends Command
                             AdCampaignDailyMetric::upsert(
                                 $chunk,
                                 ['brand_id', 'platform', 'date', 'campaign_id'],
-                                ['campaign_name', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+                                ['campaign_name', 'status', 'channel_type', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'all_conversions', 'view_through_conversions', 'search_impression_share', 'search_budget_lost_is', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                             );
                         }
                         $rows += count($records);
@@ -177,6 +177,14 @@ class AdsBackfillCampaignsCommand extends Command
                 'date'             => $date,
                 'campaign_id'      => mb_substr($cid, 0, 64),
                 'campaign_name'    => mb_substr((string) ($r['campaign_name'] ?? ''), 0, 255),
+                // Google enrichment — absent on Meta/TikTok rows, kept null there
+                // (missing, not zero).
+                'status'           => isset($r['status']) ? mb_substr((string) $r['status'], 0, 16) : null,
+                'channel_type'     => isset($r['channel_type']) ? mb_substr((string) $r['channel_type'], 0, 32) : null,
+                'all_conversions'          => isset($r['all_conversions']) ? (float) $r['all_conversions'] : null,
+                'view_through_conversions' => isset($r['view_through_conversions']) ? (int) $r['view_through_conversions'] : null,
+                'search_impression_share'  => isset($r['search_impression_share']) ? (float) $r['search_impression_share'] : null,
+                'search_budget_lost_is'    => isset($r['search_budget_lost_is']) ? (float) $r['search_budget_lost_is'] : null,
                 'spend'            => (float) ($r['spend'] ?? 0),
                 'impressions'      => (int) ($r['impressions'] ?? 0),
                 'clicks'           => (int) ($r['clicks'] ?? 0),

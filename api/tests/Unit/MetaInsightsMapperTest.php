@@ -29,6 +29,9 @@ final class MetaInsightsMapperTest extends TestCase
                 ['action_type' => 'landing_page_view', 'value' => '500', '7d_click' => '480'],
                 ['action_type' => 'omni_purchase',     'value' => '42',  '7d_click' => '37'],
                 ['action_type' => 'purchase',          'value' => '40',  '7d_click' => '35'],
+                ['action_type' => 'omni_add_to_cart',  'value' => '210', '7d_click' => '180'],
+                ['action_type' => 'add_to_cart',       'value' => '200', '7d_click' => '170'],
+                ['action_type' => 'omni_initiated_checkout', 'value' => '88', '7d_click' => '75'],
             ],
             'action_values' => [
                 ['action_type' => 'omni_purchase', 'value' => '5000.00', '7d_click' => '4200.50'],
@@ -61,6 +64,16 @@ final class MetaInsightsMapperTest extends TestCase
         $this->assertSame(37, $s->conversions);
         $this->assertEqualsWithDelta(4200.50, $s->conversionValue, 0.0001);
         $this->assertSame('7d_click', $s->metadata['attribution_window']);
+    }
+
+    public function test_it_parses_funnel_steps_from_plain_action_values(): void
+    {
+        $s = InsightsFetcher::mapInsightRow($this->sampleRow(), 1, CarbonImmutable::parse('2026-05-30'), 'USD', true);
+
+        // Funnel steps use the PLAIN value (they're steps, not attributed
+        // conversions) and prefer the omni_* type over the pixel-specific one.
+        $this->assertSame(210, $s->addToCarts);
+        $this->assertSame(88, $s->checkoutsInitiated);
     }
 
     public function test_empty_row_yields_zeroes_with_fallback_currency(): void

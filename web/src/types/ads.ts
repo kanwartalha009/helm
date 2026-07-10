@@ -67,6 +67,7 @@ export interface AdsCountryRow {
   roas: number | null;
   cpa: number | null;
   ctr: number | null;
+  cpm: number | null;
   pct: number; // this segment's share of window spend
 }
 
@@ -98,6 +99,9 @@ export interface AdsCampaignRow {
   id: string;
   name: string;
   status: string | null;
+  // Google's advertising_channel_type ('search' / 'shopping' / 'performance_max'
+  // / …); null on Meta/TikTok and on rows synced before the column existed.
+  channelType: string | null;
   spend: number;
   revenue: number;
   purchases: number;
@@ -153,6 +157,7 @@ export interface AdsTikTokNative {
     p75: number;
     p100: number;
     completionRate: number | null; // p100 ÷ plays %
+    avgWatchSec: number | null; // mean seconds per play, averaged over synced days
   };
   social: {
     likes: number;
@@ -160,6 +165,11 @@ export interface AdsTikTokNative {
     shares: number;
     follows: number;
     profileVisits: number;
+  };
+  // Mid-funnel web events — null (rendered "—") until a synced day carries them.
+  funnel: {
+    addToCarts: number | null;
+    checkoutsInitiated: number | null;
   };
 }
 
@@ -177,6 +187,7 @@ export interface AdsMetaNative {
     p75: number;
     p100: number;
     completionRate: number | null; // p100 ÷ plays %
+    avgWatchSec: number | null; // mean seconds per play, averaged over synced days
   };
   social: {
     likes: number;
@@ -184,13 +195,28 @@ export interface AdsMetaNative {
     shares: number;
     pageLikes: number;
   };
+  // Unique clicks are daily uniques — the windowed sum is an upper bound, like
+  // reach. Null (rendered "—") until a synced day carries them.
+  clicks: {
+    unique: number | null;
+    outbound: number | null;
+  };
 }
 
 // Campaign drill-down (Phase B) — one campaign's KPIs + daily trend.
 // summary reuses AdsSummary (reach/frequency are null — those live at the
 // account level, not per campaign).
 export interface AdsCampaignDetail {
-  campaign: { id: string; name: string; status: string | null };
+  campaign: {
+    id: string;
+    name: string;
+    status: string | null;
+    channelType: string | null; // Google only; null elsewhere
+    // Search/Shopping impression share (%, window average) — null and hidden
+    // for other channel types and rows synced before the columns existed.
+    searchImpressionShare: number | null;
+    searchBudgetLostIs: number | null;
+  };
   period: AdsPeriod;
   from: string;
   to: string;
@@ -223,6 +249,11 @@ export interface AdsCreative {
   hr: number | null; // Hold rate % (video only): ThruPlays / impressions
   ctp: number | null; // Click→Purchase %: purchases / clicks
   ctatc: number | null; // Click→Add-to-cart %: add-to-cart / clicks
+  // Meta relevance rankings (latest synced day, lower-case, e.g.
+  // 'below_average_10'); the card badges only 'below*' values. Null = unranked.
+  qualityRanking: string | null;
+  engagementRanking: string | null;
+  conversionRanking: string | null;
 }
 
 export interface AdsCreativesResponse {
