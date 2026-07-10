@@ -21,12 +21,15 @@ use Carbon\CarbonImmutable;
 final class AdAudit
 {
     // ROAS bands (computed in USD so the ratio is currency-correct). Defaults —
-    // tune once Bosco confirms his banding (open item #16).
-    private const DEAD_ROAS = 1.0;   // < 1× → losing money on the campaign
-    private const WEAK_ROAS = 1.8;   // 1–1.8× → underperforming
-    private const WIN_ROAS  = 3.0;   // ≥ 3× → scale
-    private const MIN_SPEND = 50.0;  // USD floor below which a campaign isn't worth a verdict
-    private const SCALING   = 20.0;  // spend Δ% above which a weak campaign is "scaling the loss"
+    // tune once Bosco confirms his banding (open item #16). Public (was private)
+    // so AdsAuditReport's best/worst ranking + issue rules reference THESE
+    // constants — one source of truth, thresholds can never drift. Values
+    // unchanged.
+    public const DEAD_ROAS = 1.0;   // < 1× → losing money on the campaign
+    public const WEAK_ROAS = 1.8;   // 1–1.8× → underperforming
+    public const WIN_ROAS  = 3.0;   // ≥ 3× → scale
+    public const MIN_SPEND = 50.0;  // USD floor below which a campaign isn't worth a verdict
+    public const SCALING   = 20.0;  // spend Δ% above which a weak campaign is "scaling the loss"
 
     // Evidence floor for a CONFIDENT verdict (3 × MIN_SPEND). Below it a verdict
     // still renders but is tagged 'early' — practitioners attach minimum-spend

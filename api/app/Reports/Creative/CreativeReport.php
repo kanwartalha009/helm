@@ -35,13 +35,16 @@ final class CreativeReport implements ReportType
     //   - it also ran in the comparison window (prev spend > 0 — a brand-new
     //     creative has nothing to fall from), AND
     //   - ROAS fell ≥ FATIGUE_DROP_PCT vs the comparison window, or CTR did.
-    private const FATIGUE_MIN_SPEND = 100.0;
-    private const FATIGUE_DROP_PCT  = 30.0;
+    // Public (was private) so AdsAuditReport's creative winners/fatigue rules
+    // reference THESE constants — one source of truth, thresholds can never
+    // drift between the two reports. Values unchanged.
+    public const FATIGUE_MIN_SPEND = 100.0;
+    public const FATIGUE_DROP_PCT  = 30.0;
 
     // Scale rule (deterministic): ROAS ≥ SCALE_ROAS_MULT × the platform's median
     // creative ROAS this window, with meaningful spend (≥ SCALE_MIN_SPEND USD).
-    private const SCALE_MIN_SPEND = 50.0;
-    private const SCALE_ROAS_MULT = 2.0;
+    public const SCALE_MIN_SPEND = 50.0;
+    public const SCALE_ROAS_MULT = 2.0;
 
     public function key(): string
     {

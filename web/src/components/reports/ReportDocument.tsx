@@ -226,7 +226,11 @@ export function ReportDocument({
       <section className="rpt-sec">
         <div className="rpt-sec-head"><span className="rpt-sec-num">02</span><h2>By ad platform</h2></div>
         <div className="rpt-plat-grid">
-          {byPlatform.map((p) => (
+          {/* Client-facing doc shows CONNECTED platforms only — a brand
+              without TikTok never renders a "TikTok: not connected" row
+              (Kanwar 2026-07-10). The blended-ROAS "connected platforms
+              only" note above keeps the partial-spend honesty. */}
+          {byPlatform.filter((p) => p.connected).map((p) => (
             <div className="rpt-plat" key={p.platform}>
               <div className="rpt-plat-name">
                 {PLATFORM_LABEL[p.platform] ?? p.platform}

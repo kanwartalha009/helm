@@ -19,11 +19,19 @@ const SEVERITY: Record<AuditFinding['severity'], { label: string; color: string 
   good:     { label: 'Good',     color: 'var(--success, #1f6f5c)' },
 };
 
+// Section order (spec §4 Phase 2.8): Data health → Revenue → Tracking → Ad
+// accounts → Products → Inventory.
+const AREA_ORDER: AuditFinding['area'][] = ['data', 'revenue', 'tracking', 'ads', 'products', 'inventory'];
 const AREA_LABEL: Record<AuditFinding['area'], string> = {
-  ads: 'Ad accounts',
-  inventory: 'Inventory',
   data: 'Data health',
+  revenue: 'Revenue',
+  tracking: 'Tracking',
+  ads: 'Ad accounts',
+  products: 'Products',
+  inventory: 'Inventory',
 };
+
+const SEV_RANK: Record<AuditFinding['severity'], number> = { critical: 0, warn: 1, info: 2, good: 3 };
 
 /**
  * Store audit — REAL findings composed exclusively from the rules engines
@@ -34,6 +42,7 @@ const AREA_LABEL: Record<AuditFinding['area'], string> = {
 export function BrandAuditPage() {
   const { slug } = useParams();
   const [period, setPeriod] = useState('last30');
+  const [sevFilter, setSevFilter] = useState<AuditFinding['severity'] | null>(null);
 
   const { data: detail } = useBrandDetail(slug);
   const brand = detail?.brand;
@@ -41,6 +50,20 @@ export function BrandAuditPage() {
 
   const brandName = brand?.name ?? 'Brand';
   const brandInitials = brand?.initials ?? '··';
+
+  const findings = data?.findings ?? [];
+  const counts = {
+    critical: findings.filter((f) => f.severity === 'critical').length,
+    warn: findings.filter((f) => f.severity === 'warn').length,
+    good: findings.filter((f) => f.severity === 'good').length,
+  };
+  const shown = sevFilter ? findings.filter((f) => f.severity === sevFilter) : findings;
+  const grouped = AREA_ORDER
+    .map((area) => ({
+      area,
+      items: shown.filter((f) => f.area === area).sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity]),
+    }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <AppLayout title="Store audit">
@@ -78,27 +101,56 @@ export function BrandAuditPage() {
       {isLoading && <div className="muted" style={{ padding: 24 }}>Running the rules…</div>}
 
       {data && (
-        <div style={{ display: 'grid', gap: 12 }}>
-          {data.findings.map((f) => (
-            <Card key={f.id} style={{ padding: 18 }}>
-              <div className="flex items-center gap-8" style={{ marginBottom: 6 }}>
-                <span
-                  aria-hidden
-                  style={{ width: 8, height: 8, borderRadius: '50%', background: SEVERITY[f.severity].color, flexShrink: 0 }}
-                />
-                <span style={{ fontSize: 12, fontWeight: 600, color: SEVERITY[f.severity].color }}>
-                  {SEVERITY[f.severity].label}
-                </span>
-                <span className="muted text-xs">· {AREA_LABEL[f.area]}</span>
-              </div>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>{f.title}</div>
-              <div className="muted text-sm" style={{ lineHeight: 1.55 }}>{f.detail}</div>
-            </Card>
-          ))}
-          <div className="text-xs muted">
-            Every finding above comes from a deterministic rule — the same thresholds every time, no AI involved.
+        <>
+          <div className="flex items-center gap-8 mb-16" style={{ flexWrap: 'wrap' }}>
+            {(['critical', 'warn', 'good'] as const).map((sev) => (
+              <button
+                key={sev}
+                type="button"
+                onClick={() => setSevFilter(sevFilter === sev ? null : sev)}
+                style={{
+                  cursor: 'pointer', border: '1px solid var(--border, #e7e4dd)', borderRadius: 20, padding: '4px 12px',
+                  background: sevFilter === sev ? SEVERITY[sev].color : 'transparent',
+                  color: sevFilter === sev ? '#fff' : SEVERITY[sev].color, fontSize: 12, fontWeight: 600,
+                }}
+              >
+                {counts[sev]} {sev === 'critical' ? 'critical' : sev === 'warn' ? `warning${counts[sev] === 1 ? '' : 's'}` : 'good'}
+              </button>
+            ))}
+            {sevFilter && (
+              <button type="button" className="muted text-xs" style={{ cursor: 'pointer', background: 'none', border: 'none' }} onClick={() => setSevFilter(null)}>
+                clear filter
+              </button>
+            )}
           </div>
-        </div>
+
+          <div style={{ display: 'grid', gap: 20 }}>
+            {grouped.map((g) => (
+              <div key={g.area}>
+                <div className="text-xs" style={{ fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 8 }}>
+                  {AREA_LABEL[g.area]}
+                </div>
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {g.items.map((f) => (
+                    <Card key={f.id} style={{ padding: 18 }}>
+                      <div className="flex items-center gap-8" style={{ marginBottom: 6 }}>
+                        <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: SEVERITY[f.severity].color, flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, fontWeight: 600, color: SEVERITY[f.severity].color }}>{SEVERITY[f.severity].label}</span>
+                      </div>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>{f.title}</div>
+                      <div className="muted text-sm" style={{ lineHeight: 1.55 }}>{f.detail}</div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {grouped.length === 0 && <div className="muted" style={{ padding: 18 }}>No {sevFilter ?? ''} findings in this window.</div>}
+          </div>
+
+          <div className="text-xs muted mt-16">
+            Every finding comes from a deterministic rule — the same thresholds every time, no AI involved.
+          </div>
+        </>
       )}
     </AppLayout>
   );

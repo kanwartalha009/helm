@@ -591,6 +591,98 @@ export interface AdsAuditMover {
   confidence?: AdConfidence;
 }
 
+// ── Ads audit v2 additions (2026-07-10, ADDITIVE) ───────────────────────────
+// Best / worst performer row — worst is ordered null-ROAS spenders first
+// (wasting with zero attributed revenue). Metric fields are nullable so a
+// platform that can't attribute (e.g. no purchase rows) renders '—', never 0.
+export interface AdsAuditPerformerRow {
+  campaignId: string;
+  name: string;
+  status: string;
+  spend: number;
+  conversionValue: number | null;
+  roas: number | null;
+  cpa: number | null;
+  ctr: number | null; // %
+  cpm: number | null;
+  purchases: number | null;
+  confidence?: AdConfidence;
+}
+
+export type AdsAuditSegmentAxis = 'audience' | 'age_gender' | 'country' | 'device' | 'placement';
+
+export interface AdsAuditSegmentRow {
+  key: string;
+  label: string;
+  spend: number;
+  sharePct: number | null; // 0–100, of platform spend on this axis
+  ctr: number | null; // %
+  cpm: number | null;
+  roas: number | null;
+  purchases: number | null;
+}
+
+export interface AdsAuditSegmentAxisBlock {
+  axis: AdsAuditSegmentAxis;
+  rows: AdsAuditSegmentRow[]; // ≤10
+}
+
+/** Customer-segment breakdowns — axes may be [] when no breakdown synced. */
+export interface AdsAuditSegments {
+  axes: AdsAuditSegmentAxisBlock[];
+}
+
+// Creative winners / fatigued (meta + tiktok only — absent for google).
+export interface AdsAuditCreativeRow {
+  adId: string;
+  name: string;
+  thumbnailUrl: string | null;
+  mediaType: string | null; // image | video | null (unknown)
+  spend: number;
+  roas: number | null;
+  ctr: number | null; // %
+  thumbstopPct: number | null; // video only
+  holdPct: number | null; // video only
+  cpa: number | null;
+  belowAverage: boolean;
+}
+
+export interface AdsAuditCreatives {
+  status: 'ok' | 'no_data';
+  winners: AdsAuditCreativeRow[]; // ≤6
+  fatigued: AdsAuditCreativeRow[]; // ≤6
+}
+
+export type AdsAuditIssueSeverity = 'critical' | 'warn' | 'info';
+
+export interface AdsAuditCampaignIssue {
+  severity: AdsAuditIssueSeverity;
+  title: string;
+  detail: string;
+}
+
+/** Per-campaign detail for the issues drawer (≤12 campaigns by spend). */
+export interface AdsAuditCampaignDetail {
+  campaignId: string;
+  name: string;
+  status: string;
+  channelType: string | null;
+  verdict: AdVerdict;
+  confidence?: AdConfidence;
+  kpis: {
+    spend: number | null;
+    prevSpend: number | null;
+    roas: number | null;
+    prevRoas: number | null;
+    cpa: number | null;
+    ctr: number | null;
+    cpm: number | null;
+    purchases: number | null;
+  };
+  series: { date: string; spend: number | null; roas: number | null }[];
+  issues: AdsAuditCampaignIssue[];
+}
+
 export interface AdsAuditPlatformBlock {
   platform: string;
   kpis: {
@@ -602,6 +694,13 @@ export interface AdsAuditPlatformBlock {
   };
   audit: AdAuditSection;
   movers: AdsAuditMover[];
+  // v2 additive keys — ALL optional so cached pre-migration payloads render
+  // (an absent key omits its section, never a zero-filled table).
+  best?: AdsAuditPerformerRow[]; // ≤5
+  worst?: AdsAuditPerformerRow[]; // ≤5, null-ROAS spenders first
+  segments?: AdsAuditSegments | null;
+  creatives?: AdsAuditCreatives | null; // meta/tiktok only
+  campaignDetails?: AdsAuditCampaignDetail[]; // ≤12
 }
 
 export interface AdsAuditReportData {

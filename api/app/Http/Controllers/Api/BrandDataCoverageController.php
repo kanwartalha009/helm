@@ -26,7 +26,8 @@ use Illuminate\Support\Facades\DB;
  *  - history   — daily_metrics for every connected platform via the RANGED
  *                commands (shopify:backfill-sales, ads:backfill-spend,
  *                tiktok:backfill-daily) — one job, not per-day fan-out.
- *  - campaigns — ad_campaign_daily_metrics   (ads:backfill-campaigns)
+ *  - campaigns — ad_campaign_daily_metrics + ad_set_daily_metrics
+ *                (ads:backfill-campaigns + ads:backfill-adsets)
  *  - creatives — ad_creative_daily           (meta/tiktok:backfill-creatives)
  *  - commerce  — commerce_daily_metrics      (shopify:backfill-commerce)
  */
@@ -106,21 +107,27 @@ class BrandDataCoverageController extends Controller
         ];
 
         // --- tracked datasets -------------------------------------------------
+        // 'tables' is the set of grains a dataset must ALL cover to count as
+        // complete. campaigns spans two (campaign + ad-set, spec §4): coverage is
+        // the window covered by BOTH — earliest is the later of their floors, and
+        // null (a gap) if either grain is empty. So the ~80 brands that already
+        // backfilled campaigns but have an empty ad_set_daily_metrics correctly
+        // show the campaigns card as needing a backfill.
         $tracked = [
             'campaigns' => [
-                'label'    => 'Campaign-level ad history',
+                'label'    => 'Campaign & ad-set ad history',
                 'relevant' => $adPlatforms !== [],
-                'table'    => 'ad_campaign_daily_metrics',
+                'tables'   => ['ad_campaign_daily_metrics', 'ad_set_daily_metrics'],
             ],
             'creatives' => [
                 'label'    => 'Creative-level ad history',
                 'relevant' => array_intersect($adPlatforms, ['meta', 'tiktok']) !== [],
-                'table'    => 'ad_creative_daily',
+                'tables'   => ['ad_creative_daily'],
             ],
             'commerce'  => [
                 'label'    => 'Product / country / category revenue',
                 'relevant' => in_array('shopify', $connected, true),
-                'table'    => 'commerce_daily_metrics',
+                'tables'   => ['commerce_daily_metrics'],
             ],
         ];
 
@@ -128,12 +135,24 @@ class BrandDataCoverageController extends Controller
             $earliest = null;
             $latest   = null;
             if ($meta['relevant']) {
-                $row = DB::table($meta['table'])
-                    ->where('brand_id', $brand->id)
-                    ->selectRaw('MIN(date) as earliest, MAX(date) as latest')
-                    ->first();
-                $earliest = $row?->earliest ? CarbonImmutable::parse((string) $row->earliest)->toDateString() : null;
-                $latest   = $row?->latest ? CarbonImmutable::parse((string) $row->latest)->toDateString() : null;
+                // Intersection window across the dataset's grains: earliest = the
+                // MAX of per-table MINs (the limiting grain), latest = the MIN of
+                // per-table MAXs. If any required grain has no rows, earliest stays
+                // null → the dataset reads as a gap.
+                $mins = [];
+                $maxes = [];
+                foreach ($meta['tables'] as $table) {
+                    $row = DB::table($table)
+                        ->where('brand_id', $brand->id)
+                        ->selectRaw('MIN(date) as earliest, MAX(date) as latest')
+                        ->first();
+                    $mins[]  = $row?->earliest ? CarbonImmutable::parse((string) $row->earliest)->toDateString() : null;
+                    $maxes[] = $row?->latest ? CarbonImmutable::parse((string) $row->latest)->toDateString() : null;
+                }
+                if (! in_array(null, $mins, true)) {
+                    $earliest = max($mins);   // later floor = the grain that reaches back least far
+                    $latest   = min($maxes);  // trailing edge covered by every grain
+                }
             }
 
             $lastRun = $lastRuns[$key] ?? null;

@@ -80,8 +80,10 @@ class BackfillBrandDatasetJob implements ShouldQueue
             }
         }
         if ($wants('campaigns') && array_intersect(['meta', 'google', 'tiktok'], $connected) !== []) {
-            // ads:backfill-campaigns handles meta|google|tiktok itself.
+            // ads:backfill-campaigns handles meta|google|tiktok itself; the ad-set
+            // grain (spec §4) rides the same dataset so one click fills both.
             $commands[] = ['ads:backfill-campaigns', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+            $commands[] = ['ads:backfill-adsets', ['brand' => (string) $this->brand->slug, '--since' => $since]];
         }
         if ($wants('creatives')) {
             if (in_array('meta', $connected, true)) {

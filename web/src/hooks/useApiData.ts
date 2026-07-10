@@ -302,7 +302,7 @@ export function useBrandProducts(slug: string | undefined, period: string, searc
 
 export interface AuditFinding {
   id: string;
-  area: 'ads' | 'inventory' | 'data';
+  area: 'data' | 'revenue' | 'tracking' | 'ads' | 'products' | 'inventory';
   severity: 'critical' | 'warn' | 'info' | 'good';
   title: string;
   detail: string;

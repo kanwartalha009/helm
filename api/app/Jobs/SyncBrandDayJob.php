@@ -16,6 +16,7 @@ use App\Platforms\Support\PlatformRateLimitedException;
 use App\Platforms\Support\SyncFailureClassifier;
 use App\Platforms\Support\Throttle;
 use App\Services\Currency\FxService;
+use App\Services\Sync\AdSetSync;
 use App\Services\Sync\CampaignSync;
 use Carbon\CarbonImmutable;
 use Illuminate\Bus\Queueable;
@@ -76,7 +77,7 @@ class SyncBrandDayJob implements ShouldQueue
         $this->onQueue($platformConnection->platform === 'shopify' ? 'shopify-sync' : 'ads-sync');
     }
 
-    public function handle(PlatformRegistry $registry, FxService $fx, CampaignSync $campaignSync, RevenueFetcher $revenue): void
+    public function handle(PlatformRegistry $registry, FxService $fx, CampaignSync $campaignSync, AdSetSync $adSetSync, RevenueFetcher $revenue): void
     {
         // Two paths in:
         //   - $logId set      → controller/command already wrote a `queued`
@@ -163,6 +164,12 @@ class SyncBrandDayJob implements ShouldQueue
             // — syncDay guards the platform and swallows its own errors, so it can
             // never fail the day sync that has already succeeded above.
             $campaignSync->syncDay($this->platformConnection, $this->date);
+
+            // Ad-set / ad-group / asset-group level rows for the same day (spec §4
+            // Phase 3c) — feeds the under-performer drill-down. Same from=to=date
+            // range as the campaign pull; best-effort + self-guarded to the three ad
+            // platforms, so it never affects the day sync that already succeeded.
+            $adSetSync->syncRange($this->platformConnection, $this->date, $this->date);
 
             // Meta audience-segment spend (ASC new/engaged/existing/unknown) for
             // the dashboard's Audience view. Meta-only + best-effort (self-guards

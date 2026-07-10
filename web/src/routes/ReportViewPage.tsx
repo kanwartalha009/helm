@@ -9,6 +9,8 @@ import { WeeklyReportDocument } from '@/components/reports/WeeklyReportDocument'
 import { CreativeReportDocument } from '@/components/reports/CreativeReportDocument';
 import { AdsAuditReportDocument } from '@/components/reports/AdsAuditReportDocument';
 import { useCreateShare, useGenerateNarrative, useReport, useSaveNarrative } from '@/hooks/useReports';
+import { useBrandDetail } from '@/hooks/useApiData';
+import { adPlatformsOf } from '@/components/ads/AdPlatformToggle';
 import { useTriggerSync } from '@/hooks/useBrands';
 import { toast } from '@/stores/toastStore';
 import type { AdsAuditPlatformFilter, NarrativeBlocksShape, ReportFiltersInput, ReportWindowOption } from '@/types/reports';
@@ -24,6 +26,8 @@ import type { AdsAuditPlatformFilter, NarrativeBlocksShape, ReportFiltersInput, 
 
 type PeriodChoice = ReportFiltersInput['period']; // includes 'custom'
 type PlatformChoice = 'all' | AdsAuditPlatformFilter;
+
+const PLATFORM_FILTER_LABEL: Record<string, string> = { meta: 'Meta', google: 'Google', tiktok: 'TikTok' };
 
 // Latest complete day — custom date inputs cap here so a partial "today"
 // never enters a client report.
@@ -58,6 +62,18 @@ export function ReportViewPage() {
   const isWeekly = type === 'weekly';
   const isAdsAudit = type === 'ads-audit';
   const hasFixedWindow = isMonthly || isWeekly;
+
+  // The brand's connected ad platforms drive the ads-audit filter options — a
+  // brand without TikTok never sees a TikTok chip. A deep-linked ?platform=
+  // for an unconnected platform falls back to All (honest empty is avoided).
+  const { data: brandDetail } = useBrandDetail(isAdsAudit ? slug : undefined);
+  const availablePlatforms = adPlatformsOf(brandDetail?.brand?.platforms);
+  useEffect(() => {
+    if (isAdsAudit && platform !== 'all' && brandDetail && !availablePlatforms.includes(platform)) {
+      setPlatform('all');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdsAudit, brandDetail, platform]);
 
   // A custom window only switches the query once BOTH dates are valid — until
   // then we keep serving the last concrete preset so the report never flashes
@@ -222,13 +238,14 @@ export function ReportViewPage() {
     <AppLayout title="Report">
       <div className="filter-bar mb-12" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         {!hasFixedWindow && periodControls}
-        {isAdsAudit && (
+        {/* Platform filter offers ONLY the brand's connected ad platforms —
+            a brand without TikTok never sees a TikTok option (Kanwar
+            2026-07-10). Hidden entirely when fewer than 2 are connected. */}
+        {isAdsAudit && availablePlatforms.length >= 2 && (
           <Segmented
             options={[
               { value: 'all', label: 'All platforms' },
-              { value: 'meta', label: 'Meta' },
-              { value: 'google', label: 'Google' },
-              { value: 'tiktok', label: 'TikTok' },
+              ...availablePlatforms.map((p) => ({ value: p, label: PLATFORM_FILTER_LABEL[p] ?? p })),
             ]}
             value={platform}
             onChange={(v) => setPlatform(v as PlatformChoice)}
