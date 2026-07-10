@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { formatMoney, formatRoas } from '@/lib/formatters';
+import { Chip } from '@/components/ui';
 import { REPORT_CSS } from './ReportDocument';
-import type { MonthlyChannelRow, MonthlyCustomerRow, MonthlyFunnelRow, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySeriesData } from '@/types/reports';
+import type { MonthlyChannelRow, MonthlyCustomerRow, MonthlyFunnelRow, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyPlatformSection, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySeriesData } from '@/types/reports';
 
 const DEFAULT_COMMENTARY =
   'Summarise the month for the store owner here — what moved, how it landed against targets, and the plan for next month. Editable before you send.';
@@ -129,8 +130,8 @@ export function MonthlyReportDocument({
       <div className="mrt-group"><span>Advertising</span></div>
       <SectionBlock num="05" title="Channel mix" sub="Meta, Google and TikTok side by side — spend, purchases, revenue, ROAS and CPA for the month." section={sections.channelMix} currency={currency} editable={editable} tag="All platforms" />
       <SectionBlock num="06" title="Revenue vs Meta spend by country" sub="All-channel revenue ÷ Meta spend per country — a blended efficiency, so it reads far higher than platform ROAS. Advantage+ spend with no country is shown separately as unattributed." section={sections.roasByCountry} currency={currency} editable={editable} tag="Meta spend" />
-      <SectionBlock num="07" title="Ad spend by placement" sub="Where the budget ran and how it performed — reach, ROAS and CPA by placement." section={sections.placement} currency={currency} editable={editable} tag="Meta only" />
-      <SectionBlock num="08" title="Ad spend by gender" sub="Spend, reach and ROAS by gender." section={sections.gender} currency={currency} editable={editable} tag="Meta only" />
+      <PlatformSectionBlock num="07" title="Ad spend by placement" sub="Where the budget ran and how it performed — reach, ROAS and CPA by placement." section={sections.placement} currency={currency} kind="placement" />
+      <PlatformSectionBlock num="08" title="Ad spend by gender" sub="Spend, reach and ROAS by gender." section={sections.gender} currency={currency} kind="gender" />
       <SectionBlock num="09" title="Ad spend by landing page × best sellers" sub="Is the ad budget behind the winners?" section={sections.landingSellers} currency={currency} editable={editable} foot="Meta spend is reported in the ad account's native currency (the product-level pull carries no fx rate); revenue follows the report currency, so treat the ROAS as approximate when the two differ." />
 
       <div className="mrt-group"><span>Customers</span></div>
@@ -194,6 +195,81 @@ function SectionBlock({ num, title, sub, section, currency, tag, foot, editable 
         <Ribbon status={section.status} note={section.note} />
       )}
       {section.status === 'ready' && foot && <div className="rpt-cap">{foot}</div>}
+    </section>
+  );
+}
+
+const MRT_PLATFORM_LABEL: Record<string, string> = {
+  meta: 'Meta',
+  google: 'Google Ads',
+  tiktok: 'TikTok',
+};
+
+// Gender / placement — one row set per platform (2026-07-10 shape change).
+// More than one platform → Chip toggles switch which platform's rows show;
+// exactly one → a muted platform label instead of toggles. Row rendering is
+// unchanged (the shared gender/placement tables).
+function PlatformSectionBlock({
+  num,
+  title,
+  sub,
+  section,
+  currency,
+  kind,
+}: {
+  num: string;
+  title: string;
+  sub: string;
+  section: MonthlyPlatformSection<MonthlyGenderRow> | MonthlyPlatformSection<MonthlyPlacementRow>;
+  currency: string;
+  kind: 'gender' | 'placement';
+}) {
+  const platforms = section.status === 'ok' ? section.platforms : [];
+  const [selected, setSelected] = useState<string | null>(null);
+  const activeKey = selected && platforms.some((p) => p.platform === selected) ? selected : platforms[0]?.platform ?? null;
+  const active = platforms.find((p) => p.platform === activeKey) ?? null;
+
+  return (
+    <section className="rpt-sec">
+      <div className="rpt-sec-head">
+        <span className="rpt-sec-num">{num}</span>
+        <h2>{title}</h2>
+        {platforms.length === 1 && (
+          <span className="mrt-plat-tag">{MRT_PLATFORM_LABEL[platforms[0].platform] ?? platforms[0].platform}</span>
+        )}
+      </div>
+      <div className="rpt-sec-sub">{sub}</div>
+      {platforms.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+          {platforms.map((p) => (
+            <Chip
+              key={p.platform}
+              active={p.platform === activeKey}
+              role="button"
+              tabIndex={0}
+              style={{ cursor: 'pointer' }}
+              onClick={() => setSelected(p.platform)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSelected(p.platform);
+                }
+              }}
+            >
+              {MRT_PLATFORM_LABEL[p.platform] ?? p.platform}
+            </Chip>
+          ))}
+        </div>
+      )}
+      {section.status === 'ok' && active ? (
+        kind === 'gender' ? (
+          <GenderTable rows={active.rows as MonthlyGenderRow[]} currency={currency} />
+        ) : (
+          <PlacementTable rows={active.rows as MonthlyPlacementRow[]} currency={currency} />
+        )
+      ) : (
+        <Ribbon status="no_data" note={section.note} />
+      )}
     </section>
   );
 }

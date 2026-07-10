@@ -23,18 +23,43 @@ export function useReportTypes() {
   });
 }
 
+// Serialise the filters into query params — optional fields (custom window,
+// month/week pickers, ads-audit platform) are only sent when set, so default
+// URLs stay clean and the server defaults apply.
+function filterParams(filters: ReportFiltersInput): Record<string, string> {
+  const params: Record<string, string> = { period: filters.period, compare: filters.compare };
+  if (filters.from) params.from = filters.from;
+  if (filters.to) params.to = filters.to;
+  if (filters.month) params.month = filters.month;
+  if (filters.week) params.week = filters.week;
+  if (filters.platform) params.platform = filters.platform;
+  return params;
+}
+
+function filterKey(filters: ReportFiltersInput): (string | null)[] {
+  return [
+    filters.period,
+    filters.compare,
+    filters.from ?? null,
+    filters.to ?? null,
+    filters.month ?? null,
+    filters.week ?? null,
+    filters.platform ?? null,
+  ];
+}
+
 export function useReport(
   slug: string | undefined,
   type: string | undefined,
   filters: ReportFiltersInput,
 ) {
   return useQuery({
-    queryKey: ['report', slug, type, filters.period, filters.compare],
+    queryKey: ['report', slug, type, ...filterKey(filters)],
     enabled: !!slug && !!type,
     queryFn: async () => {
       const { data } = await api.get<AnyReportData>(
         `/brands/${slug}/reports/${type}`,
-        { params: { period: filters.period, compare: filters.compare } },
+        { params: filterParams(filters) },
       );
       return data;
     },

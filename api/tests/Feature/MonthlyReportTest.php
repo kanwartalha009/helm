@@ -76,12 +76,12 @@ class MonthlyReportTest extends TestCase
         ]);
     }
 
-    /** Seed one meta_breakdown_daily row (the stored breakdown pull). */
-    private function seedBreakdown(int $brandId, string $date, string $type, string $segment, float $spend, float $value, int $impressions, int $clicks, float $fx = 1.0): void
+    /** Seed one meta_breakdown_daily row (the stored breakdown pull, any platform). */
+    private function seedBreakdown(int $brandId, string $date, string $type, string $segment, float $spend, float $value, int $impressions, int $clicks, float $fx = 1.0, string $platform = 'meta'): void
     {
         DB::table('meta_breakdown_daily')->insert([
             'brand_id'         => $brandId,
-            'platform'         => 'meta',
+            'platform'         => $platform,
             'date'             => $date,
             'breakdown_type'   => $type,
             'segment_key'      => $segment,
@@ -169,9 +169,13 @@ class MonthlyReportTest extends TestCase
         $this->assertSame(0, $res->json('freshness.staleDays'));
         $this->assertSame($monthEnd->toDateString(), $res->json('freshness.windowEnd'));
 
-        // Gender section from the stored age_gender rows, folded onto gender.
-        $this->assertSame('ready', $res->json('sections.gender.status'));
-        $gender = collect($res->json('sections.gender.metrics'));
+        // Gender section from the stored age_gender rows, folded onto gender —
+        // per-platform shape: only Meta was seeded, so exactly one entry.
+        $this->assertSame('ok', $res->json('sections.gender.status'));
+        $genderPlatforms = $res->json('sections.gender.platforms');
+        $this->assertCount(1, $genderPlatforms);
+        $this->assertSame('meta', $genderPlatforms[0]['platform']);
+        $gender = collect($genderPlatforms[0]['rows']);
         $this->assertSame('Female', $gender[0]['label']); // ranked by cost
         $this->assertEquals(100.0, $gender[0]['cost']);
         $this->assertEquals(4.0, $gender[0]['roas']);
@@ -180,9 +184,10 @@ class MonthlyReportTest extends TestCase
         $this->assertSame('Male', $gender[1]['label']);
         $this->assertNull($gender[0]['reach']); // reach not captured → null, not 0
 
-        // Placement section from the stored placement rows, prettified label.
-        $this->assertSame('ready', $res->json('sections.placement.status'));
-        $placement = $res->json('sections.placement.placement.0');
+        // Placement section (Meta-only, same wrapped shape), prettified label.
+        $this->assertSame('ok', $res->json('sections.placement.status'));
+        $this->assertSame('meta', $res->json('sections.placement.platforms.0.platform'));
+        $placement = $res->json('sections.placement.platforms.0.rows.0');
         $this->assertSame('IG · Feed', $placement['label']);
         $this->assertEquals(120.0, $placement['cost']);
         $this->assertEquals(4.0, $placement['roas']);
@@ -220,9 +225,84 @@ class MonthlyReportTest extends TestCase
         $res = $this->getJson("/api/brands/{$brand->slug}/reports/monthly?currency=USD")->assertOk();
 
         $this->assertSame('USD', $res->json('currency'));
-        $this->assertSame('ready', $res->json('sections.gender.status'));
-        $this->assertEquals(125.0, $res->json('sections.gender.metrics.0.cost'));
-        $this->assertEquals(500.0, $res->json('sections.gender.metrics.0.roas') * 125.0); // revenue 400 × 1.25
+        $this->assertSame('ok', $res->json('sections.gender.status'));
+        $this->assertEquals(125.0, $res->json('sections.gender.platforms.0.rows.0.cost'));
+        $this->assertEquals(500.0, $res->json('sections.gender.platforms.0.rows.0.roas') * 125.0); // revenue 400 × 1.25
+    }
+
+    public function test_gender_section_lists_each_platform_with_age_gender_rows(): void
+    {
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+
+        $monthStart = $this->monthStart();
+
+        // Meta uses "AGE · gender" keys; TikTok lands bare upper-case values.
+        // Both fold through the same case-insensitive genderOf.
+        $this->seedBreakdown($brand->id, $monthStart->addDays(3)->toDateString(), 'age_gender', '25-34 · female', 100, 400, 10000, 200);
+        $this->seedBreakdown($brand->id, $monthStart->addDays(3)->toDateString(), 'age_gender', 'FEMALE', 80, 240, 8000, 160, platform: 'tiktok');
+        $this->seedBreakdown($brand->id, $monthStart->addDays(4)->toDateString(), 'age_gender', 'MALE', 20, 20, 2000, 20, platform: 'tiktok');
+        $this->seedBreakdown($brand->id, $monthStart->addDays(4)->toDateString(), 'age_gender', 'NONE', 10, 0, 1000, 5, platform: 'tiktok');
+
+        Sanctum::actingAs($user);
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/monthly")->assertOk();
+
+        $this->assertSame('ok', $res->json('sections.gender.status'));
+        $platforms = collect($res->json('sections.gender.platforms'))->keyBy('platform');
+        $this->assertCount(2, $platforms);
+        $this->assertArrayHasKey('meta', $platforms->all());
+        $this->assertArrayHasKey('tiktok', $platforms->all());
+
+        // TikTok rows fold onto the same gender axis: Female first (by cost),
+        // then Male, and 'NONE' lands in the unknown bucket.
+        $tiktok = collect($platforms['tiktok']['rows']);
+        $this->assertSame(['Female', 'Male', 'Unknown'], $tiktok->pluck('label')->all());
+        $this->assertEquals(80.0, $tiktok[0]['cost']);
+        $this->assertEquals(3.0, $tiktok[0]['roas']);
+        $this->assertEqualsWithDelta(0.7273, $tiktok[0]['share'], 0.001); // 80 / 110
+
+        // Meta's row shape is unchanged by the wrapping.
+        $this->assertEquals(100.0, $platforms['meta']['rows'][0]['cost']);
+        $this->assertSame('Female', $platforms['meta']['rows'][0]['label']);
+    }
+
+    public function test_month_selector_shifts_the_report_month_and_lists_available_months(): void
+    {
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+
+        $defaultStart = $this->monthStart();          // last complete month
+        $olderStart   = $defaultStart->subMonth();    // the month before it
+        $olderEnd     = $olderStart->endOfMonth();
+
+        // Rows in BOTH months; the older month carries distinct revenue so the
+        // selection is visible in the KPIs. Its MoM month (older-1) is empty →
+        // previous null, never 0.
+        $this->seedDaily($brand->id, 'shopify', $defaultStart->addDays(2)->toDateString(), ['total_sales' => 900, 'refunds_amount' => 0, 'orders' => 9]);
+        $this->seedDaily($brand->id, 'shopify', $olderStart->addDays(2)->toDateString(), ['total_sales' => 300, 'refunds_amount' => 30, 'orders' => 3]);
+
+        Sanctum::actingAs($user);
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/monthly?month={$olderStart->format('Y-m')}")
+            ->assertOk()
+            ->assertJsonPath('month.start', $olderStart->toDateString())
+            ->assertJsonPath('month.end', $olderEnd->toDateString());
+
+        // KPIs are for the SELECTED month; the MoM comparison shifts with it —
+        // the month before the selection is unsynced, so no delta is invented.
+        $this->assertEquals(330.0, $res->json('overall.revenue.value'));
+        $this->assertNull($res->json('overall.revenue.deltaPct'));
+
+        // Picker lists every complete month down to the earliest synced row,
+        // most recent first — both seeded months appear.
+        $keys = collect($res->json('availableMonths'))->pluck('key')->all();
+        $this->assertSame([$defaultStart->format('Y-m'), $olderStart->format('Y-m')], $keys);
+        $this->assertSame($olderStart->isoFormat('MMMM YYYY'), $res->json('availableMonths.1.label'));
+
+        // An incomplete month (the current one) is refused → default month.
+        $current = CarbonImmutable::now(self::TZ)->format('Y-m');
+        $this->getJson("/api/brands/{$brand->slug}/reports/monthly?month={$current}")
+            ->assertOk()
+            ->assertJsonPath('month.start', $defaultStart->toDateString());
     }
 
     public function test_empty_brand_degrades_cleanly_with_a_closed_freshness_gate(): void

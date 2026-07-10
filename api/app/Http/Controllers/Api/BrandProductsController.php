@@ -7,6 +7,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Brand;
 use App\Models\CommerceDailyMetric;
+use App\Models\InventorySnapshot;
+use App\Services\Rules\ProductFlags;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,6 +25,8 @@ class BrandProductsController extends Controller
 {
     private const MAX_ROWS = 100;
 
+    public function __construct(private readonly ProductFlags $flags) {}
+
     public function index(Request $request, Brand $brand): JsonResponse
     {
         $this->authorize('view', $brand);
@@ -30,6 +34,7 @@ class BrandProductsController extends Controller
         $data = $request->validate([
             'period' => ['nullable', 'in:last7,last30,last90,mtd'],
             'search' => ['nullable', 'string', 'max:120'],
+            'sort'   => ['nullable', 'in:revenue,units,delta,refunds,cover'],
         ]);
 
         $tz        = $brand->timezone ?: 'UTC';
@@ -72,16 +77,23 @@ class BrandProductsController extends Controller
 
         $totalRevenue = (float) $current->sum('revenue');
 
-        $rows = $current->map(function ($r) use ($prior, $totalRevenue): array {
+        // One rules engine drives these flags AND the audit cards + reports —
+        // computed over the whole window so ABC grading sees the full catalog.
+        $flagMap = $this->flags->forBrand($brand->id, $start, $end);
+
+        $rows = $current->map(function ($r) use ($prior, $totalRevenue, $flagMap): array {
+            $key     = (string) $r->dimension_key;
             $revenue = round((float) $r->revenue, 2);
             $refunds = round((float) $r->refunds, 2);
-            $prevRev = $prior->has($r->dimension_key) ? round((float) $prior[$r->dimension_key]->revenue, 2) : null;
+            $orders  = (int) $r->orders;
+            $prevRev = $prior->has($key) ? round((float) $prior[$key]->revenue, 2) : null;
+            $f       = $flagMap[$key] ?? null;
 
             return [
-                'key'        => (string) $r->dimension_key,
-                'title'      => (string) ($r->label ?: $r->dimension_key),
+                'key'        => $key,
+                'title'      => (string) ($r->label ?: $key),
                 'revenue'    => $revenue,
-                'orders'     => (int) $r->orders,
+                'orders'     => $orders,
                 'units'      => (int) $r->units,
                 'refunds'    => $refunds,
                 // Money-based refund rate: refunded amount as % of revenue.
@@ -89,14 +101,36 @@ class BrandProductsController extends Controller
                 'sharePct'   => $totalRevenue > 0 ? round($revenue / $totalRevenue * 100, 1) : null,
                 'prevRevenue' => $prevRev,
                 'deltaPct'   => ($prevRev !== null && $prevRev > 0) ? round(($revenue - $prevRev) / $prevRev * 100, 1) : null,
+                // Phase 1 additions (additive) — merged from ProductFlags by key.
+                'aov'        => $orders > 0 ? round($revenue / $orders, 2) : null,
+                'abc'        => $f['abc'] ?? null,
+                'coverDays'  => $f['coverDays'] ?? null,
+                'sellThroughPct' => $f['sellThroughPct'] ?? null,
+                'flags'      => $f['flags'] ?? [],
             ];
         })->all();
 
-        // Freshness: when was the product dimension last pulled?
+        // Sort the displayed rows (the top-100 selection stays by revenue). Cover
+        // and delta sort ascending (lowest cover / steepest drop first, nulls last).
+        $sort = $data['sort'] ?? 'revenue';
+        usort($rows, static fn (array $a, array $b): int => match ($sort) {
+            'units'   => $b['units'] <=> $a['units'],
+            'refunds' => ($b['refundRatePct'] ?? -1) <=> ($a['refundRatePct'] ?? -1),
+            'delta'   => ($a['deltaPct'] ?? 0) <=> ($b['deltaPct'] ?? 0),
+            'cover'   => ($a['coverDays'] ?? PHP_INT_MAX) <=> ($b['coverDays'] ?? PHP_INT_MAX),
+            default   => $b['revenue'] <=> $a['revenue'],
+        });
+
+        // Freshness: when was the product dimension last pulled + the stock snapshot.
         $lastPulled = CommerceDailyMetric::query()
             ->where('brand_id', $brand->id)
             ->where('dimension_type', 'product')
             ->max('pulled_at');
+
+        $snapshotOn = InventorySnapshot::query()
+            ->where('brand_id', $brand->id)
+            ->where('dimension_type', 'product')
+            ->max('captured_on');
 
         return response()->json([
             'currency'    => $brand->base_currency,
@@ -106,6 +140,7 @@ class BrandProductsController extends Controller
             'totalRevenue' => round($totalRevenue, 2),
             'hasData'     => $rows !== [],
             'lastPulledAt' => $lastPulled ? CarbonImmutable::parse((string) $lastPulled)->toIso8601String() : null,
+            'inventorySnapshotAt' => $snapshotOn ? CarbonImmutable::parse((string) $snapshotOn)->toDateString() : null,
         ]);
     }
 }

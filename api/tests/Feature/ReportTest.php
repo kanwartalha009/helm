@@ -268,6 +268,75 @@ class ReportTest extends TestCase
 
         $this->assertSame(1, $out['deadCount']);
         $this->assertSame(50, $out['deadUnits']);
+
+        // Median units_sold {0, 5, 60} = 5 → threshold floor(0.5) = 0: the
+        // brand-relative rule degrades to the old zero-sales rule here.
+        $this->assertSame(0, $out['deadThresholdUnits']);
+        $this->assertEquals(5.0, $out['medianUnits']);
+    }
+
+    /** Seed one product inventory snapshot row. */
+    private function seedSnapshot(int $brandId, string $key, int $ending, int $sold): void
+    {
+        (new InventorySnapshot())->forceFill([
+            'brand_id'        => $brandId,
+            'captured_on'     => now()->toDateString(),
+            'dimension_type'  => 'product',
+            'dimension_key'   => $key,
+            'dimension_label' => $key,
+            'ending_units'    => $ending,
+            'units_sold'      => $sold,
+            'window_days'     => 90,
+            'pulled_at'       => now(),
+        ])->save();
+    }
+
+    public function test_dead_threshold_scales_with_the_brand_median(): void
+    {
+        $brand = Brand::factory()->create(['timezone' => 'Europe/Madrid']);
+
+        // units_sold {1, 10, 10, 30, 40} → median 10 → threshold floor(1.0) = 1:
+        // the 1-unit seller is dead FOR THIS BRAND even though it isn't zero.
+        $this->seedSnapshot($brand->id, 'barely-selling-ring', 50, 1);
+        $this->seedSnapshot($brand->id, 'steady-necklace', 10, 10);     // 90d cover → healthy
+        $this->seedSnapshot($brand->id, 'mover-bracelet', 20, 30);      // 60d cover → healthy
+        $this->seedSnapshot($brand->id, 'steady-earring', 15, 10);      // 135d cover → healthy
+        $this->seedSnapshot($brand->id, 'fast-pendant', 40, 40);        // 90d cover → healthy
+
+        $out = app(DeadInventory::class)->forDimension($brand->id, 'product');
+
+        $this->assertNotNull($out);
+        $this->assertSame(1, $out['deadThresholdUnits']);
+        $this->assertEquals(10.0, $out['medianUnits']);
+
+        $byKey = collect($out['rows'])->keyBy('key');
+        $this->assertSame('dead', $byKey['barely-selling-ring']['status']);
+        $this->assertSame(1, $out['deadCount']);
+        $this->assertSame(50, $out['deadUnits']);
+        $this->assertSame(1, $out['flaggedItems']); // the healthy four are excluded
+    }
+
+    public function test_dead_threshold_floors_to_zero_for_low_velocity_brands(): void
+    {
+        $brand = Brand::factory()->create(['timezone' => 'Europe/Madrid']);
+
+        // units_sold {0, 4, 6} → median 4 → threshold floor(0.4) = 0: only the
+        // zero-seller is dead (identical to the old rule below median 10).
+        $this->seedSnapshot($brand->id, 'dusty-ring', 30, 0);
+        $this->seedSnapshot($brand->id, 'slow-but-alive', 5, 4);   // ~113d cover → healthy
+        $this->seedSnapshot($brand->id, 'ticking-over', 10, 6);    // 150d cover → healthy
+
+        $out = app(DeadInventory::class)->forDimension($brand->id, 'product');
+
+        $this->assertNotNull($out);
+        $this->assertSame(0, $out['deadThresholdUnits']);
+        $this->assertEquals(4.0, $out['medianUnits']);
+
+        $byKey = collect($out['rows'])->keyBy('key');
+        $this->assertSame('dead', $byKey['dusty-ring']['status']);
+        $this->assertArrayNotHasKey('slow-but-alive', $byKey->all());
+        $this->assertSame(1, $out['deadCount']);
+        $this->assertSame(30, $out['deadUnits']);
     }
 
     public function test_total_revenue_adds_refunds_back(): void

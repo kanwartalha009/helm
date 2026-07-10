@@ -81,15 +81,24 @@ export interface DeadInventorySection {
   deadCount: number;
   deadUnits: number;
   flaggedItems: number;
+  // "Dead" = sold ≤ deadThresholdUnits units in the snapshot window (10% of
+  // this brand's median). Optional so a cached pre-migration payload never
+  // renders "undefined units".
+  deadThresholdUnits?: number;
+  medianUnits?: number | null;
 }
 
+// byCollection was removed server-side (2026-07-10) — the block is byProduct only.
 export interface DeadInventoryData {
   byProduct: DeadInventorySection | null;
-  byCollection: DeadInventorySection | null;
 }
 
-// Campaign-level ads audit (slice 2.2 / 2.4) — Meta + Google.
+// Campaign-level ads audit (slice 2.2 / 2.4) — Meta + Google + TikTok.
 export type AdVerdict = 'dead' | 'scaling_loss' | 'weak' | 'winner' | 'steady' | 'minor';
+
+// Verdict confidence: 'early' = under $150 of spend in the window — direction
+// is indicative only, so the UI flags it and never over-claims.
+export type AdConfidence = 'solid' | 'early';
 
 export interface AdAuditKpi {
   value: number | null;
@@ -107,6 +116,14 @@ export interface AdCampaignRow {
   spendDelta: number | null;
   verdict: AdVerdict;
   action: string;
+  confidence?: AdConfidence;
+}
+
+export interface AdAuditAction {
+  kind: 'stop' | 'fix' | 'scale';
+  title: string;
+  body: string;
+  confidence?: AdConfidence;
 }
 
 export interface AdAuditSection {
@@ -115,7 +132,10 @@ export interface AdAuditSection {
   waste: { amount: number; sharePct: number | null; count: number };
   campaigns: AdCampaignRow[];
   totalCampaigns: number;
-  actions: { kind: 'stop' | 'fix' | 'scale'; title: string; body: string }[];
+  actions: AdAuditAction[];
+  // How many days of data the verdicts read — optional so cached
+  // pre-migration payloads stay renderable.
+  windowDays?: number;
 }
 
 // Analyst narrative + action plan — written by the LLM layer (slice 2.3) and
@@ -316,6 +336,15 @@ export interface MonthlyChannelRow {
   share: number | null;
 }
 
+// Gender / placement (2026-07-10 shape change): the section now carries one
+// row set PER PLATFORM (Meta today, TikTok when its breakdown sync lands).
+// Row shape is unchanged — the platforms wrapper is the only difference.
+export interface MonthlyPlatformSection<TRow> {
+  status: 'ok' | 'no_data';
+  platforms: { platform: string; rows: TRow[] }[];
+  note?: string;
+}
+
 export interface MonthlyReportSection {
   status: MonthlySectionStatus;
   data?: MonthlySeriesData;          // month-over-month heat table (country/category/product/market)
@@ -336,11 +365,20 @@ export interface MonthlyKpi {
   deltaAbs: number | null;
 }
 
+// A selectable report window (month / week pickers on the view page).
+export interface ReportWindowOption {
+  key: string; // 'YYYY-MM' for months, 'YYYY-MM-DD' (Monday) for weeks
+  label: string;
+}
+
 export interface MonthlyReportData {
   reportType: 'monthly';
   brand: { name: string; slug: string; baseCurrency: string; timezone: string };
   currency: string;
   month: { label: string; start: string; end: string };
+  // Selectable months, latest first — first entry is the default the server
+  // builds when no ?month= is passed.
+  availableMonths?: ReportWindowOption[];
   comparison: { mom: string; yoy: string };
   overall: {
     blendedRoas: MonthlyKpi;
@@ -354,10 +392,10 @@ export interface MonthlyReportData {
     categories: MonthlyReportSection;
     bestSellers: MonthlyReportSection;
     roasByCountry: MonthlyReportSection;
-    gender: MonthlyReportSection;
+    gender: MonthlyPlatformSection<MonthlyGenderRow>;
     market: MonthlyReportSection;
     channelMix: MonthlyReportSection;
-    placement: MonthlyReportSection;
+    placement: MonthlyPlatformSection<MonthlyPlacementRow>;
     landingSellers: MonthlyReportSection;
     newVsExisting: MonthlyReportSection;
     funnelCountry: MonthlyReportSection;
@@ -410,6 +448,7 @@ export interface WeeklyAction {
   title: string;
   body: string;
   platform: string;
+  confidence?: AdConfidence;
 }
 
 export interface WeeklyReportData {
@@ -419,6 +458,9 @@ export interface WeeklyReportData {
   brand: { name: string; slug: string; baseCurrency: string; timezone: string };
   currency: string;
   week: { label: string; start: string; end: string };
+  // Selectable complete weeks (Monday keys), latest first — first entry is the
+  // default the server builds when no ?week= is passed.
+  availableWeeks?: ReportWindowOption[];
   comparison: {
     previous: { start: string; end: string };
     lastYear: { start: string; end: string } | null;
@@ -525,12 +567,72 @@ export interface CreativeReportData {
   shared?: boolean;
 }
 
+// ── Ads audit report (platform-by-platform campaign audit) ──────────────────
+// One block per ad platform with campaign rows in the window; a platformFilter
+// narrows the build server-side (e.g. a Meta-only audit for a client email).
+export type AdsAuditPlatformFilter = 'meta' | 'google' | 'tiktok';
+
+/** ROAS KPI — ratio metrics compare by absolute × delta, not %. */
+export interface AdsAuditRoasKpi {
+  value: number | null;
+  previous: number | null;
+  deltaAbs: number | null;
+}
+
+export interface AdsAuditMover {
+  campaignId: string;
+  name: string;
+  spend: number;
+  prevSpend: number | null;
+  spendDeltaPct: number | null;
+  roas: number | null;
+  prevRoas: number | null;
+  verdict: AdVerdict;
+  confidence?: AdConfidence;
+}
+
+export interface AdsAuditPlatformBlock {
+  platform: string;
+  kpis: {
+    spend: AdAuditKpi;
+    conversionValue: AdAuditKpi;
+    roas: AdsAuditRoasKpi;
+    purchases: AdAuditKpi;
+    cpa: AdAuditKpi;
+  };
+  audit: AdAuditSection;
+  movers: AdsAuditMover[];
+}
+
+export interface AdsAuditReportData {
+  reportType: 'ads-audit';
+  brand: { name: string; slug: string; baseCurrency: string; timezone: string };
+  currency: string;
+  period: { label: string; start: string; end: string };
+  comparison: { label: string | null; start: string; end: string } | null;
+  platformFilter: AdsAuditPlatformFilter | null;
+  platforms: AdsAuditPlatformBlock[];
+  hasData: boolean;
+  freshness?: { upToDate: boolean; lastSynced: string | null; staleDays: number; windowEnd: string };
+  branding: ReportBranding;
+  content?: ReportContent | null;
+  shared?: boolean;
+}
+
 // The report pages accept any report type; they branch on `reportType`.
-export type AnyReportData = OverallPerformanceReportData | MonthlyReportData | WeeklyReportData | CreativeReportData;
+export type AnyReportData = OverallPerformanceReportData | MonthlyReportData | WeeklyReportData | CreativeReportData | AdsAuditReportData;
 
 export interface ReportFiltersInput {
-  period: 'last7' | 'last30' | 'mtd';
+  period: 'last7' | 'last30' | 'mtd' | 'custom';
   compare: 'previous' | 'last_year' | 'none';
+  // Custom window (period === 'custom') — only sent when BOTH are set.
+  from?: string; // YYYY-MM-DD
+  to?: string; // YYYY-MM-DD
+  // Fixed-window pickers — monthly / weekly reports.
+  month?: string; // YYYY-MM
+  week?: string; // YYYY-MM-DD (a Monday)
+  // Ads-audit platform narrowing — absent = all platforms.
+  platform?: AdsAuditPlatformFilter;
 }
 
 export const DEFAULT_BRANDING: ReportBranding = {

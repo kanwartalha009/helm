@@ -26,20 +26,22 @@ class NewReportTypesTest extends TestCase
 
     private const TZ = 'Europe/Madrid';
 
-    public function test_registry_lists_four_report_types(): void
+    public function test_registry_lists_five_report_types(): void
     {
         Sanctum::actingAs(User::factory()->create(['role' => 'master_admin']));
 
         $res  = $this->getJson('/api/reports')->assertOk();
         $keys = collect($res->json('reports'))->pluck('key')->all();
 
-        $this->assertCount(4, $keys);
+        $this->assertCount(5, $keys);
         $this->assertContains('weekly', $keys);
         $this->assertContains('creatives', $keys);
+        $this->assertContains('ads-audit', $keys);
 
         $labels = collect($res->json('reports'))->keyBy('key');
         $this->assertSame('Weekly performance', $labels['weekly']['label']);
         $this->assertSame('Creative performance', $labels['creatives']['label']);
+        $this->assertSame('Ads audit', $labels['ads-audit']['label']);
     }
 
     /** The last COMPLETE Mon–Sun ISO week in the brand's timezone. */
@@ -310,6 +312,47 @@ class NewReportTypesTest extends TestCase
         $scaleIds = collect($meta['scaleCandidates'])->pluck('id')->all();
         $this->assertSame(['s3'], $scaleIds);
         $this->assertEquals(1.2, $meta['scaleCandidates'][0]['platformMedian']);
+    }
+
+    public function test_weekly_week_selector_shifts_the_window_and_lists_available_weeks(): void
+    {
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = Brand::factory()->create(['base_currency' => 'EUR', 'timezone' => self::TZ, 'status' => 'active']);
+
+        $defaultStart  = $this->lastCompleteWeekStart();
+        $selectedStart = $defaultStart->subWeeks(2);
+
+        // Rows in the default week (120/day basis) and the selected older week
+        // (60/day) plus ITS previous week (30/day) so the WoW delta is relative
+        // to the SELECTED week.
+        $this->seedShopifyDay($brand->id, $defaultStart->toDateString(), 100, 20, 2);
+        $this->seedShopifyDay($brand->id, $selectedStart->toDateString(), 50, 10, 1);
+        $this->seedShopifyDay($brand->id, $selectedStart->subWeek()->toDateString(), 25, 5, 1);
+
+        Sanctum::actingAs($user);
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/weekly?week={$selectedStart->toDateString()}")
+            ->assertOk()
+            ->assertJsonPath('week.start', $selectedStart->toDateString())
+            ->assertJsonPath('week.end', $selectedStart->addDays(6)->toDateString());
+
+        // KPIs compare the SELECTED week against the one before it.
+        $this->assertEquals(60.0, $res->json('kpis.totalRevenue.value'));
+        $this->assertEquals(30.0, $res->json('kpis.totalRevenue.previous'));
+
+        // Picker: complete weeks back to the earliest synced row's week (4
+        // entries: default, -1, -2 [selected], -3 [its comparison]), most
+        // recent first.
+        $weeks = collect($res->json('availableWeeks'));
+        $this->assertCount(4, $weeks);
+        $this->assertSame($defaultStart->toDateString(), $weeks[0]['key']);
+        $this->assertSame($selectedStart->toDateString(), $weeks[2]['key']);
+        $this->assertNotSame('', (string) $weeks[0]['label']);
+
+        // An incomplete week (the current one) is refused → default window.
+        $currentMonday = $defaultStart->addWeek()->toDateString();
+        $this->getJson("/api/brands/{$brand->slug}/reports/weekly?week={$currentMonday}")
+            ->assertOk()
+            ->assertJsonPath('week.start', $defaultStart->toDateString());
     }
 
     public function test_both_reports_degrade_cleanly_on_an_empty_brand(): void

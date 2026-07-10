@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Reports\Support;
 
 use App\Models\AdCampaignDailyMetric;
+use Carbon\CarbonImmutable;
 
 /**
  * Turns ad_campaign_daily_metrics (slice 2.2 / 2.4) into a render-ready audit
@@ -27,6 +28,15 @@ final class AdAudit
     private const MIN_SPEND = 50.0;  // USD floor below which a campaign isn't worth a verdict
     private const SCALING   = 20.0;  // spend Δ% above which a weak campaign is "scaling the loss"
 
+    // Evidence floor for a CONFIDENT verdict (3 × MIN_SPEND). Below it a verdict
+    // still renders but is tagged 'early' — practitioners attach minimum-spend
+    // guards before acting on verdicts (Bïrch rule templates use spend > $50 as
+    // the validity floor; staged kill frameworks want ~2–3× target CPA spent
+    // before a confident kill — https://bir.ch/facebook-automated-rules,
+    // https://admanage.ai/blog/when-to-kill-a-facebook-ad). Additive only: no
+    // existing verdict threshold changes.
+    public const SOLID_SPEND = 150.0;
+
     public function forPlatform(
         int $brandId,
         string $platform,
@@ -41,6 +51,10 @@ final class AdAudit
         if ($cur === []) {
             return null;
         }
+
+        // How much evidence the window holds — short windows carry less spend,
+        // so their verdicts are tagged 'early' more often (see SOLID_SPEND).
+        $windowDays = (int) CarbonImmutable::parse($start)->diffInDays(CarbonImmutable::parse($end)) + 1;
         $prev = ($cStart !== null && $cEnd !== null) ? $this->aggregate($brandId, $platform, $cStart, $cEnd) : [];
 
         $disp = static fn (array $r): float => $usd ? $r['spend_usd'] : $r['spend_native'];
@@ -79,14 +93,18 @@ final class AdAudit
                 'spendDelta' => $spendDelta,
                 'verdict'    => $verdict,
                 'action'     => $this->action($verdict),
+                // Evidence tag: 'early' until the campaign has spent enough in
+                // THIS window (≥ SOLID_SPEND USD) for the verdict to be trusted.
+                'confidence' => $c['spend_usd'] < self::SOLID_SPEND ? 'early' : 'solid',
             ];
         }
 
         $topCampaigns = array_slice($campaigns, 0, $limit);
 
         return [
-            'platform' => $platform,
-            'kpis'     => $this->kpis($acc, $accP),
+            'platform'   => $platform,
+            'windowDays' => $windowDays,
+            'kpis'       => $this->kpis($acc, $accP),
             'waste'    => [
                 'amount'   => round($usd ? $wasteUsd : $this->nativeWaste($cur), 2),
                 'sharePct' => $acc['spend_usd'] > 0 ? round($wasteUsd / $acc['spend_usd'] * 100, 1) : null,
@@ -247,12 +265,18 @@ final class AdAudit
 
         $deadSpend = array_sum(array_map(static fn ($c) => $c['spend'], $dead));
 
+        // An action is only 'solid' when every campaign backing it cleared the
+        // SOLID_SPEND evidence floor; one under-evidenced campaign tags the
+        // whole action 'early' (accuracy over small windows).
+        $conf = static fn (array $group): string => array_filter($group, static fn ($c) => ($c['confidence'] ?? 'solid') === 'early') === [] ? 'solid' : 'early';
+
         $plan = [];
         if ($dead !== []) {
             $plan[] = [
                 'kind'  => 'stop',
                 'title' => 'Pause ' . count($dead) . ' losing campaign' . (count($dead) === 1 ? '' : 's'),
                 'body'  => 'Sub-1× ROAS — ' . round($deadSpend, 2) . ' in spend returning less than it costs.',
+                'confidence' => $conf($dead),
             ];
         }
         if ($scaling !== []) {
@@ -260,6 +284,7 @@ final class AdAudit
                 'kind'  => 'fix',
                 'title' => 'Cap ' . count($scaling) . ' scaling loss' . (count($scaling) === 1 ? '' : 'es'),
                 'body'  => 'Budget grew while ROAS stayed under target — cap before the loss compounds.',
+                'confidence' => $conf($scaling),
             ];
         }
         if ($winners !== []) {
@@ -267,6 +292,7 @@ final class AdAudit
                 'kind'  => 'scale',
                 'title' => 'Fund ' . count($winners) . ' winner' . (count($winners) === 1 ? '' : 's'),
                 'body'  => 'Running at 3×+ ROAS — the clearest place to put the freed budget.',
+                'confidence' => $conf($winners),
             ];
         }
 

@@ -69,10 +69,21 @@ final class MonthlyReport implements ReportType
         $tz  = $brand->timezone ?: 'UTC';
         $now = CarbonImmutable::now($tz);
 
-        // The report is inherently monthly: the "report month" is the last COMPLETE
-        // calendar month (today's month is partial and never sent to a client).
-        $monthEnd   = $now->startOfMonth()->subDay()->endOfDay();
-        $monthStart = $monthEnd->startOfMonth();
+        // The report is inherently monthly: the "report month" defaults to the
+        // last COMPLETE calendar month (today's month is partial and never sent
+        // to a client). A ?month=YYYY-MM selector overrides it — but only for a
+        // COMPLETE month (monthWindow returns null otherwise); every MoM/YoY
+        // comparison below derives from $monthStart, so they shift with it.
+        $defaultMonthStart = $now->startOfMonth()->subMonth();
+
+        $selected = $filters->monthWindow($tz);
+        if ($selected !== null) {
+            $monthStart = CarbonImmutable::parse($selected[0], $tz)->startOfDay();
+            $monthEnd   = CarbonImmutable::parse($selected[1], $tz)->endOfDay();
+        } else {
+            $monthEnd   = $now->startOfMonth()->subDay()->endOfDay();
+            $monthStart = $monthEnd->startOfMonth();
+        }
         $reportMonth = $monthStart->format('Y-m');
 
         // Trailing Y-m columns for the heatmaps, chronological, ending on the
@@ -116,6 +127,9 @@ final class MonthlyReport implements ReportType
                 'mom' => $momStart->isoFormat('MMMM YYYY'),
                 'yoy' => $yoyStart->isoFormat('MMMM YYYY'),
             ],
+            // Month picker: every COMPLETE month the brand has Shopify rows for
+            // (clamped to 12), most recent first — the SPA renders the selector.
+            'availableMonths' => $this->availableMonths($brand->id, $defaultMonthStart),
             // Headline KPIs — value + MoM previous + delta. Targets are editable
             // content (merged by the controller); the SPA reads value vs target.
             // New-customer ROAS + acquisition YoY await the customer-type probe.
@@ -147,6 +161,43 @@ final class MonthlyReport implements ReportType
             // public share page) gate a stale report behind a "sync first" wall.
             'freshness' => $this->freshness($brand->id, $monthEnd->toDateString()),
         ];
+    }
+
+    /**
+     * The selectable report months: complete calendar months (most recent
+     * first) where the brand has ANY Shopify daily_metrics rows, clamped to 12.
+     * Empty (never fabricated months) when nothing is synced. Fault-isolated —
+     * a failure here degrades the picker, not the report.
+     *
+     * @return array<int, array{key: string, label: string}>
+     */
+    private function availableMonths(int $brandId, CarbonImmutable $lastCompleteMonthStart): array
+    {
+        try {
+            $min = DailyMetric::query()
+                ->where('brand_id', $brandId)
+                ->where('platform', 'shopify')
+                ->min('date');
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'availableMonths', 'error' => $e->getMessage()]);
+
+            return [];
+        }
+
+        if ($min === null) {
+            return [];
+        }
+
+        // Compare on the 'Y-m' key, not instants — the brand-tz month start and
+        // the tz-less MIN(date) would otherwise disagree by a few hours.
+        $minKey = CarbonImmutable::parse((string) $min)->format('Y-m');
+
+        $out = [];
+        for ($m = $lastCompleteMonthStart; count($out) < 12 && $m->format('Y-m') >= $minKey; $m = $m->subMonth()) {
+            $out[] = ['key' => $m->format('Y-m'), 'label' => $m->isoFormat('MMMM YYYY')];
+        }
+
+        return $out;
     }
 
     /**
@@ -253,33 +304,51 @@ final class MonthlyReport implements ReportType
     }
 
     /**
-     * Ad spend by gender for the report month — the STORED
-     * meta_breakdown_daily[age_gender] rows folded onto the gender axis
-     * (mirrors the dashboard Audience fold), never a live Meta call: build()
-     * runs on every view including public shares, so it must stay read-only.
-     * Cost / clicks / CPC / CTR / CPM / share; money converts per row × the
-     * stored fx snapshot in USD mode. 'no_data' until the breakdown backfill
-     * has landed rows for the month.
+     * Ad spend by gender for the report month, PER PLATFORM — the STORED
+     * age_gender rows in meta_breakdown_daily (which carries a `platform`
+     * column since 2026_07_07_000001: Meta and TikTok both land there), folded
+     * onto the gender axis. Never a live API call: build() runs on every view
+     * including public shares, so it must stay read-only. Cost / clicks / CPC /
+     * CTR / CPM / share per platform; money converts per row × the stored fx
+     * snapshot in USD mode. A platform appears ONLY when it has rows in the
+     * window (missing ≠ zero); 'no_data' until any platform has rows.
      *
-     * @return array<string, mixed>
+     * @return array{status: string, platforms: array<int, array{platform: string, rows: array<int, array<string, mixed>>}>}
      */
     private function genderSection(int $brandId, string $start, string $end, bool $usd): array
     {
-        try {
-            $segments = $this->breakdownTotalsFromStore($brandId, 'age_gender', $start, $end, $usd);
-        } catch (Throwable $e) {
-            Log::warning('monthly_report.section_failed', ['dimension' => 'gender', 'error' => $e->getMessage()]);
-
-            return ['status' => 'no_data'];
+        $platforms = [];
+        foreach (['meta', 'tiktok'] as $platform) {
+            try {
+                $segments = $this->breakdownTotalsFromStore($brandId, 'age_gender', $start, $end, $usd, $platform);
+            } catch (Throwable $e) {
+                Log::warning('monthly_report.section_failed', ['dimension' => "gender.{$platform}", 'error' => $e->getMessage()]);
+                continue;
+            }
+            if ($segments === []) {
+                continue; // no rows for this platform in the window — absent, never €0
+            }
+            $platforms[] = ['platform' => $platform, 'rows' => $this->genderRows($segments)];
         }
 
-        if ($segments === []) {
-            return ['status' => 'no_data'];
-        }
+        return $platforms === []
+            ? ['status' => 'no_data', 'platforms' => []]
+            : ['status' => 'ok', 'platforms' => $platforms];
+    }
 
-        // Fold age × gender onto the gender axis. Age buckets are disjoint, so a
-        // person lands in exactly one age×gender cell; daily reach rows re-count
-        // repeat viewers, so the summed reach is an upper bound (freq approximate).
+    /**
+     * Fold one platform's age × gender segments onto the gender axis and build
+     * the metric rows (row shape unchanged from the old single-platform
+     * section). Age buckets are disjoint, so a person lands in exactly one
+     * age×gender cell; daily reach rows re-count repeat viewers, so the summed
+     * reach is an upper bound (freq approximate). Segment keys the fold can't
+     * classify (genderOf) land in the 'unknown' bucket.
+     *
+     * @param array<int, array<string, mixed>> $segments
+     * @return array<int, array<string, mixed>>
+     */
+    private function genderRows(array $segments): array
+    {
         $folded = [];
         foreach ($segments as $s) {
             $g = $this->genderOf((string) $s['key']);
@@ -310,26 +379,27 @@ final class MonthlyReport implements ReportType
 
         usort($rows, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
 
-        return ['status' => 'ready', 'metrics' => $rows];
+        return $rows;
     }
 
     /**
      * Segment totals for one breakdown axis over [start, end] from the stored
-     * meta_breakdown_daily rows — the report's read-only replacement for the
-     * live fetchBreakdownTotals call. Money is summed per row × the stored fx
+     * meta_breakdown_daily rows (any platform — the table carries a `platform`
+     * column) — the report's read-only replacement for the live
+     * fetchBreakdownTotals call. Money is summed per row × the stored fx
      * snapshot in USD mode (same pattern as roasByCountry), so mixed-currency
      * days convert on the day's own rate. Reach is summed across days (upper
      * bound); rows with a zero reach column read as "not captured".
      *
      * @return array<int, array<string, mixed>>
      */
-    private function breakdownTotalsFromStore(int $brandId, string $breakdownType, string $start, string $end, bool $usd): array
+    private function breakdownTotalsFromStore(int $brandId, string $breakdownType, string $start, string $end, bool $usd, string $platform = 'meta'): array
     {
         $money = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
 
         $rows = MetaBreakdownDaily::query()
             ->where('brand_id', $brandId)
-            ->where('platform', 'meta')
+            ->where('platform', $platform)
             ->where('breakdown_type', $breakdownType)
             ->whereBetween('date', [$start, $end])
             ->groupBy('segment_key')
@@ -663,9 +733,11 @@ final class MonthlyReport implements ReportType
      * CPM / share; money converts per row × the stored fx snapshot in USD mode.
      * Summed daily reach is an upper bound so frequency is approximate; both
      * are NULL until the pull captures reach. 'no_data' until the breakdown
-     * backfill has landed rows for the month.
+     * backfill has landed rows for the month. Meta-only today, but the payload
+     * wraps rows in the same {status, platforms: [{platform, rows}]} shape as
+     * the gender section so the SPA renders both with one component.
      *
-     * @return array<string, mixed>
+     * @return array{status: string, platforms: array<int, array{platform: string, rows: array<int, array<string, mixed>>}>}
      */
     private function placementSection(int $brandId, string $start, string $end, bool $usd): array
     {
@@ -674,11 +746,11 @@ final class MonthlyReport implements ReportType
         } catch (Throwable $e) {
             Log::warning('monthly_report.section_failed', ['dimension' => 'placement', 'error' => $e->getMessage()]);
 
-            return ['status' => 'no_data'];
+            return ['status' => 'no_data', 'platforms' => []];
         }
 
         if ($segments === []) {
-            return ['status' => 'no_data'];
+            return ['status' => 'no_data', 'platforms' => []];
         }
 
         $total = 0.0;
@@ -695,7 +767,10 @@ final class MonthlyReport implements ReportType
 
         usort($rows, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
 
-        return ['status' => 'ready', 'placement' => array_slice($rows, 0, 10)];
+        return [
+            'status'    => 'ok',
+            'platforms' => [['platform' => 'meta', 'rows' => array_slice($rows, 0, 10)]],
+        ];
     }
 
     /**
@@ -960,11 +1035,17 @@ final class MonthlyReport implements ReportType
         return implode(' · ', $parts);
     }
 
-    /** Parse the gender axis out of a Meta "AGE · GENDER" segment key. */
+    /**
+     * Fold an age_gender segment key onto the gender axis. Case-insensitive
+     * substring match over the WHOLE key so it classifies both Meta's
+     * "25-34 · female" keys and TikTok's differently-formatted values
+     * ('MALE'/'FEMALE'/'NONE', possibly embedded). 'female' is checked before
+     * 'male' (the latter is a substring of the former); anything else —
+     * including 'unknown'/'NONE' and arbitrary strings — lands in 'unknown'.
+     */
     private function genderOf(string $seg): string
     {
-        $parts = array_map('trim', explode('·', $seg));
-        $g     = strtolower((string) end($parts));
+        $g = mb_strtolower($seg);
         if (str_contains($g, 'female')) {
             return 'female';
         }

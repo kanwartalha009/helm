@@ -1,6 +1,8 @@
 import { formatMoney, formatRoas } from '@/lib/formatters';
+import { Tag } from '@/components/ui';
 import { NarrativeBlocks } from './NarrativeBlocks';
 import type {
+  AdAuditAction,
   AdAuditSection as AdAuditSectionData,
   AdVerdict,
   CommerceRow,
@@ -104,8 +106,6 @@ export function ReportDocument({
     sections.push(<CollectionSection key="collection" num={nextNum()} section={data.byCategory} currency={currency} read={content?.collectionRead} />);
   if (data.deadInventory?.byProduct)
     sections.push(<DeadStockSection key="dead-product" num={nextNum()} noun="product" section={data.deadInventory.byProduct} />);
-  if (data.deadInventory?.byCollection)
-    sections.push(<DeadStockSection key="dead-collection" num={nextNum()} noun="collection" section={data.deadInventory.byCollection} />);
   adsAudit.forEach((a) =>
     sections.push(
       <AdsAuditSection
@@ -535,7 +535,7 @@ function DeadStockSection({
     <section className="rpt-sec">
       <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>Dead inventory by {noun}</h2></div>
       <div className="rpt-sec-sub">
-        {section.deadCount} {noun}{section.deadCount === 1 ? '' : 's'} with stock and no sales in the last {section.windowDays} days · {section.deadUnits.toLocaleString()} units tied up · snapshot {section.capturedOn}
+        {section.deadCount} {noun}{section.deadCount === 1 ? '' : 's'} flagged dead in the last {section.windowDays} days · {section.deadUnits.toLocaleString()} units tied up · snapshot {section.capturedOn}
       </div>
       <div className="rpt-tbl-wrap">
         <table className="rpt-tbl rpt-tbl-dim">
@@ -564,6 +564,12 @@ function DeadStockSection({
       {section.flaggedItems > section.rows.length && (
         <div className="rpt-cap">Showing the top {section.rows.length} of {section.flaggedItems} flagged {noun}s by units on hand.</div>
       )}
+      {section.deadThresholdUnits != null && (
+        <div className="rpt-cap">
+          Dead = {section.deadThresholdUnits === 0 ? 'zero units' : `≤${section.deadThresholdUnits} units`} sold in the
+          snapshot window — threshold is 10% of this brand's median ({section.medianUnits ?? '—'}).
+        </div>
+      )}
     </section>
   );
 }
@@ -582,6 +588,23 @@ function verdictTint(v: AdVerdict): string {
   if (v === 'scaling_loss' || v === 'weak') return 'row-wound';
   if (v === 'winner') return 'row-win';
   return '';
+}
+
+// Verdicts on thin data never over-claim (Kanwar): rows/actions flagged
+// 'early' carry an amber tag, and the caption spells out what that means.
+// Shared with the weekly + ads-audit documents.
+export function EarlySignalTag() {
+  return <Tag variant="warning" style={{ marginLeft: 8, fontSize: 10, verticalAlign: 'middle' }}>early signal</Tag>;
+}
+
+export function VerdictWindowCaption({ windowDays }: { windowDays?: number }) {
+  if (windowDays == null) return null;
+  return (
+    <div className="rpt-cap">
+      Verdicts read {windowDays} days of data. 'Early signal' = under $150 of spend — direction is indicative, verify
+      before acting.
+    </div>
+  );
 }
 
 function DeltaRatio({ value, prev }: { value: number | null; prev: number | null }) {
@@ -643,7 +666,10 @@ function AdsAuditSection({
               {audit.campaigns.map((c) => (
                 <tr key={c.id} className={verdictTint(c.verdict)}>
                   <td className="name"><div className="rpt-dim-label">{c.name}</div></td>
-                  <td>{VERDICT[c.verdict] ? <Badge tone={VERDICT[c.verdict].tone}>{VERDICT[c.verdict].label}</Badge> : '—'}</td>
+                  <td>
+                    {VERDICT[c.verdict] ? <Badge tone={VERDICT[c.verdict].tone}>{VERDICT[c.verdict].label}</Badge> : '—'}
+                    {c.confidence === 'early' && <EarlySignalTag />}
+                  </td>
                   <td className="r">{money(c.spend)}</td>
                   <td className="r">{roas(c.roas)}</td>
                   {hasComparison && <td className="r"><Delta pct={c.spendDelta} abs={null} kind="int" /></td>}
@@ -657,6 +683,7 @@ function AdsAuditSection({
       {audit.totalCampaigns > audit.campaigns.length && (
         <div className="rpt-cap">Showing the top {audit.campaigns.length} of {audit.totalCampaigns} campaigns by spend.</div>
       )}
+      <VerdictWindowCaption windowDays={audit.windowDays} />
       <SectionRead tag={`${platLabel} read`} text={read} />
     </section>
   );
@@ -668,7 +695,7 @@ function StrategySection({
   read,
 }: {
   num: string;
-  actions: { kind: 'stop' | 'fix' | 'scale'; title: string; body: string }[];
+  actions: AdAuditAction[];
   read?: string;
 }) {
   return (
@@ -680,7 +707,10 @@ function StrategySection({
           {actions.map((a, i) => (
             <div className={`rpt-act ${ACTION_META[a.kind]?.tone ?? 'hold'}`} key={i}>
               <div className="rpt-act-k">{ACTION_META[a.kind]?.label ?? a.kind}</div>
-              <div className="rpt-act-t"><b>{a.title}</b> — {a.body}</div>
+              <div className="rpt-act-t">
+                <b>{a.title}</b> — {a.body}
+                {a.confidence === 'early' && <EarlySignalTag />}
+              </div>
             </div>
           ))}
         </div>

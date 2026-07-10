@@ -20,6 +20,9 @@ final class ReportFilters
         public readonly ?string $to,      // Y-m-d, custom only
         public readonly string $compare,  // previous | last_year | none
         public readonly bool $usd,        // display currency: USD vs brand native
+        public readonly ?string $month = null,    // Y-m — monthly report month selector
+        public readonly ?string $week = null,     // Y-m-d Monday — weekly report week selector
+        public readonly ?string $platform = null, // meta | google | tiktok — platform-scoped reports
     ) {}
 
     /** @param array<string, mixed> $p query params */
@@ -29,13 +32,63 @@ final class ReportFilters
         $compare = in_array($p['compare'] ?? null, ['previous', 'last_year', 'none'], true) ? (string) $p['compare'] : 'previous';
         $ymd     = static fn ($v) => is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) ? $v : null;
 
+        // month must be a real 'YYYY-MM'; week must be a Y-m-d that lands on a
+        // Monday (anything else is a malformed selector → null, never a guess).
+        $month = ($m = $p['month'] ?? null) !== null && is_string($m) && preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $m) ? $m : null;
+        $week  = $ymd($p['week'] ?? null);
+        if ($week !== null && CarbonImmutable::parse($week)->dayOfWeekIso !== 1) {
+            $week = null;
+        }
+
         return new self(
             period:  $period,
             from:    $ymd($p['from'] ?? null),
             to:      $ymd($p['to'] ?? null),
             compare: $compare,
             usd:     strtoupper((string) ($p['currency'] ?? '')) === 'USD',
+            month:   $month,
+            week:    $week,
+            platform: in_array($p['platform'] ?? null, ['meta', 'google', 'tiktok'], true) ? (string) $p['platform'] : null,
         );
+    }
+
+    /**
+     * [first, last] day of the requested month — ONLY when that month is
+     * complete in the brand tz (last day ≤ yesterday), else null: a partial
+     * month is never sent to a client.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    public function monthWindow(string $tz): ?array
+    {
+        if ($this->month === null) {
+            return null;
+        }
+
+        $start     = CarbonImmutable::parse($this->month . '-01', $tz)->startOfDay();
+        $end       = $start->endOfMonth()->startOfDay();
+        $yesterday = CarbonImmutable::now($tz)->subDay()->startOfDay();
+
+        return $end->lessThanOrEqualTo($yesterday) ? [$start->toDateString(), $end->toDateString()] : null;
+    }
+
+    /**
+     * [monday, sunday] of the requested ISO week — ONLY when the week is
+     * complete in the brand tz (sunday ≤ yesterday), else null.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    public function weekWindow(string $tz): ?array
+    {
+        if ($this->week === null) {
+            return null;
+        }
+
+        $monday    = CarbonImmutable::parse($this->week, $tz)->startOfDay();
+        $sunday    = $monday->addDays(6);
+        $yesterday = CarbonImmutable::now($tz)->subDay()->startOfDay();
+
+        return $sunday->lessThanOrEqualTo($yesterday) ? [$monday->toDateString(), $sunday->toDateString()] : null;
     }
 
     /**

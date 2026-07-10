@@ -54,7 +54,16 @@ final class WeeklyReport implements ReportType
         // The last COMPLETE Mon–Sun ISO week: startOfWeek(Monday) is this week's
         // Monday (partial — never sent to a client), so step one week back. On a
         // Monday this correctly yields the week that ended yesterday (Sunday).
-        $weekStart = $now->startOfWeek(CarbonInterface::MONDAY)->subWeek()->startOfDay();
+        // A ?week=YYYY-MM-DD (Monday) selector overrides it, but only for a
+        // COMPLETE week (weekWindow returns null otherwise); the WoW and
+        // same-week-last-year comparisons derive from $weekStart, so they shift
+        // with the selection.
+        $defaultWeekStart = $now->startOfWeek(CarbonInterface::MONDAY)->subWeek()->startOfDay();
+
+        $selected  = $filters->weekWindow($tz);
+        $weekStart = $selected !== null
+            ? CarbonImmutable::parse($selected[0], $tz)->startOfDay()
+            : $defaultWeekStart;
         $weekEnd   = $weekStart->addDays(6);
         $start     = $weekStart->toDateString();
         $end       = $weekEnd->toDateString();
@@ -106,6 +115,9 @@ final class WeeklyReport implements ReportType
                 'previous' => ['start' => $prevStart, 'end' => $prevEnd],
                 'lastYear' => $hasLastYear ? ['start' => $lyStart, 'end' => $lyEnd] : null,
             ],
+            // Week picker: complete Mon–Sun weeks the brand has Shopify rows
+            // for (clamped to 8), most recent first. Fault-isolated.
+            'availableWeeks' => $this->safely('availableWeeks', fn () => $this->availableWeeks($brand->id, $defaultWeekStart), []),
             'kpis' => [
                 'totalRevenue' => $this->kpi('money', $cur['revenue'], $prev['revenue'], $ly['revenue'] ?? null),
                 'adSpend'      => $this->kpi('money', $cur['totalSpend'], $prev['totalSpend'], $ly['totalSpend'] ?? null),
@@ -124,8 +136,10 @@ final class WeeklyReport implements ReportType
             // overall-performance report — the SPA gates on it. On error, fail
             // CLOSED: gating a fresh report is annoying, un-gating a stale one
             // sends wrong numbers to a client.
+            // fail CLOSED — a freshness bug must never un-gate a stale report.
             'freshness' => $this->safely('freshness', fn () => $this->freshness($brand->id, $end), [
-                'upToDate' => false, // fail CLOSED — a freshness bug must never un-gate a stale report 'lastSynced' => null, 'staleDays' => 0, 'windowEnd' => $end,
+                'upToDate' => false, 'lastSynced' => null, 'staleDays' => 0, 'windowEnd' => $end,
+                'note'     => 'Freshness could not be verified — the report is held back until a sync confirms the data is current.',
             ]),
         ];
     }
@@ -149,6 +163,39 @@ final class WeeklyReport implements ReportType
 
             return $default;
         }
+    }
+
+    /**
+     * The selectable report weeks: complete Mon–Sun weeks (most recent first)
+     * where the brand has ANY Shopify daily_metrics rows, clamped to 8. Empty
+     * (never fabricated weeks) when nothing is synced.
+     *
+     * @return array<int, array{key: string, label: string}>
+     */
+    private function availableWeeks(int $brandId, CarbonImmutable $lastCompleteWeekStart): array
+    {
+        $min = DailyMetric::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'shopify')
+            ->min('date');
+
+        if ($min === null) {
+            return [];
+        }
+
+        // Compare on the date STRING — the brand-tz week start and the tz-less
+        // MIN(date) would otherwise disagree by a few hours.
+        $minMonday = CarbonImmutable::parse((string) $min)->startOfWeek(CarbonInterface::MONDAY)->toDateString();
+
+        $out = [];
+        for ($w = $lastCompleteWeekStart; count($out) < 8 && $w->toDateString() >= $minMonday; $w = $w->subWeek()) {
+            $out[] = [
+                'key'   => $w->toDateString(),
+                'label' => $w->isoFormat('ddd D') . ' – ' . $w->addDays(6)->isoFormat('ddd D MMM'),
+            ];
+        }
+
+        return $out;
     }
 
     /**

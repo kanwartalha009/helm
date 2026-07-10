@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { Button, Card, Segmented } from '@/components/ui';
@@ -7,29 +7,75 @@ import { ReportDocument } from '@/components/reports/ReportDocument';
 import { MonthlyReportDocument } from '@/components/reports/MonthlyReportDocument';
 import { WeeklyReportDocument } from '@/components/reports/WeeklyReportDocument';
 import { CreativeReportDocument } from '@/components/reports/CreativeReportDocument';
+import { AdsAuditReportDocument } from '@/components/reports/AdsAuditReportDocument';
 import { useCreateShare, useGenerateNarrative, useReport, useSaveNarrative } from '@/hooks/useReports';
 import { useTriggerSync } from '@/hooks/useBrands';
 import { toast } from '@/stores/toastStore';
-import type { NarrativeBlocksShape, ReportFiltersInput } from '@/types/reports';
+import type { AdsAuditPlatformFilter, NarrativeBlocksShape, ReportFiltersInput, ReportWindowOption } from '@/types/reports';
 
 /**
- * In-app report view: filters, the editable white-label document, and the two
- * delivery actions. Before the report renders, a freshness gate checks the data
- * is current for the selected window — a client should never receive stale
- * numbers, so when the latest synced day is behind we block on a fresh sync
- * (with a "show anyway" escape).
+ * In-app report view: filters, the editable white-label document, and the
+ * delivery action (share link — link sharing only, the Export PDF button was
+ * removed 2026-07-10). Before the report renders, a freshness gate checks the
+ * data is current for the selected window — a client should never receive
+ * stale numbers, so when the latest synced day is behind we block on a fresh
+ * sync (with a "show anyway" escape).
  */
+
+type PeriodChoice = ReportFiltersInput['period']; // includes 'custom'
+type PlatformChoice = 'all' | AdsAuditPlatformFilter;
+
+// Latest complete day — custom date inputs cap here so a partial "today"
+// never enters a client report.
+function yesterdayIso(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export function ReportViewPage() {
   const { slug, type } = useParams();
+  const [searchParams] = useSearchParams();
   const qc = useQueryClient();
-  const [period, setPeriod] = useState<ReportFiltersInput['period']>('last30');
+
+  const [period, setPeriod] = useState<PeriodChoice>('last30');
   const [compare, setCompare] = useState<ReportFiltersInput['compare']>('previous');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [month, setMonth] = useState<string | undefined>(undefined);
+  const [week, setWeek] = useState<string | undefined>(undefined);
+  // ?platform=meta deep link from the picker page seeds the ads-audit filter.
+  const urlPlatform = searchParams.get('platform');
+  const [platform, setPlatform] = useState<PlatformChoice>(
+    urlPlatform === 'meta' || urlPlatform === 'google' || urlPlatform === 'tiktok' ? urlPlatform : 'all',
+  );
   const [commentary, setCommentary] = useState('');
   const [nextSteps, setNextSteps] = useState('');
   const [targets, setTargets] = useState<{ blendedRoas: number | null; newCustomerRoas: number | null }>({ blendedRoas: null, newCustomerRoas: null });
   const [showAnyway, setShowAnyway] = useState(false);
 
-  const filters: ReportFiltersInput = { period, compare };
+  const isMonthly = type === 'monthly';
+  const isWeekly = type === 'weekly';
+  const isAdsAudit = type === 'ads-audit';
+  const hasFixedWindow = isMonthly || isWeekly;
+
+  // A custom window only switches the query once BOTH dates are valid — until
+  // then we keep serving the last concrete preset so the report never flashes
+  // a half-specified window.
+  const lastPresetRef = useRef<Exclude<PeriodChoice, 'custom'>>('last30');
+  if (period !== 'custom') lastPresetRef.current = period;
+  const customReady = period === 'custom' && !!fromDate && !!toDate && fromDate <= toDate;
+  const effectivePeriod: PeriodChoice = period === 'custom' ? (customReady ? 'custom' : lastPresetRef.current) : period;
+
+  const filters: ReportFiltersInput = {
+    period: effectivePeriod,
+    compare,
+    ...(customReady ? { from: fromDate, to: toDate } : {}),
+    ...(isMonthly && month ? { month } : {}),
+    ...(isWeekly && week ? { week } : {}),
+    ...(isAdsAudit && platform !== 'all' ? { platform } : {}),
+  };
+
   const { data, isLoading, isError, error } = useReport(slug, type, filters);
   const createShare = useCreateShare(slug, type);
   const triggerSync = useTriggerSync();
@@ -40,9 +86,29 @@ export function ReportViewPage() {
   // before send).
   const [narrativeEdits, setNarrativeEdits] = useState<NarrativeBlocksShape | null>(null);
 
+  const filterSignature = [effectivePeriod, compare, filters.from ?? '', filters.to ?? '', filters.month ?? '', filters.week ?? '', filters.platform ?? ''].join('|');
+
   // A new window must re-check freshness, so the gate can't be bypassed for it.
-  useEffect(() => setShowAnyway(false), [period, compare, slug, type]);
-  useEffect(() => setNarrativeEdits(null), [period, compare, slug, type]);
+  useEffect(() => setShowAnyway(false), [filterSignature, slug, type]);
+  useEffect(() => setNarrativeEdits(null), [filterSignature, slug, type]);
+
+  // Keep the month / week option lists across refetches so the picker doesn't
+  // vanish while a newly selected window loads.
+  const [monthOptions, setMonthOptions] = useState<ReportWindowOption[]>([]);
+  const [weekOptions, setWeekOptions] = useState<ReportWindowOption[]>([]);
+  useEffect(() => {
+    if (data?.reportType === 'monthly' && data.availableMonths?.length) setMonthOptions(data.availableMonths);
+    if (data?.reportType === 'weekly' && data.availableWeeks?.length) setWeekOptions(data.availableWeeks);
+  }, [data]);
+  // The route component is reused across /brands/:slug/reports/:type param
+  // changes — window selections and cached option lists must not leak from one
+  // brand/report to the next.
+  useEffect(() => {
+    setMonth(undefined);
+    setWeek(undefined);
+    setMonthOptions([]);
+    setWeekOptions([]);
+  }, [slug, type]);
 
   const effectiveNarrativeBlocks = (): NarrativeBlocksShape | null =>
     narrativeEdits ??
@@ -52,7 +118,7 @@ export function ReportViewPage() {
 
   const onGenerateNarrative = () => {
     generateNarrative.mutate(
-      { period, compare },
+      { ...filters },
       {
         onSuccess: () => {
           setNarrativeEdits(null);
@@ -67,21 +133,13 @@ export function ReportViewPage() {
     if (!base) return;
     const blocks = { ...base, [key]: value };
     setNarrativeEdits(blocks);
-    saveNarrative.mutate({ period, compare, blocks });
+    saveNarrative.mutate({ ...filters, blocks });
   };
 
   const stale = !!data?.freshness && !data.freshness.upToDate;
 
-  // The monthly and weekly reports are inherently fixed windows (last complete
-  // calendar month / last complete Mon–Sun week) with their comparisons built
-  // in — their build() ignores period and compare, so those selectors are dead
-  // controls here. Hide them for both; keep them for overall-performance and
-  // creatives.
-  const isMonthly = type === 'monthly' || data?.reportType === 'monthly';
   const monthLabel = data?.reportType === 'monthly' ? data.month.label : null;
-  const isWeekly = type === 'weekly' || data?.reportType === 'weekly';
   const weekLabel = data?.reportType === 'weekly' ? data.week.label : null;
-  const hasFixedWindow = isMonthly || isWeekly;
 
   const onShare = () => {
     const narrativeBlocks = effectiveNarrativeBlocks() ?? undefined;
@@ -111,36 +169,106 @@ export function ReportViewPage() {
     });
   };
 
+  const maxDate = yesterdayIso();
+
+  const periodControls = (
+    <>
+      <Segmented
+        options={[
+          { value: 'last7', label: 'Last 7 days' },
+          { value: 'last30', label: 'Last 30 days' },
+          { value: 'mtd', label: 'Month to date' },
+          { value: 'custom', label: 'Custom' },
+        ]}
+        value={period}
+        onChange={(v) => setPeriod(v as PeriodChoice)}
+      />
+      {period === 'custom' && (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="date"
+            className="input"
+            style={{ width: 150 }}
+            value={fromDate}
+            max={toDate || maxDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            aria-label="Custom period from"
+          />
+          <span className="muted text-sm">to</span>
+          <input
+            type="date"
+            className="input"
+            style={{ width: 150 }}
+            value={toDate}
+            min={fromDate || undefined}
+            max={maxDate}
+            onChange={(e) => setToDate(e.target.value)}
+            aria-label="Custom period to"
+          />
+        </span>
+      )}
+      <Segmented
+        options={[
+          { value: 'previous', label: 'vs previous' },
+          { value: 'last_year', label: 'vs last year' },
+        ]}
+        value={compare}
+        onChange={(v) => setCompare(v as ReportFiltersInput['compare'])}
+      />
+    </>
+  );
+
   return (
     <AppLayout title="Report">
       <div className="filter-bar mb-12" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        {!hasFixedWindow && (
+        {!hasFixedWindow && periodControls}
+        {isAdsAudit && (
+          <Segmented
+            options={[
+              { value: 'all', label: 'All platforms' },
+              { value: 'meta', label: 'Meta' },
+              { value: 'google', label: 'Google' },
+              { value: 'tiktok', label: 'TikTok' },
+            ]}
+            value={platform}
+            onChange={(v) => setPlatform(v as PlatformChoice)}
+          />
+        )}
+        {isMonthly && monthOptions.length > 0 && (
           <>
-            <Segmented
-              options={[
-                { value: 'last7', label: 'Last 7 days' },
-                { value: 'last30', label: 'Last 30 days' },
-                { value: 'mtd', label: 'Month to date' },
-              ]}
-              value={period}
-              onChange={(v) => setPeriod(v as ReportFiltersInput['period'])}
-            />
-            <Segmented
-              options={[
-                { value: 'previous', label: 'vs previous' },
-                { value: 'last_year', label: 'vs last year' },
-              ]}
-              value={compare}
-              onChange={(v) => setCompare(v as ReportFiltersInput['compare'])}
-            />
+            <span className="muted text-sm">Month</span>
+            <select
+              className="input"
+              style={{ maxWidth: 200 }}
+              value={month ?? monthOptions[0].key}
+              onChange={(e) => setMonth(e.target.value === monthOptions[0].key ? undefined : e.target.value)}
+              aria-label="Report month"
+            >
+              {monthOptions.map((m) => (
+                <option key={m.key} value={m.key}>{m.label}</option>
+              ))}
+            </select>
           </>
         )}
-        {isMonthly && monthLabel && <span className="muted text-sm">Last complete month · {monthLabel}</span>}
-        {isWeekly && weekLabel && <span className="muted text-sm">Week · {weekLabel}</span>}
+        {isMonthly && !month && monthLabel && <span className="muted text-sm">Last complete month · {monthLabel}</span>}
+        {isWeekly && weekOptions.length > 0 && (
+          <>
+            <span className="muted text-sm">Week</span>
+            <select
+              className="input"
+              style={{ maxWidth: 230 }}
+              value={week ?? weekOptions[0].key}
+              onChange={(e) => setWeek(e.target.value === weekOptions[0].key ? undefined : e.target.value)}
+              aria-label="Report week"
+            >
+              {weekOptions.map((w) => (
+                <option key={w.key} value={w.key}>{w.label}</option>
+              ))}
+            </select>
+          </>
+        )}
+        {isWeekly && weekOptions.length === 0 && weekLabel && <span className="muted text-sm">Week · {weekLabel}</span>}
         <span style={{ flex: 1 }} />
-        <Button variant="secondary" onClick={() => window.print()} disabled={!data || (stale && !showAnyway)}>
-          Export PDF
-        </Button>
         <Button variant="primary" onClick={onShare} disabled={!data || (stale && !showAnyway) || createShare.isPending}>
           {createShare.isPending ? 'Creating…' : 'Create share link'}
         </Button>
@@ -182,6 +310,9 @@ export function ReportViewPage() {
             onGenerateNarrative={onGenerateNarrative}
             onNarrativeBlockChange={onNarrativeBlockChange}
           />
+        ) : data.reportType === 'ads-audit' ? (
+          // No narrative blocks for ads-audit v1 — commentary only.
+          <AdsAuditReportDocument data={data} editable onCommentaryChange={setCommentary} />
         ) : (
           <ReportDocument
             data={data}

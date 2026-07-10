@@ -249,6 +249,13 @@ export function useRetrySyncLog() {
 
 /* ---- Deep analytics (slice 2.1/2.4) + LLM chat (D-016) ---------------- */
 
+export interface ProductFlag {
+  key: string;
+  severity: 'critical' | 'warn' | 'info';
+  label: string;
+  detail: string;
+}
+
 export interface BrandProductRow {
   key: string;
   title: string;
@@ -260,6 +267,12 @@ export interface BrandProductRow {
   sharePct: number | null;
   prevRevenue: number | null;
   deltaPct: number | null;
+  // Phase 1 additions — from the ProductFlags engine.
+  aov: number | null;
+  abc: 'A' | 'B' | 'C' | null;
+  coverDays: number | null;
+  sellThroughPct: number | null;
+  flags: ProductFlag[];
 }
 
 export interface BrandProductsResponse {
@@ -270,16 +283,17 @@ export interface BrandProductsResponse {
   totalRevenue: number;
   hasData: boolean;
   lastPulledAt: string | null;
+  inventorySnapshotAt: string | null;
 }
 
-/** GET /api/brands/{slug}/products — commerce product aggregates for a window. */
-export function useBrandProducts(slug: string | undefined, period: string, search: string) {
+/** GET /api/brands/{slug}/products — commerce product aggregates + flags for a window. */
+export function useBrandProducts(slug: string | undefined, period: string, search: string, sort = 'revenue') {
   return useQuery({
-    queryKey: ['brand', slug, 'products', period, search],
+    queryKey: ['brand', slug, 'products', period, search, sort],
     enabled: !!slug,
     queryFn: async (): Promise<BrandProductsResponse> => {
       const { data } = await api.get<BrandProductsResponse>(`/brands/${slug}/products`, {
-        params: { period, ...(search ? { search } : {}) },
+        params: { period, sort, ...(search ? { search } : {}) },
       });
       return data;
     },

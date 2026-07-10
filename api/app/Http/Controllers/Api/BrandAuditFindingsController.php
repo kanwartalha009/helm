@@ -9,6 +9,7 @@ use App\Models\Brand;
 use App\Models\DailyMetric;
 use App\Reports\Support\AdAudit;
 use App\Reports\Support\DeadInventory;
+use App\Services\Rules\ProductFlags;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,6 +27,7 @@ class BrandAuditFindingsController extends Controller
     public function __construct(
         private readonly AdAudit $ads,
         private readonly DeadInventory $inventory,
+        private readonly ProductFlags $productFlags,
     ) {}
 
     public function index(Request $request, Brand $brand): JsonResponse
@@ -109,11 +111,16 @@ class BrandAuditFindingsController extends Controller
         // --- Inventory: dead / overstocked stock ------------------------------
         $stock = $this->inventory->forDimension($brand->id, 'product', 8);
         if ($stock !== null && ($stock['deadCount'] ?? 0) > 0) {
+            // The dead rule is brand-relative (≤10% of median units sold). A
+            // zero threshold reads as the plain "zero sales" it is; a higher
+            // one names the line so the badge never overstates.
+            $threshold = (int) ($stock['deadThresholdUnits'] ?? 0);
+            $salesText = $threshold === 0 ? 'zero sales' : "≤{$threshold} sale" . ($threshold === 1 ? '' : 's');
             $findings[] = $this->finding(
                 'inventory',
                 'warn',
-                "{$stock['deadCount']} product" . ($stock['deadCount'] === 1 ? '' : 's') . ' with stock and zero sales',
-                "{$stock['deadUnits']} units are sitting on hand with no sales in the {$stock['windowDays']}-day snapshot window (captured {$stock['capturedOn']}). Full list on the Inventory page.",
+                "{$stock['deadCount']} product" . ($stock['deadCount'] === 1 ? '' : 's') . " with stock and {$salesText}",
+                "{$stock['deadUnits']} units are sitting on hand with effectively no sales in the {$stock['windowDays']}-day snapshot window (captured {$stock['capturedOn']}). Full list on the Inventory page.",
                 ['rows' => array_slice($stock['rows'], 0, 5)],
             );
         }

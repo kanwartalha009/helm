@@ -1,6 +1,6 @@
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import { NarrativeBlocks } from './NarrativeBlocks';
-import { REPORT_CSS } from './ReportDocument';
+import { EarlySignalTag, REPORT_CSS, VerdictWindowCaption } from './ReportDocument';
 import type { NarrativeBlocksShape, WeeklyKpi, WeeklyReportData } from '@/types/reports';
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -196,10 +196,15 @@ export function WeeklyReportDocument({
                   {ACTION_META[a.kind]?.label ?? a.kind}
                   <span className="wk-act-plat"> · {PLATFORM_LABEL[a.platform] ?? a.platform}</span>
                 </div>
-                <div className="rpt-act-t"><b>{a.title}</b> — {a.body}</div>
+                <div className="rpt-act-t">
+                  <b>{a.title}</b> — {a.body}
+                  {a.confidence === 'early' && <EarlySignalTag />}
+                </div>
               </div>
             ))}
           </div>
+          {/* The weekly window is always the complete Mon–Sun week — 7 days. */}
+          <VerdictWindowCaption windowDays={7} />
         </section>
       )}
 

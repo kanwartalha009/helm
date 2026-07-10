@@ -17,5 +17,6 @@ return [
         'monthly'             => \App\Reports\Monthly\MonthlyReport::class,
         'weekly'              => \App\Reports\Weekly\WeeklyReport::class,
         'creatives'           => \App\Reports\Creative\CreativeReport::class,
+        'ads-audit'           => \App\Reports\AdsAudit\AdsAuditReport::class,
     ],
 ];

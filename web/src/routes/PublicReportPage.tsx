@@ -3,6 +3,7 @@ import { ReportDocument } from '@/components/reports/ReportDocument';
 import { MonthlyReportDocument } from '@/components/reports/MonthlyReportDocument';
 import { WeeklyReportDocument } from '@/components/reports/WeeklyReportDocument';
 import { CreativeReportDocument } from '@/components/reports/CreativeReportDocument';
+import { AdsAuditReportDocument } from '@/components/reports/AdsAuditReportDocument';
 import { usePublicReport } from '@/hooks/useReports';
 
 /**
@@ -22,28 +23,9 @@ export function PublicReportPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#efeee9', padding: '28px 16px' }}>
+      {/* Link sharing only (2026-07-10) — the Save as PDF button was removed;
+          the print CSS stays so a browser-initiated print still looks right. */}
       <style>{`@media print{.rpt-public-bar{display:none}}`}</style>
-      <div
-        className="rpt-public-bar"
-        style={{ maxWidth: 1040, margin: '0 auto 16px', display: 'flex', justifyContent: 'flex-end' }}
-      >
-        {data && !stale && (
-          <button
-            onClick={() => window.print()}
-            style={{
-              fontSize: 12,
-              padding: '7px 14px',
-              borderRadius: 8,
-              border: '1px solid #ccc9c2',
-              background: '#fff',
-              color: '#0f0f0f',
-              cursor: 'pointer',
-            }}
-          >
-            Save as PDF
-          </button>
-        )}
-      </div>
 
       {isLoading && (
         <div style={{ textAlign: 'center', color: '#767676', padding: 64 }}>Loading report…</div>
@@ -77,6 +59,8 @@ export function PublicReportPage() {
           <WeeklyReportDocument data={data} editable={false} />
         ) : data.reportType === 'creatives' ? (
           <CreativeReportDocument data={data} editable={false} />
+        ) : data.reportType === 'ads-audit' ? (
+          <AdsAuditReportDocument data={data} editable={false} />
         ) : (
           <ReportDocument data={data} editable={false} />
         ))}

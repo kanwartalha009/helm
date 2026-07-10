@@ -139,7 +139,7 @@ final class OverallPerformanceReport implements ReportType
     }
 
     /**
-     * Campaign-level audit per connected ad platform — Meta first, then Google.
+     * Campaign-level audit per connected ad platform — Meta, Google, TikTok.
      * Each platform with campaign rows in the window returns an audit block;
      * platforms without data are simply absent (missing ≠ zero).
      *
@@ -149,7 +149,7 @@ final class OverallPerformanceReport implements ReportType
     private function adsAudit(int $brandId, array $connected, string $start, string $end, ?string $cStart, ?string $cEnd, bool $usd): array
     {
         $out = [];
-        foreach (['meta', 'google'] as $platform) {
+        foreach (self::AD_PLATFORMS as $platform) {
             if (! in_array($platform, $connected, true)) {
                 continue;
             }
@@ -190,20 +190,22 @@ final class OverallPerformanceReport implements ReportType
     }
 
     /**
-     * Latest dead-stock snapshot by product + collection, or null when no
-     * inventory snapshot exists yet (shopify:sync-inventory hasn't run).
+     * Latest dead-stock snapshot, PRODUCT ONLY — null when no inventory
+     * snapshot exists yet (shopify:sync-inventory hasn't run). Decision
+     * ratified: a collection mixes dead and healthy products, so
+     * collection-level "dead" is misleading; the product list is the
+     * actionable one.
      *
      * @return array<string, mixed>|null
      */
     private function deadInventory(int $brandId): ?array
     {
-        $byProduct    = $this->inventory->forDimension($brandId, 'product');
-        $byCollection = $this->inventory->forDimension($brandId, 'collection');
-        if ($byProduct === null && $byCollection === null) {
+        $byProduct = $this->inventory->forDimension($brandId, 'product');
+        if ($byProduct === null) {
             return null;
         }
 
-        return ['byProduct' => $byProduct, 'byCollection' => $byCollection];
+        return ['byProduct' => $byProduct];
     }
 
     /** @return array<string, mixed> */

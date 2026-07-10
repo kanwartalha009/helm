@@ -85,6 +85,9 @@ class ReportController extends Controller
             'from'     => ['nullable', 'date_format:Y-m-d'],
             'to'       => ['nullable', 'date_format:Y-m-d'],
             'compare'  => ['nullable', 'in:previous,last_year,none'],
+            'month'    => ['nullable', 'date_format:Y-m'],
+            'week'     => ['nullable', 'date_format:Y-m-d'],
+            'platform' => ['nullable', 'in:meta,google,tiktok'],
             'language' => ['nullable', 'in:en,es'],
         ]);
 
@@ -119,6 +122,9 @@ class ReportController extends Controller
             'from'                => ['nullable', 'date_format:Y-m-d'],
             'to'                  => ['nullable', 'date_format:Y-m-d'],
             'compare'             => ['nullable', 'in:previous,last_year,none'],
+            'month'               => ['nullable', 'date_format:Y-m'],
+            'week'                => ['nullable', 'date_format:Y-m-d'],
+            'platform'            => ['nullable', 'in:meta,google,tiktok'],
             'blocks'              => ['required', 'array'],
             'blocks.observations' => ['required', 'string', 'max:8000'],
             'blocks.actions'      => ['required', 'string', 'max:8000'],

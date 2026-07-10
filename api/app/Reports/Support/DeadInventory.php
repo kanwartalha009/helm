@@ -22,6 +22,14 @@ final class DeadInventory
     private const SLOW_COVER_DAYS = 180.0; // > ~6 months of stock at current velocity → overstocked
     private const MIN_UNITS       = 1;     // ignore items with no stock on hand
 
+    // "Dead" is RELATIVE to the brand's own velocity: an item is dead when its
+    // window sales are ≤ 10% of the brand's MEDIAN units_sold (over stocked
+    // items in the latest snapshot). [HELM DEFAULT — no published industry
+    // standard; 'dead' scales with the brand's own velocity, e.g. median 10
+    // units → dead = ≤1 unit; median <10 → threshold 0 → identical to the old
+    // zero-sales rule.]
+    private const DEAD_PCT_OF_MEDIAN = 10.0;
+
     /**
      * @return array<string, mixed>|null
      */
@@ -54,6 +62,18 @@ final class DeadInventory
 
         $window = (int) ($rows->first()->window_days ?: 90);
 
+        // Per-brand dead threshold: median units_sold over stocked items, of
+        // which 10% (floored) is the "effectively not selling" line. A median
+        // under 10 floors to 0 — the old zero-sales rule.
+        $soldValues = [];
+        foreach ($rows as $r) {
+            if ((int) ($r->ending_units ?? 0) >= self::MIN_UNITS) {
+                $soldValues[] = (float) ($r->units_sold ?? 0);
+            }
+        }
+        $median        = $this->median($soldValues);
+        $deadThreshold = $median !== null ? (int) floor(self::DEAD_PCT_OF_MEDIAN / 100 * $median) : 0;
+
         $items     = [];
         $deadUnits = 0;
         $deadCount = 0;
@@ -64,10 +84,11 @@ final class DeadInventory
                 continue; // no stock on hand → not dead inventory
             }
 
-            // Days of stock left at the window's sell rate. Null = nothing sold
-            // (truly dead). > SLOW_COVER_DAYS = overstocked / slow mover.
+            // Days of stock left at the window's sell rate. Null = nothing sold.
+            // Dead = at/below the brand-relative threshold; > SLOW_COVER_DAYS =
+            // overstocked / slow mover.
             $cover  = $sold > 0 ? ($ending * $window) / $sold : null;
-            $status = $sold === 0
+            $status = $sold <= $deadThreshold
                 ? 'dead'
                 : (($cover !== null && $cover > self::SLOW_COVER_DAYS) ? 'slow' : 'healthy');
 
@@ -98,12 +119,27 @@ final class DeadInventory
         usort($items, static fn (array $a, array $b): int => $b['endingUnits'] <=> $a['endingUnits']);
 
         return [
-            'capturedOn'   => $capturedDate,
-            'windowDays'   => $window,
-            'rows'         => array_slice($items, 0, $limit),
-            'deadCount'    => $deadCount,
-            'deadUnits'    => $deadUnits,
-            'flaggedItems' => count($items),
+            'capturedOn'         => $capturedDate,
+            'windowDays'         => $window,
+            'rows'               => array_slice($items, 0, $limit),
+            'deadCount'          => $deadCount,
+            'deadUnits'          => $deadUnits,
+            'flaggedItems'       => count($items),
+            'deadThresholdUnits' => $deadThreshold,
+            'medianUnits'        => $median,
         ];
+    }
+
+    /** @param array<int, float> $values */
+    private function median(array $values): ?float
+    {
+        if ($values === []) {
+            return null;
+        }
+        sort($values);
+        $n   = count($values);
+        $mid = intdiv($n, 2);
+
+        return $n % 2 === 1 ? $values[$mid] : ($values[$mid - 1] + $values[$mid]) / 2;
     }
 }
