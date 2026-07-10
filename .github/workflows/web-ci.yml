@@ -1,0 +1,43 @@
+name: web-ci
+
+# The frontend gate CI was missing (audit 2026-07-10): deploy.sh hard-aborts
+# on a tsc error and silently keeps serving the OLD bundle, so a type error
+# that reaches main means the client sees stale code with no visible failure.
+# This job catches it at push/PR time instead of at deploy time.
+
+on:
+  push:
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ci.yml'
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ci.yml'
+
+jobs:
+  build:
+    name: tsc + vite build (Node 22)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (deploy.sh gate, run early)
+        run: npx tsc --noEmit
+
+      - name: Production build
+        run: npm run build

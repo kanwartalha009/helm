@@ -1,3 +1,4 @@
+import type React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/queryClient';
@@ -21,6 +22,7 @@ import { BrandDetailPage } from '@/routes/BrandDetailPage';
 import { BrandAdsPage } from '@/routes/BrandAdsPage';
 import { BrandProductsPage } from '@/routes/BrandProductsPage';
 import { BrandAuditPage } from '@/routes/BrandAuditPage';
+import { BrandAskPage } from '@/routes/BrandAskPage';
 import { ReportsPage } from '@/routes/ReportsPage';
 import { ReportViewPage } from '@/routes/ReportViewPage';
 import { PublicReportPage } from '@/routes/PublicReportPage';
@@ -45,6 +47,21 @@ import { TicketDetailPage } from '@/routes/TicketDetailPage';
 
 import { NotFoundPage } from '@/routes/NotFoundPage';
 import { SitemapPage } from '@/routes/SitemapPage';
+
+/**
+ * Every authenticated route = AuthGate (session/onboarding/MFA gates) +
+ * ErrorBoundary. Before 2026-07-10 only /onboarding and the settings tabs
+ * had a boundary, so one render error white-screened the whole dashboard
+ * (audit 2026-07-10, layer: error surfaces). The boundary sits INSIDE the
+ * gate so auth redirects still work when a page crashes.
+ */
+function Guarded({ children }: { children: React.ReactNode }) {
+  return (
+    <AuthGate>
+      <ErrorBoundary>{children}</ErrorBoundary>
+    </AuthGate>
+  );
+}
 
 export function App() {
   return (
@@ -79,34 +96,34 @@ export function App() {
           <Route
             path="/onboarding"
             element={
-              <AuthGate>
-                <ErrorBoundary>
-                  <OnboardingPage />
-                </ErrorBoundary>
-              </AuthGate>
+              <Guarded>
+                <OnboardingPage />
+              </Guarded>
             }
           />
 
           {/* Phase 1 — every authed route runs through AuthGate */}
-          <Route path="/dashboard" element={<AuthGate><DashboardPage /></AuthGate>} />
-          <Route path="/sync-health" element={<AuthGate><SyncHealthPage /></AuthGate>} />
-          <Route path="/brands" element={<AuthGate><BrandsPage /></AuthGate>} />
-          <Route path="/brands/:slug" element={<AuthGate><BrandDetailPage /></AuthGate>} />
-          <Route path="/brands/:slug/ads" element={<AuthGate><BrandAdsPage /></AuthGate>} />
-          <Route path="/brands/:slug/products" element={<AuthGate><BrandProductsPage /></AuthGate>} />
-          <Route path="/brands/:slug/audit" element={<AuthGate><BrandAuditPage /></AuthGate>} />
+          <Route path="/dashboard" element={<Guarded><DashboardPage /></Guarded>} />
+          <Route path="/sync-health" element={<Guarded><SyncHealthPage /></Guarded>} />
+          <Route path="/brands" element={<Guarded><BrandsPage /></Guarded>} />
+          <Route path="/brands/:slug" element={<Guarded><BrandDetailPage /></Guarded>} />
+          <Route path="/brands/:slug/ads" element={<Guarded><BrandAdsPage /></Guarded>} />
+          <Route path="/brands/:slug/products" element={<Guarded><BrandProductsPage /></Guarded>} />
+          <Route path="/brands/:slug/audit" element={<Guarded><BrandAuditPage /></Guarded>} />
+          {/* Ask-the-data chat (D-016 LLM layer, admin/manager only server-side) */}
+          <Route path="/brands/:slug/ask" element={<Guarded><BrandAskPage /></Guarded>} />
 
           {/* Inventory Intelligence — per-brand stock × Meta spend (Phase 2). Top-level
               hub with an in-page brand switcher, so it's not under /brands/:slug. */}
-          <Route path="/inventory" element={<AuthGate><InventoryPage /></AuthGate>} />
+          <Route path="/inventory" element={<Guarded><InventoryPage /></Guarded>} />
 
           {/* Ads hub — per-brand ad-platform Overview (Meta today). Top-level hub
               with an in-page brand switcher; /brands/:slug/ads deep-links a brand. */}
-          <Route path="/ads" element={<AuthGate><AdsPage /></AuthGate>} />
+          <Route path="/ads" element={<Guarded><AdsPage /></Guarded>} />
 
           {/* Reporting & Creative Intelligence (Phase 2, slice 2.0) */}
-          <Route path="/reports" element={<AuthGate><ReportsPage /></AuthGate>} />
-          <Route path="/brands/:slug/reports/:type" element={<AuthGate><ReportViewPage /></AuthGate>} />
+          <Route path="/reports" element={<Guarded><ReportsPage /></Guarded>} />
+          <Route path="/brands/:slug/reports/:type" element={<Guarded><ReportViewPage /></Guarded>} />
 
           {/* /add-brand legacy URLs redirect to dashboard — the drawer is the
               only entry point now. */}
@@ -114,19 +131,19 @@ export function App() {
           <Route path="/add-brand/connect" element={<Navigate to="/dashboard" replace />} />
           <Route path="/add-brand/sync" element={<Navigate to="/dashboard" replace />} />
 
-          <Route path="/settings" element={<AuthGate><SettingsPage /></AuthGate>} />
-          <Route path="/profile" element={<AuthGate><ProfilePage /></AuthGate>} />
+          <Route path="/settings" element={<Guarded><SettingsPage /></Guarded>} />
+          <Route path="/profile" element={<Guarded><ProfilePage /></Guarded>} />
 
           {/* Phase 1.5 */}
-          <Route path="/team" element={<AuthGate><TeamPage /></AuthGate>} />
+          <Route path="/team" element={<Guarded><TeamPage /></Guarded>} />
           <Route path="/team/invite" element={<Navigate to="/team" replace />} />
-          <Route path="/team/users/:slug" element={<AuthGate><UserDetailPage /></AuthGate>} />
-          <Route path="/audit-log" element={<AuthGate><AuditLogPage /></AuthGate>} />
+          <Route path="/team/users/:slug" element={<Guarded><UserDetailPage /></Guarded>} />
+          <Route path="/audit-log" element={<Guarded><AuditLogPage /></Guarded>} />
 
           {/* Phase 3 */}
-          <Route path="/tickets" element={<AuthGate><TicketsPage /></AuthGate>} />
+          <Route path="/tickets" element={<Guarded><TicketsPage /></Guarded>} />
           <Route path="/tickets/new" element={<Navigate to="/tickets" replace />} />
-          <Route path="/tickets/:id" element={<AuthGate><TicketDetailPage /></AuthGate>} />
+          <Route path="/tickets/:id" element={<Guarded><TicketDetailPage /></Guarded>} />
 
           {/* Convenience redirects from the old HTML filenames so old bookmarks resolve */}
           <Route path="/dashboard.html" element={<Navigate to="/dashboard" replace />} />

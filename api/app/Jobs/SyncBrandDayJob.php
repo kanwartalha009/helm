@@ -12,7 +12,9 @@ use App\Models\ShopifyFunnelDaily;
 use App\Models\SyncLog;
 use App\Platforms\PlatformRegistry;
 use App\Platforms\Shopify\RevenueFetcher;
+use App\Platforms\Support\PlatformRateLimitedException;
 use App\Platforms\Support\SyncFailureClassifier;
+use App\Platforms\Support\Throttle;
 use App\Services\Currency\FxService;
 use App\Services\Sync\CampaignSync;
 use Carbon\CarbonImmutable;
@@ -38,8 +40,16 @@ class SyncBrandDayJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    /** Max attempts including the first one. Horizon retries with 1m / 5m / 15m backoff. */
-    public int $tries = 3;
+    /**
+     * Attempt budget. Real failures are capped by $maxExceptions (3, matching
+     * the original 1m/5m/15m retry contract); $tries is higher because a
+     * rate-limit release() also consumes an attempt, and a legitimately
+     * throttled platform shouldn't be able to burn the whole failure budget.
+     */
+    public int $tries = 6;
+
+    /** Max attempts that end in a thrown exception (actual failures). */
+    public int $maxExceptions = 3;
 
     /** Hard timeout per attempt — matches horizon.php. */
     public int $timeout = 600;
@@ -101,6 +111,12 @@ class SyncBrandDayJob implements ShouldQueue
                 'started_at'  => now(),
             ]);
         }
+
+        // Long platform waits (Shopify cost refill, Meta cool-down, TikTok
+        // 40100) release the job back to the queue instead of sleeping in the
+        // worker — but only on a real queue connection; release() is a no-op
+        // on the sync driver (tests, dispatch_sync), where inline sleeps stay.
+        Throttle::deferToQueue($this->job !== null && $this->job->getConnectionName() !== 'sync');
 
         try {
             $adapter  = $registry->for($this->platformConnection->platform);
@@ -179,6 +195,19 @@ class SyncBrandDayJob implements ShouldQueue
                 // Best-effort + self-guarded, like the funnel above.
                 $this->syncShopifyCommerce($revenue, $fx, $this->platformConnection, $this->date);
             }
+        } catch (PlatformRateLimitedException $e) {
+            // Not a failure — the platform asked us to wait. Hand the worker
+            // slot to another brand and come back after the reported delay
+            // (+ jitter so a burst of throttled jobs doesn't stampede back
+            // in the same second). The log returns to `queued` so Sync health
+            // shows it as pending, not broken.
+            $log->update([
+                'status'        => 'queued',
+                'error_message' => $e->getMessage(),
+            ]);
+            $this->release($e->retryAfterSeconds + random_int(1, 15));
+
+            return;
         } catch (Throwable $e) {
             $log->update([
                 'status'        => 'failed',
@@ -205,7 +234,34 @@ class SyncBrandDayJob implements ShouldQueue
             ]);
             report($e);
             throw $e;   // hand to Horizon for retry
+        } finally {
+            // One worker process handles one job at a time; always reset so a
+            // console command running later in this process sleeps inline.
+            Throttle::deferToQueue(false);
         }
+    }
+
+    /**
+     * Terminal failure (max attempts / maxExceptions exhausted, or the worker
+     * killed on timeout). The catch above already stamps `failed` on a normal
+     * exception path, but a timeout or exhausted release loop bypasses it —
+     * without this, the prewritten sync_logs row would sit `queued`/`running`
+     * forever and Sync health would show phantom pending work.
+     */
+    public function failed(Throwable $e): void
+    {
+        if ($this->logId === null) {
+            return;
+        }
+
+        SyncLog::query()
+            ->where('id', $this->logId)
+            ->whereIn('status', ['queued', 'running'])
+            ->update([
+                'status'        => 'failed',
+                'completed_at'  => now(),
+                'error_message' => $e->getMessage(),
+            ]);
     }
 
     /**

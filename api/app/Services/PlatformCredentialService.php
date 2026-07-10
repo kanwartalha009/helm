@@ -39,6 +39,12 @@ class PlatformCredentialService
             'login_customer_id'  => 'GOOGLE_ADS_LOGIN_CUSTOMER_ID',
         ],
         'tiktok' => ['bc_token' => 'TIKTOK_BC_TOKEN'],
+        // D-016 (ratified 2026-07-10): LLM keys live here like any platform
+        // credential — Settings UI row first, env fallback for bootstrap.
+        'llm' => [
+            'anthropic_api_key' => 'HELM_ANTHROPIC_API_KEY',
+            'openai_api_key'    => 'HELM_OPENAI_API_KEY',
+        ],
     ];
 
     /**
@@ -179,6 +185,12 @@ class PlatformCredentialService
             'tiktok' => [
                 ['key' => 'bc_token', 'label' => 'Business Center access token', 'sensitive' => true],
             ],
+            // AI / LLM (D-016). Paste the key for the provider selected via
+            // HELM_LLM_PROVIDER (default anthropic); the other key is optional.
+            'llm' => [
+                ['key' => 'anthropic_api_key', 'label' => 'Anthropic API key', 'sensitive' => true],
+                ['key' => 'openai_api_key',    'label' => 'OpenAI API key',    'sensitive' => true],
+            ],
         ];
     }
 
@@ -195,6 +207,14 @@ class PlatformCredentialService
                 'ok'      => false,
                 'message' => "Unknown platform: {$platform}",
             ];
+        }
+
+        // LLM: one key (the active provider's) is enough, and the live test
+        // is a completion ping, not an adapter healthCheck.
+        if ($platform === 'llm') {
+            $ping = app(\App\Services\Llm\LlmManager::class)->ping();
+
+            return ['ok' => $ping['ok'], 'message' => $ping['message']];
         }
 
         // Check every expected key has a value.

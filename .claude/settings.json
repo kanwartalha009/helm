@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git ls-files:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(php artisan test:*)",
+      "Bash(php artisan route:list:*)",
+      "Bash(php artisan migrate:status:*)",
+      "Bash(php artisan queue:failed:*)",
+      "Bash(php artisan horizon:status:*)",
+      "Bash(composer validate:*)",
+      "Bash(composer show:*)",
+      "Bash(composer test:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npm test:*)",
+      "Bash(node --version:*)",
+      "Bash(php --version:*)"
+    ],
+    "deny": [
+      "Read(./api/.env)",
+      "Read(./api/.env.*)",
+      "Read(./.env.production.recovered)",
+      "Bash(rm -rf:*)",
+      "Bash(git push --force:*)",
+      "Bash(php artisan migrate:fresh:*)",
+      "Bash(php artisan migrate:reset:*)",
+      "Bash(php artisan db:wipe:*)"
+    ]
+  }
+}

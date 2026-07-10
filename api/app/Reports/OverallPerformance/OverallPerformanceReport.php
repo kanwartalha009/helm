@@ -12,6 +12,7 @@ use App\Reports\Contracts\ReportType;
 use App\Reports\Support\AdAudit;
 use App\Reports\Support\CommerceBreakdown;
 use App\Reports\Support\DeadInventory;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 

@@ -584,26 +584,8 @@ final class DashboardQuery
         return $present === [] ? null : round(array_sum($present), 2);
     }
 
-    /** @param array<string, mixed> $params */
-    public function summary(array $params): array
-    {
-        $brandCount = Brand::query()->where('status', 'active')->count();
-
-        return [
-            'totalRevenue' => 0,
-            'totalSpend'   => 0,
-            'roas'         => null,
-            'currency'     => $params['currency'] ?? 'USD',
-            'brandCount'   => $brandCount,
-            'isComplete'   => false,
-        ];
-    }
-
-    /** @return array<int, array<string, mixed>> */
-    public function trend(int $brandId, string $from, string $to, ?array $platforms = null): array
-    {
-        return [];
-    }
+    // summary() and trend() stubs deleted 2026-07-10 (D-020) together with
+    // their routes — no consumer existed and both returned placeholder data.
 
     private function initials(string $name): string
     {

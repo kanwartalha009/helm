@@ -121,8 +121,31 @@ export interface AdAuditSection {
 // Analyst narrative + action plan — written by the LLM layer (slice 2.3) and
 // editable before send. Every field optional: the report renders cleanly with
 // none of it (data-only), and richer as each slot is filled.
+/** The four LLM narrative blocks (D-016). Keys are stable; labels live in the UI. */
+export interface NarrativeBlocksShape {
+  observations: string;
+  actions: string;
+  plan: string;
+  ideas: string;
+}
+
+/** Server-stored narrative draft + edit state for one filter selection. */
+export interface ReportNarrativePayload {
+  blocks: NarrativeBlocksShape;      // what should render (edits win)
+  draftBlocks: NarrativeBlocksShape; // the model's untouched draft
+  isEdited: boolean;
+  provider: string;
+  model: string;
+  language: string;
+  generatedAt: string | null;
+  editedAt: string | null;
+}
+
 export interface ReportContent {
   commentary?: string; // the top "Summary" block
+  // Narrative blocks as they were at share time — the public page renders
+  // these verbatim (D-016: edited before send).
+  narrativeBlocks?: NarrativeBlocksShape;
   nextSteps?: string;  // end-of-report "Next steps / to discuss" block
   // Monthly report — agency-set targets for the Overall picture (editable, saved
   // with the share alongside the commentary).
@@ -138,6 +161,9 @@ export interface ReportContent {
 
 export interface OverallPerformanceReportData {
   reportType: 'overall-performance';
+  // LLM layer (D-016): stored draft for this filter selection + availability.
+  narrative?: ReportNarrativePayload | null;
+  llm?: { enabled: boolean; provider: string };
   brand: { name: string; slug: string; baseCurrency: string; timezone: string };
   currency: string;
   period: { label: string; start: string; end: string };

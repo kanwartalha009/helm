@@ -1,10 +1,12 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { toast } from '@/stores/toastStore';
 import type {
   AnyReportData,
+  NarrativeBlocksShape,
   ReportContent,
   ReportFiltersInput,
+  ReportNarrativePayload,
   ReportTypeItem,
 } from '@/types/reports';
 
@@ -49,6 +51,38 @@ export function usePublicReport(token: string | undefined) {
       const { data } = await api.get<AnyReportData>(`/r/${token}`);
       return data;
     },
+  });
+}
+
+export function useGenerateNarrative(slug: string | undefined, type: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: ReportFiltersInput & { language?: 'en' | 'es' }) => {
+      const { data } = await api.post<{ narrative: ReportNarrativePayload }>(
+        `/brands/${slug}/reports/${type}/narrative`,
+        payload,
+      );
+      return data.narrative;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['report', slug] }),
+    onError: (err: any) =>
+      toast.error('Couldn\u2019t generate the narrative', err?.response?.data?.message ?? err?.message ?? 'Unknown error'),
+  });
+}
+
+export function useSaveNarrative(slug: string | undefined, type: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: ReportFiltersInput & { blocks: NarrativeBlocksShape }) => {
+      const { data } = await api.patch<{ narrative: ReportNarrativePayload }>(
+        `/brands/${slug}/reports/${type}/narrative`,
+        payload,
+      );
+      return data.narrative;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['report', slug] }),
+    onError: (err: any) =>
+      toast.error('Couldn\u2019t save your edits', err?.response?.data?.message ?? err?.message ?? 'Unknown error'),
   });
 }
 

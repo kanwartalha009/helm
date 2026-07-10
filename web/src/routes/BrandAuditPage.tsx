@@ -1,28 +1,45 @@
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
-import { Banner, Breadcrumb, Button, Dot } from '@/components/ui';
-import { useAuditFindings, useBrand } from '@/hooks/useDashboardData';
+import { Breadcrumb, Card, Chip } from '@/components/ui';
+import { useAuditFindings, useBrandDetail } from '@/hooks/useApiData';
+import type { AuditFinding } from '@/hooks/useApiData';
 
-function severityLabel(s: string) {
-  if (s === 'critical') return 'critical';
-  if (s === 'warn') return 'warn';
-  return 'info';
-}
+const PERIODS: { key: string; label: string }[] = [
+  { key: 'last7', label: 'Last 7 days' },
+  { key: 'last30', label: 'Last 30 days' },
+  { key: 'mtd', label: 'MTD' },
+];
 
-function detectedLabel(date: string) {
-  const today = new Date('2026-05-16');
-  const d = new Date(date);
-  const diffDays = Math.round((today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
-  return `${diffDays} days ago`;
-}
+const SEVERITY: Record<AuditFinding['severity'], { label: string; color: string }> = {
+  critical: { label: 'Critical', color: 'var(--danger, #b3261e)' },
+  warn:     { label: 'Warning',  color: 'var(--warning, #9a6700)' },
+  info:     { label: 'Info',     color: 'var(--text-secondary, #6b6f76)' },
+  good:     { label: 'Good',     color: 'var(--success, #1f6f5c)' },
+};
 
+const AREA_LABEL: Record<AuditFinding['area'], string> = {
+  ads: 'Ad accounts',
+  inventory: 'Inventory',
+  data: 'Data health',
+};
+
+/**
+ * Store audit — REAL findings composed exclusively from the rules engines
+ * (campaign verdicts, dead stock, sync freshness). Deterministic by design:
+ * rules, never LLM (spec §4.3). Replaces the Phase-2 empty state
+ * (2026-07-10).
+ */
 export function BrandAuditPage() {
-  const { slug = 'meller' } = useParams();
-  const { data: brand } = useBrand(slug);
-  const { data: findings = [] } = useAuditFindings();
+  const { slug } = useParams();
+  const [period, setPeriod] = useState('last30');
 
-  const brandName = brand?.name ?? 'Meller';
-  const brandInitials = brand?.initials ?? 'ML';
+  const { data: detail } = useBrandDetail(slug);
+  const brand = detail?.brand;
+  const { data, isLoading } = useAuditFindings(slug, period);
+
+  const brandName = brand?.name ?? 'Brand';
+  const brandInitials = brand?.initials ?? '··';
 
   return (
     <AppLayout title="Store audit">
@@ -39,65 +56,47 @@ export function BrandAuditPage() {
           <span className="brand-avatar" style={{ width: 32, height: 32 }}>{brandInitials}</span>
           <div>
             <h2 className="page-title">{brandName} — store audit</h2>
-            <p className="page-subtitle">Refreshed weekly. Last run: 2 days ago at 04:00 UTC.</p>
+            <p className="page-subtitle">
+              Rules-driven findings from campaign verdicts, stock levels and data freshness
+              {data ? ` · ${data.periodStart} – ${data.periodEnd}` : ''}
+            </p>
           </div>
-        </div>
-        <Button size="sm" variant="secondary">Re-run audit</Button>
-      </div>
-
-      <Banner
-        variant="info"
-        icon={
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="16" x2="12" y2="12" />
-            <line x1="12" y1="8" x2="12.01" y2="8" />
-          </svg>
-        }
-      >
-        Store audit checks are a Phase 2 feature. Real findings appear here once weekly audits run.
-      </Banner>
-
-      <div className="stat-grid stat-grid-3 mb-24" style={{ marginTop: 16 }}>
-        <div className="stat">
-          <div className="stat-label">Page speed (LCP)</div>
-          <div className="stat-value num">2.4s</div>
-          <div className="stat-sub" style={{ color: 'var(--success)' }}>Within target (&lt; 2.5s)</div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">Checkout drop-off</div>
-          <div className="stat-value num">61.4%</div>
-          <div className="stat-sub" style={{ color: 'var(--warning)' }}>+4.2 pts vs prior week</div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">Broken events</div>
-          <div className="stat-value num">2</div>
-          <div className="stat-sub" style={{ color: 'var(--warning)' }}>Meta Pixel: Purchase, AddToCart</div>
         </div>
       </div>
 
-      <h3 className="section-title">Findings</h3>
-      <div className="card" style={{ overflow: 'hidden' }}>
-        {findings.map((f) => (
-          <div key={f.id} className="list-row">
-            {f.severity === 'critical' ? (
-              <span className="dot" style={{ background: 'var(--danger)' }} />
-            ) : f.severity === 'warn' ? (
-              <Dot variant="warning" />
-            ) : (
-              <span className="dot" style={{ background: 'var(--text-muted)' }} />
-            )}
-            <div className="list-row-main">
-              <div className="list-row-title">{f.title}</div>
-              <div className="list-row-sub">
-                {f.auditType} · severity: {severityLabel(f.severity)} · detected {detectedLabel(f.detectedAt)}
-              </div>
-            </div>
-            {/* Phase 2 — the audit-findings table + resolve mutation aren't
-                wired yet. Buttons hidden until then so they don't pretend to act. */}
-          </div>
+      <div className="filter-bar mb-16" style={{ marginTop: 8 }}>
+        {PERIODS.map((p) => (
+          <Chip key={p.key} active={period === p.key} onClick={() => setPeriod(p.key)}>
+            {p.label}
+          </Chip>
         ))}
       </div>
+
+      {isLoading && <div className="muted" style={{ padding: 24 }}>Running the rules…</div>}
+
+      {data && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          {data.findings.map((f) => (
+            <Card key={f.id} style={{ padding: 18 }}>
+              <div className="flex items-center gap-8" style={{ marginBottom: 6 }}>
+                <span
+                  aria-hidden
+                  style={{ width: 8, height: 8, borderRadius: '50%', background: SEVERITY[f.severity].color, flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 12, fontWeight: 600, color: SEVERITY[f.severity].color }}>
+                  {SEVERITY[f.severity].label}
+                </span>
+                <span className="muted text-xs">· {AREA_LABEL[f.area]}</span>
+              </div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>{f.title}</div>
+              <div className="muted text-sm" style={{ lineHeight: 1.55 }}>{f.detail}</div>
+            </Card>
+          ))}
+          <div className="text-xs muted">
+            Every finding above comes from a deterministic rule — the same thresholds every time, no AI involved.
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }

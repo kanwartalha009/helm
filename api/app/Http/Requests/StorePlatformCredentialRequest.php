@@ -18,7 +18,7 @@ class StorePlatformCredentialRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'platform' => ['required', 'string', 'in:shopify,meta,google,tiktok'],
+            'platform' => ['required', 'string', 'in:shopify,meta,google,tiktok,llm'],
             'key'      => ['required', 'string', 'max:60'],
             'value'    => ['required', 'string'],
             'label'    => ['nullable', 'string', 'max:120'],

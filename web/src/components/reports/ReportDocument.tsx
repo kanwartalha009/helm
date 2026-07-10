@@ -1,4 +1,5 @@
 import { formatMoney, formatRoas } from '@/lib/formatters';
+import { NarrativeBlocks } from './NarrativeBlocks';
 import type {
   AdAuditSection as AdAuditSectionData,
   AdVerdict,
@@ -6,6 +7,7 @@ import type {
   CommerceSection,
   CommerceTrend,
   DeadInventorySection as DeadInventorySectionData,
+  NarrativeBlocksShape,
   OverallPerformanceReportData,
 } from '@/types/reports';
 
@@ -65,10 +67,16 @@ export function ReportDocument({
   data,
   editable = false,
   onCommentaryChange,
+  generatingNarrative = false,
+  onGenerateNarrative,
+  onNarrativeBlockChange,
 }: {
   data: OverallPerformanceReportData;
   editable?: boolean;
   onCommentaryChange?: (value: string) => void;
+  generatingNarrative?: boolean;
+  onGenerateNarrative?: () => void;
+  onNarrativeBlockChange?: (key: keyof NarrativeBlocksShape, value: string) => void;
 }) {
   const { brand, currency, period, comparison, kpis, revenueVsSpend, byPlatform, spendComplete } = data;
   const content = data.content ?? undefined;
@@ -168,6 +176,15 @@ export function ReportDocument({
             <div className="rpt-note">{content?.commentary ?? DEFAULT_COMMENTARY}</div>
           )}
         </div>
+        <NarrativeBlocks
+          narrative={data.narrative}
+          sharedBlocks={content?.narrativeBlocks ?? null}
+          editable={editable}
+          llmEnabled={data.llm?.enabled ?? false}
+          generating={generatingNarrative}
+          onGenerate={onGenerateNarrative}
+          onBlockChange={onNarrativeBlockChange}
+        />
         {content?.actions && content.actions.length > 0 && (
           <div className="rpt-actions">
             {content.actions.map((a, i) => (

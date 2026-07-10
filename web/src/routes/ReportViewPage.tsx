@@ -5,10 +5,10 @@ import { AppLayout } from '@/components/shell/AppLayout';
 import { Button, Card, Segmented } from '@/components/ui';
 import { ReportDocument } from '@/components/reports/ReportDocument';
 import { MonthlyReportDocument } from '@/components/reports/MonthlyReportDocument';
-import { useCreateShare, useReport } from '@/hooks/useReports';
+import { useCreateShare, useGenerateNarrative, useReport, useSaveNarrative } from '@/hooks/useReports';
 import { useTriggerSync } from '@/hooks/useBrands';
 import { toast } from '@/stores/toastStore';
-import type { ReportFiltersInput } from '@/types/reports';
+import type { NarrativeBlocksShape, ReportFiltersInput } from '@/types/reports';
 
 /**
  * In-app report view: filters, the editable white-label document, and the two
@@ -31,9 +31,39 @@ export function ReportViewPage() {
   const { data, isLoading, isError, error } = useReport(slug, type, filters);
   const createShare = useCreateShare(slug, type);
   const triggerSync = useTriggerSync();
+  const generateNarrative = useGenerateNarrative(slug, type);
+  const saveNarrative = useSaveNarrative(slug, type);
+  // Local copy of the narrative blocks while the operator edits — the server
+  // draft stays the base; edits PATCH on every block blur (D-016: edited
+  // before send).
+  const [narrativeEdits, setNarrativeEdits] = useState<NarrativeBlocksShape | null>(null);
 
   // A new window must re-check freshness, so the gate can't be bypassed for it.
   useEffect(() => setShowAnyway(false), [period, compare, slug, type]);
+  useEffect(() => setNarrativeEdits(null), [period, compare, slug, type]);
+
+  const effectiveNarrativeBlocks = (): NarrativeBlocksShape | null =>
+    narrativeEdits ?? (data?.reportType === 'overall-performance' ? data.narrative?.blocks ?? null : null);
+
+  const onGenerateNarrative = () => {
+    generateNarrative.mutate(
+      { period, compare },
+      {
+        onSuccess: () => {
+          setNarrativeEdits(null);
+          toast.success('Draft ready', 'Review and edit the AI analysis before you share.');
+        },
+      },
+    );
+  };
+
+  const onNarrativeBlockChange = (key: keyof NarrativeBlocksShape, value: string) => {
+    const base = effectiveNarrativeBlocks();
+    if (!base) return;
+    const blocks = { ...base, [key]: value };
+    setNarrativeEdits(blocks);
+    saveNarrative.mutate({ period, compare, blocks });
+  };
 
   const stale = !!data?.freshness && !data.freshness.upToDate;
 
@@ -44,8 +74,9 @@ export function ReportViewPage() {
   const monthLabel = data?.reportType === 'monthly' ? data.month.label : null;
 
   const onShare = () => {
+    const narrativeBlocks = effectiveNarrativeBlocks() ?? undefined;
     createShare.mutate(
-      { filters, content: { commentary, nextSteps, targets } },
+      { filters, content: { commentary, nextSteps, targets, narrativeBlocks } },
       {
         onSuccess: (res) => {
           const url = window.location.origin + res.url;
@@ -123,7 +154,14 @@ export function ReportViewPage() {
         ) : data.reportType === 'monthly' ? (
           <MonthlyReportDocument data={data} editable onCommentaryChange={setCommentary} onNextStepsChange={setNextSteps} onTargetsChange={setTargets} />
         ) : (
-          <ReportDocument data={data} editable onCommentaryChange={setCommentary} />
+          <ReportDocument
+            data={data}
+            editable
+            onCommentaryChange={setCommentary}
+            generatingNarrative={generateNarrative.isPending}
+            onGenerateNarrative={onGenerateNarrative}
+            onNarrativeBlockChange={onNarrativeBlockChange}
+          />
         ))}
     </AppLayout>
   );

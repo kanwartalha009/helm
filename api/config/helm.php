@@ -18,4 +18,18 @@ return [
     | `php artisan mfa:reset` escape hatch are all already in place.
     */
     'require_admin_mfa' => env('HELM_REQUIRE_ADMIN_MFA', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Dashboard aggregation engine
+    |--------------------------------------------------------------------------
+    | 'legacy' — DashboardQuery, ~12 queries per brand (the shipped behavior).
+    | 'set'    — DashboardQuerySetBased, a constant handful of GROUP BY
+    |            brand_id queries regardless of brand count (audit 2026-07-10).
+    |
+    | Flip AFTER a clean run of `php artisan helm:dashboard-parity` against
+    | production data: set HELM_DASHBOARD_ENGINE=set in api/.env, then
+    | `php artisan config:cache`. Roll back by removing the var again.
+    */
+    'dashboard_engine' => env('HELM_DASHBOARD_ENGINE', 'legacy'),
 ];

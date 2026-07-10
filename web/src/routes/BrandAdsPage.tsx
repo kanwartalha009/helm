@@ -4,7 +4,7 @@ import { AppLayout } from '@/components/shell/AppLayout';
 import { Breadcrumb } from '@/components/ui';
 import { AdsBrandOverview } from '@/components/ads/AdsBrandOverview';
 import { AdPlatformToggle, adPlatformsOf } from '@/components/ads/AdPlatformToggle';
-import { useBrand } from '@/hooks/useDashboardData';
+import { useBrandDetail } from '@/hooks/useApiData';
 import type { AdsPeriod, AdsPlatform } from '@/types/ads';
 
 const PERIODS: { key: AdsPeriod; label: string }[] = [
@@ -20,7 +20,11 @@ const PERIODS: { key: AdsPeriod; label: string }[] = [
  */
 export function BrandAdsPage() {
   const { slug } = useParams();
-  const { data: brand } = useBrand(slug);
+  // Real brand lookup — the platform toggle must reflect the brand's ACTUAL
+  // connections (this page previously read a mockApi fixture brand, so the
+  // toggle never matched the real connection state).
+  const { data: detail } = useBrandDetail(slug);
+  const brand = detail?.brand;
   const [period, setPeriod] = useState<AdsPeriod>('last30');
   const [platform, setPlatform] = useState<AdsPlatform>('meta');
 

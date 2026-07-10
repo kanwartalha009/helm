@@ -25,7 +25,9 @@ use Throwable;
  * it can NEVER fail the day's main metric sync (which has already succeeded).
  * The one-off ads:backfill-campaigns command fills history; this keeps it fresh.
  */
-final class CampaignSync
+// Not final: SyncBrandDayJob type-hints this concrete class, and the job's
+// lifecycle tests need a test double at that seam (tests/Feature/SyncBrandDayJobTest).
+class CampaignSync
 {
     public function __construct(
         private readonly InsightsFetcher $meta,

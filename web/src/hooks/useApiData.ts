@@ -9,8 +9,8 @@ import type {
 } from '@/types/domain';
 
 // Real-API hooks for the pages that have shipped end-to-end with Laravel.
-// Phase 2/3 pages still pull from mockApi via useDashboardData.ts — that file
-// is intentionally left alone so the work-in-progress views keep rendering.
+// (mockApi and its hooks were removed 2026-07-10 — every page reads the real
+// API now; Phase 2 placeholder pages render explicit empty states instead.)
 
 /* ---- Brands ---------------------------------------------------------- */
 
@@ -75,6 +75,8 @@ export interface BrandDailyMetricRow {
 export interface BrandMetricsResponse {
   currency: string;
   timezone: string;
+  /** Size of the daily series window (the API caps `daily` — default 90 days, ?days= up to 365). */
+  windowDays?: number;
   tiles: {
     today: BrandMetricTile;
     yesterday: BrandMetricTile;
@@ -241,6 +243,75 @@ export function useRetrySyncLog() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sync-status'] });
+    },
+  });
+}
+
+/* ---- Deep analytics (slice 2.1/2.4) + LLM chat (D-016) ---------------- */
+
+export interface BrandProductRow {
+  key: string;
+  title: string;
+  revenue: number;
+  orders: number;
+  units: number;
+  refunds: number;
+  refundRatePct: number | null;
+  sharePct: number | null;
+  prevRevenue: number | null;
+  deltaPct: number | null;
+}
+
+export interface BrandProductsResponse {
+  currency: string;
+  periodStart: string;
+  periodEnd: string;
+  rows: BrandProductRow[];
+  totalRevenue: number;
+  hasData: boolean;
+  lastPulledAt: string | null;
+}
+
+/** GET /api/brands/{slug}/products — commerce product aggregates for a window. */
+export function useBrandProducts(slug: string | undefined, period: string, search: string) {
+  return useQuery({
+    queryKey: ['brand', slug, 'products', period, search],
+    enabled: !!slug,
+    queryFn: async (): Promise<BrandProductsResponse> => {
+      const { data } = await api.get<BrandProductsResponse>(`/brands/${slug}/products`, {
+        params: { period, ...(search ? { search } : {}) },
+      });
+      return data;
+    },
+  });
+}
+
+export interface AuditFinding {
+  id: string;
+  area: 'ads' | 'inventory' | 'data';
+  severity: 'critical' | 'warn' | 'info' | 'good';
+  title: string;
+  detail: string;
+  meta?: Record<string, unknown> | null;
+}
+
+export interface AuditFindingsResponse {
+  periodStart: string;
+  periodEnd: string;
+  findings: AuditFinding[];
+  generatedAt: string;
+}
+
+/** GET /api/brands/{slug}/audit-findings — rules-engine findings, never LLM. */
+export function useAuditFindings(slug: string | undefined, period: string) {
+  return useQuery({
+    queryKey: ['brand', slug, 'audit-findings', period],
+    enabled: !!slug,
+    queryFn: async (): Promise<AuditFindingsResponse> => {
+      const { data } = await api.get<AuditFindingsResponse>(`/brands/${slug}/audit-findings`, {
+        params: { period },
+      });
+      return data;
     },
   });
 }

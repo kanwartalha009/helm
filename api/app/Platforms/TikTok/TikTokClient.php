@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Platforms\TikTok;
 
+use App\Platforms\Support\Throttle;
 use App\Services\PlatformCredentialService;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
@@ -90,7 +91,9 @@ final class TikTokClient
             }
 
             if ($code === self::RATE_LIMIT_CODE && $attempt <= self::MAX_RETRIES) {
-                sleep((int) min(self::MAX_SLEEP_SECS, 2 ** $attempt));
+                // Long 40100 cool-downs release the queue job instead of
+                // pinning a worker (Throttle defer mode); commands sleep inline.
+                Throttle::wait((int) min(self::MAX_SLEEP_SECS, 2 ** $attempt), 'tiktok', 'rate limit 40100');
                 continue;
             }
 

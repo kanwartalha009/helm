@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Platforms\Shopify;
 
+use App\Platforms\Support\Throttle;
 use Closure;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ConnectException;
@@ -119,7 +120,7 @@ final class ShopifyClient
                 // fan-out doesn't fail the whole sync.
                 if ($attempt <= self::TRANSIENT_RETRIES) {
                     Log::warning('shopify.client.connect_retry', ['shop' => $this->shopDomain, 'attempt' => $attempt, 'message' => $e->getMessage()]);
-                    sleep((int) min(8, 2 ** ($attempt - 1)));
+                    Throttle::wait((int) min(8, 2 ** ($attempt - 1)), 'shopify', 'connect retry');
                     continue;
                 }
                 throw new RuntimeException('Shopify request failed: ' . $e->getMessage(), 0, $e);
@@ -187,8 +188,8 @@ final class ShopifyClient
 
         $deficit = self::COST_FLOOR - $available;
         $seconds = (int) min(self::MAX_SLEEP_SECS, ceil($deficit / $restoreRate));
-        if ($seconds > 0) {
-            sleep($seconds);
-        }
+        // In queue workers a long cost-refill wait releases the job instead of
+        // blocking the slot (Throttle defer mode); console commands sleep inline.
+        Throttle::wait($seconds, 'shopify', 'cost ceiling');
     }
 }

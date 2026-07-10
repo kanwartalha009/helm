@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Platforms\Meta;
 
+use App\Platforms\Support\Throttle;
 use App\Services\PlatformCredentialService;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ConnectException;
@@ -114,7 +115,7 @@ final class MetaClient
                 // surface it.
                 if ($attempt <= self::MAX_RETRIES) {
                     Log::warning('meta.client.connect_retry', ['attempt' => $attempt, 'message' => $e->getMessage()]);
-                    sleep((int) min(self::MAX_SLEEP_SECS, 2 ** $attempt));
+                    Throttle::wait((int) min(self::MAX_SLEEP_SECS, 2 ** $attempt), 'meta', 'connect retry');
                     continue;
                 }
                 throw new RuntimeException('Meta request failed: ' . str_replace($token, '[redacted]', $e->getMessage()), 0, $e);
@@ -158,7 +159,10 @@ final class MetaClient
         $seconds     = (int) min(self::MAX_SLEEP_SECS, max(1, $headerSleep, $expBackoff));
 
         Log::info('meta.client.backoff', ['attempt' => $attempt, 'sleep_secs' => $seconds]);
-        sleep($seconds);
+        // Queue workers defer long waits back to the queue (Throttle defer
+        // mode) so a Meta cool-down never pins a worker slot; console
+        // commands keep the original inline sleep.
+        Throttle::wait($seconds, 'meta', 'rate limit');
     }
 
     /** Parse X-Business-Use-Case-Usage for estimated_time_to_regain_access (minutes → secs). */

@@ -22,6 +22,8 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
         <env name="DB_CONNECTION" value="sqlite"/>
+        <!-- Tests exercise MFA enforcement as BUILT (D-009); prod keeps the flag off until NTP is fixed. -->
+        <env name="HELM_REQUIRE_ADMIN_MFA" value="true"/>
         <env name="DB_DATABASE" value=":memory:"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

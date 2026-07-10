@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import * as mockApi from '@/lib/mockApi';
 import { api } from '@/lib/api';
 import { toast } from '@/stores/toastStore';
 import { useFiltersStore } from '@/stores/filtersStore';
@@ -153,64 +152,9 @@ export function useMasterSync() {
   });
 }
 
-export function useBrands() {
-  return useQuery({
-    queryKey: ['brands'],
-    queryFn: mockApi.getBrands,
-  });
-}
-
-export function useBrand(slug: string | undefined) {
-  return useQuery({
-    queryKey: ['brand', slug],
-    queryFn: () => (slug ? mockApi.getBrand(slug) : Promise.resolve(undefined)),
-    enabled: !!slug,
-  });
-}
-
-export function useConnections(brandId: number | undefined) {
-  return useQuery({
-    queryKey: ['connections', brandId],
-    queryFn: () => (brandId ? mockApi.getConnections(brandId) : Promise.resolve([])),
-    enabled: !!brandId,
-  });
-}
-
-export function useSyncLogs() {
-  return useQuery({ queryKey: ['sync-logs'], queryFn: mockApi.getSyncLogs });
-}
-
-export function useAdRows() {
-  return useQuery({ queryKey: ['ad-rows'], queryFn: mockApi.getAdRows });
-}
-
-export function useProductRows() {
-  return useQuery({ queryKey: ['product-rows'], queryFn: mockApi.getProductRows });
-}
-
-export function useAuditFindings() {
-  return useQuery({ queryKey: ['audit-findings'], queryFn: mockApi.getAuditFindings });
-}
-
-export function useTickets() {
-  return useQuery({ queryKey: ['tickets'], queryFn: mockApi.getTickets });
-}
-
-export function useAuditLog() {
-  return useQuery({ queryKey: ['audit-log'], queryFn: mockApi.getAuditLog });
-}
-
-export function usePlatformCredentials() {
-  return useQuery({
-    queryKey: ['platform-credentials'],
-    queryFn: mockApi.getPlatformCredentials,
-  });
-}
-
-export function usePlatformCredentialSchema() {
-  return useQuery({
-    queryKey: ['platform-credential-schema'],
-    queryFn: mockApi.getPlatformCredentialSchema,
-    staleTime: 60 * 60_000, // schema doesn't change often
-  });
-}
+// The mockApi-backed hooks that used to live below (useBrands, useBrand,
+// useConnections, useSyncLogs, useAdRows, useProductRows, useAuditFindings,
+// useTickets, useAuditLog, usePlatformCredentials, usePlatformCredentialSchema)
+// were removed 2026-07-10 along with src/lib/mockApi.ts: every shipped page
+// now reads the real API (useApiData.ts / useBrands.ts), and the Phase 2
+// placeholder pages render honest empty states instead of fixture data.

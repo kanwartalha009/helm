@@ -61,6 +61,20 @@ return Application::configure(basePath: dirname(__DIR__))
             ->onOneServer()
             ->appendOutputTo(storage_path('logs/schedule.log'));
 
+        // Twice-daily Shopify TODAY+YESTERDAY refresh (CR 2026-05-31, ratified
+        // as D-018 on 2026-07-10). Runs at 03:00/15:00 — NOT the CR's 01:00/13:00,
+        // because sync:daily now owns those slots and both commands skip brands
+        // with queued/running sync_logs (30-min idempotency): fired together,
+        // whichever dispatches second would skip everything. Two hours is enough
+        // for the daily fan-out to drain at current scale before this fires.
+        // This is what keeps the brand-page "today" tile from going stale.
+        $schedule->command('sync:shopify-rolling')
+            ->twiceDailyAt(3, 15, 0)
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
         // FX rates — 13:30 UTC, just after the 13:00 sync. Pulls yesterday's
         // native->USD rates for every active brand currency into currency_rates,
         // then (13:45) sweeps any rows that synced before the rate existed.

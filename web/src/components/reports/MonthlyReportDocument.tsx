@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import { REPORT_CSS } from './ReportDocument';
-import type { MonthlyCustomerRow, MonthlyFunnelRow, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySeriesData } from '@/types/reports';
+import type { MonthlyChannelRow, MonthlyCustomerRow, MonthlyFunnelRow, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySeriesData } from '@/types/reports';
 
 const DEFAULT_COMMENTARY =
   'Summarise the month for the store owner here — what moved, how it landed against targets, and the plan for next month. Editable before you send.';
@@ -127,17 +127,18 @@ export function MonthlyReportDocument({
       <SectionBlock num="04" title="Best sellers" sub="Top products by revenue, with stock context." section={sections.bestSellers} currency={currency} foot="Line-item product revenue — excludes untagged items, so this total runs below the order-level country and market totals above." />
 
       <div className="mrt-group"><span>Advertising</span></div>
-      <SectionBlock num="05" title="Revenue vs Meta spend by country" sub="All-channel revenue ÷ Meta spend per country — a blended efficiency, so it reads far higher than platform ROAS. Advantage+ spend with no country is shown separately as unattributed." section={sections.roasByCountry} currency={currency} tag="Meta spend" />
-      <SectionBlock num="06" title="Ad spend by placement" sub="Where the budget ran and how it performed — reach, ROAS and CPA by placement." section={sections.placement} currency={currency} tag="Meta only" />
-      <SectionBlock num="07" title="Ad spend by gender" sub="Spend, reach and ROAS by gender." section={sections.gender} currency={currency} tag="Meta only" />
-      <SectionBlock num="08" title="Ad spend by landing page × best sellers" sub="Is the ad budget behind the winners?" section={sections.landingSellers} currency={currency} />
+      <SectionBlock num="05" title="Channel mix" sub="Meta, Google and TikTok side by side — spend, purchases, revenue, ROAS and CPA for the month." section={sections.channelMix} currency={currency} tag="All platforms" />
+      <SectionBlock num="06" title="Revenue vs Meta spend by country" sub="All-channel revenue ÷ Meta spend per country — a blended efficiency, so it reads far higher than platform ROAS. Advantage+ spend with no country is shown separately as unattributed." section={sections.roasByCountry} currency={currency} tag="Meta spend" />
+      <SectionBlock num="07" title="Ad spend by placement" sub="Where the budget ran and how it performed — reach, ROAS and CPA by placement." section={sections.placement} currency={currency} tag="Meta only" />
+      <SectionBlock num="08" title="Ad spend by gender" sub="Spend, reach and ROAS by gender." section={sections.gender} currency={currency} tag="Meta only" />
+      <SectionBlock num="09" title="Ad spend by landing page × best sellers" sub="Is the ad budget behind the winners?" section={sections.landingSellers} currency={currency} />
 
       <div className="mrt-group"><span>Customers</span></div>
-      <SectionBlock num="09" title="New vs existing customers" sub="New vs returning counts, retention, CAC and blended ROAS by month." section={sections.newVsExisting} currency={currency} />
+      <SectionBlock num="10" title="New vs existing customers" sub="New vs returning counts, retention, CAC and blended ROAS by month." section={sections.newVsExisting} currency={currency} />
 
       <div className="mrt-group"><span>Web</span></div>
-      <SectionBlock num="10" title="Web funnel by country" sub="Sessions → cart → checkout → purchase." section={sections.funnelCountry} currency={currency} />
-      <SectionBlock num="11" title="Web funnel by landing path" sub="Which entry pages convert — top entry pages with at least one purchase." section={sections.funnelLanding} currency={currency} foot="The entry page of each session. Visitors often complete the purchase on a different page, so purchases are attributed to where the journey started." />
+      <SectionBlock num="11" title="Web funnel by country" sub="Sessions → cart → checkout → purchase." section={sections.funnelCountry} currency={currency} />
+      <SectionBlock num="12" title="Web funnel by landing path" sub="Which entry pages convert — top entry pages with at least one purchase." section={sections.funnelLanding} currency={currency} foot="The entry page of each session. Visitors often complete the purchase on a different page, so purchases are attributed to where the journey started." />
 
       {(editable || nextStepsRaw) && (
         <section className="rpt-sec">
@@ -184,6 +185,8 @@ function SectionBlock({ num, title, sub, section, currency, tag, foot }: { num: 
         <FunnelTable rows={section.funnel} />
       ) : section.status === 'ready' && section.customers ? (
         <NewVsExistingTable rows={section.customers} currency={currency} />
+      ) : section.status === 'ready' && section.channels ? (
+        <ChannelMixTable rows={section.channels} currency={currency} />
       ) : (
         <Ribbon status={section.status} note={section.note} />
       )}
@@ -524,6 +527,43 @@ function NewVsExistingTable({ rows, currency }: { rows: MonthlyCustomerRow[]; cu
         </tbody>
       </table>
       <div className="rpt-cap">ROAS·new is an estimate — new customers × AOV ÷ ad spend (uses blended AOV, so it runs slightly high).</div>
+    </div>
+  );
+}
+
+// Channel mix — Meta / Google / TikTok side by side. Revenue and ROAS are each
+// platform's own attributed value (they overlap), so the footnote flags it.
+function ChannelMixTable({ rows, currency }: { rows: MonthlyChannelRow[]; currency: string }) {
+  const money = (v: number | null) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+  return (
+    <div className="rpt-tbl-wrap">
+      <table className="rpt-tbl mrt-tbl">
+        <thead>
+          <tr>
+            <th>Channel</th>
+            <th className="r">Spend</th>
+            <th className="r">Share</th>
+            <th className="r">Purch.</th>
+            <th className="r">Revenue</th>
+            <th className="r">ROAS</th>
+            <th className="r">CPA</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.platform}>
+              <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
+              <td className="r">{money(r.spend)}</td>
+              <td className="r">{r.share == null ? '—' : `${(r.share * 100).toFixed(0)}%`}</td>
+              <td className="r">{r.purchases.toLocaleString()}</td>
+              <td className="r">{money(r.revenue)}</td>
+              <td className={`r ${gradeCol(r.roas, rows.map((x) => x.roas), 'high')}`}>{r.roas == null ? '—' : `${r.roas.toFixed(2)}×`}</td>
+              <td className={`r ${gradeCol(r.cpa, rows.map((x) => x.cpa), 'low')}`}>{money(r.cpa)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="rpt-cap">Revenue and ROAS are platform-reported — each platform's own attribution, which overlaps, so they don't sum to Shopify revenue. The blended ROAS at the top of the report is the true figure; spend and purchases here are actuals.</div>
     </div>
   );
 }

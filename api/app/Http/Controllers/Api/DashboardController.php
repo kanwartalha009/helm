@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Brand;
 use App\Services\Aggregation\AudienceQuery;
 use App\Services\Aggregation\DashboardQuery;
+use App\Services\Aggregation\DashboardQuerySetBased;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,6 +15,7 @@ class DashboardController extends Controller
 {
     public function __construct(
         private readonly DashboardQuery $query,
+        private readonly DashboardQuerySetBased $setBased,
         private readonly AudienceQuery $audience,
     ) {}
 
@@ -38,8 +39,13 @@ class DashboardController extends Controller
             'window'          => ['nullable', 'in:7,30,90'],
         ]);
 
+        // Engine flag (config/helm.php): legacy per-brand queries vs the
+        // set-based engine. Same output contract — verified by
+        // `php artisan helm:dashboard-parity` before any flip.
+        $engine = config('helm.dashboard_engine') === 'set' ? $this->setBased : $this->query;
+
         return response()->json([
-            'rows' => $this->query->run($params),
+            'rows' => $engine->run($params),
         ]);
     }
 
@@ -64,40 +70,7 @@ class DashboardController extends Controller
         return response()->json($this->audience->run($params));
     }
 
-    public function summary(Request $request): JsonResponse
-    {
-        $params = $request->validate([
-            'date_range' => ['nullable', 'string'],
-            'currency'   => ['nullable', 'string', 'size:3'],
-            'group_tag'  => ['nullable', 'string', 'max:60'],
-        ]);
-
-        return response()->json($this->query->summary($params));
-    }
-
-    /**
-     * GET /api/brands/{brand}/trend
-     * Query: from, to, platforms
-     */
-    public function trend(Request $request, Brand $brand): JsonResponse
-    {
-        $this->authorize('view', $brand);
-
-        $params = $request->validate([
-            'from'      => ['required', 'date_format:Y-m-d'],
-            'to'        => ['required', 'date_format:Y-m-d', 'after_or_equal:from'],
-            'platforms' => ['nullable', 'array'],
-            'platforms.*' => ['string', 'in:shopify,meta,google,tiktok'],
-        ]);
-
-        return response()->json([
-            'brandId' => $brand->id,
-            'series'  => $this->query->trend(
-                $brand->id,
-                $params['from'],
-                $params['to'],
-                $params['platforms'] ?? null,
-            ),
-        ]);
-    }
+    // summary() and trend() were deleted 2026-07-10 (D-020): both were stubs
+    // (hardcoded zeros / empty series) on live routes with no SPA consumer.
+    // Re-add with real daily_metrics implementations when a feature needs them.
 }

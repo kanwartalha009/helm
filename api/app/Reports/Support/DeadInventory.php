@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Reports\Support;
 
 use App\Models\InventorySnapshot;
+use Carbon\CarbonImmutable;
 
 /**
  * Reads the latest inventory snapshot and surfaces dead / overstocked stock —
@@ -35,10 +36,16 @@ final class DeadInventory
             return null;
         }
 
+        // Normalise to a plain Y-m-d before whereDate(): MySQL's DATE column
+        // returns '2026-07-10' but sqlite (tests) stores the cast Carbon as
+        // '2026-07-10 00:00:00', and whereDate() compares the raw string —
+        // the un-normalised value silently matches zero rows there.
+        $capturedDate = CarbonImmutable::parse((string) $capturedOn)->toDateString();
+
         $rows = InventorySnapshot::query()
             ->where('brand_id', $brandId)
             ->where('dimension_type', $dimensionType)
-            ->whereDate('captured_on', $capturedOn)
+            ->whereDate('captured_on', $capturedDate)
             ->get();
 
         if ($rows->isEmpty()) {
@@ -91,7 +98,7 @@ final class DeadInventory
         usort($items, static fn (array $a, array $b): int => $b['endingUnits'] <=> $a['endingUnits']);
 
         return [
-            'capturedOn'   => (string) $capturedOn,
+            'capturedOn'   => $capturedDate,
             'windowDays'   => $window,
             'rows'         => array_slice($items, 0, $limit),
             'deadCount'    => $deadCount,

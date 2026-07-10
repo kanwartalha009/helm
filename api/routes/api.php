@@ -5,6 +5,9 @@ declare(strict_types=1);
 use App\Http\Controllers\Api\AdsController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BrandAuditFindingsController;
+use App\Http\Controllers\Api\BrandChatController;
+use App\Http\Controllers\Api\BrandProductsController;
 use App\Http\Controllers\Api\BrandController;
 use App\Http\Controllers\Api\ConnectionController;
 use App\Http\Controllers\Api\DashboardController;
@@ -68,7 +71,9 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
 
     // Dashboard
     Route::get('dashboard',          [DashboardController::class, 'index']);
-    Route::get('dashboard/summary',  [DashboardController::class, 'summary']);
+    // dashboard/summary + brands/{brand}/trend stubs deleted 2026-07-10 (D-020):
+    // both returned hardcoded zeros / [] with no SPA consumer. Re-add with real
+    // implementations when a feature needs them.
     // Audience view — Meta spend split by a breakdown axis (audience/placement/…).
     Route::get('dashboard/audience', [DashboardController::class, 'audience']);
 
@@ -84,8 +89,11 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         Route::patch('brands/{brand}',   [BrandController::class, 'update']);
         Route::delete('brands/{brand}',  [BrandController::class, 'destroy']);
 
-        Route::get('brands/{brand}/trend',   [DashboardController::class, 'trend']);
         Route::get('brands/{brand}/metrics', [BrandController::class, 'metrics']);
+        // Deep-analytics pages (slice 2.1/2.4 data): product performance +
+        // rules-only store audit findings.
+        Route::get('brands/{brand}/products',       [BrandProductsController::class, 'index']);
+        Route::get('brands/{brand}/audit-findings', [BrandAuditFindingsController::class, 'index']);
 
         // Inventory Intelligence — per-product stock × Meta spend for one brand.
         Route::get('brands/{brand}/inventory', [InventoryController::class, 'show']);
@@ -100,6 +108,13 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         // share token. Report type is validated against the registry.
         Route::get('brands/{brand}/reports/{type}',         [ReportController::class, 'show']);
         Route::post('brands/{brand}/reports/{type}/shares', [ReportController::class, 'createShare']);
+        // LLM layer (D-016, ratified 2026-07-10). Generation/editing is
+        // admin/manager-only — every generate call spends real tokens.
+        Route::middleware('role:master_admin,manager')->group(function (): void {
+            Route::post('brands/{brand}/reports/{type}/narrative',  [ReportController::class, 'generateNarrative']);
+            Route::patch('brands/{brand}/reports/{type}/narrative', [ReportController::class, 'saveNarrative']);
+            Route::post('brands/{brand}/ask',                       [BrandChatController::class, 'ask']);
+        });
 
         // Brand-level team assignment (brand_user_access). Admin/manager only —
         // gated by BrandPolicy::update inside the controller.

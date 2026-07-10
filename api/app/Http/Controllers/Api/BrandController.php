@@ -28,7 +28,7 @@ class BrandController extends Controller
         $brands = Brand::query()
             ->when($request->query('status'), fn ($q, $v) => $q->where('status', $v))
             ->when($request->query('group_tag'), fn ($q, $v) => $q->where('group_tag', $v))
-            ->when($request->query('search'), fn ($q, $v) => $q->where('name', 'ilike', "%{$v}%"))
+            ->when($request->query('search'), fn ($q, $v) => $q->where('name', 'like', "%{$v}%")) // like, not ilike — Postgres-only operator 500s on MySQL (D-001; audit 2026-07-10)
             // Eager-load for the list columns: connection summary (count / platforms
             // / freshest sync) and the assigned team. Also removes the shopDomain
             // N+1 the resource previously ran once per row.
@@ -216,7 +216,17 @@ class BrandController extends Controller
         return response()->json(['userIds' => $newIds]);
     }
 
-    public function metrics(Brand $brand): JsonResponse
+    /**
+     * Rolled-up tiles + a bounded daily series for the brand detail page.
+     *
+     * Tiles are computed as SQL aggregates (constant memory regardless of how
+     * much history the brand has); the daily drill-in is windowed — default 90
+     * days, `?days=` up to 365 — instead of loading every daily_metrics row
+     * into PHP (audit 2026-07-10, layer: database). Date bounds use half-open
+     * ranges [day, day+1) on the raw column so the (brand_id, date, platform)
+     * index is used on MySQL and the same comparison works on sqlite in tests.
+     */
+    public function metrics(Request $request, Brand $brand): JsonResponse
     {
         $this->authorize('view', $brand);
 
@@ -225,112 +235,71 @@ class BrandController extends Controller
         $yesterday = $today->subDay();
         $l7Start   = $today->subDays(6);   // inclusive 7-day window: today + 6 back
         $l30Start  = $today->subDays(29);
+        $tomorrow  = $today->addDay();
 
-        // One sweep over every metric row — cheaper than 4 separate aggregates.
-        $rows = DailyMetric::query()
-            ->where('brand_id', $brand->id)
-            ->orderByDesc('date')
-            ->get();
+        $windowDays = (int) $request->query('days', '90');
+        $windowDays = max(1, min(365, $windowDays));
 
-        $todayKey     = $today->toDateString();
-        $yesterdayKey = $yesterday->toDateString();
-        $l7StartKey   = $l7Start->toDateString();
-        $l30StartKey  = $l30Start->toDateString();
-
-        $tile = static function (string $label) {
+        $tile = static function (string $label, array $agg, bool $forceIncomplete = false): array {
             return [
                 'label'       => $label,
-                'revenue'     => 0.0,
-                'netSales'    => 0.0,
-                'totalSales'  => 0.0,
-                'orders'      => 0,
-                'refunds'     => 0.0,
-                'days'        => 0,
-                'isComplete'  => true,
+                'revenue'     => round((float) ($agg['revenue'] ?? 0), 2),
+                'netSales'    => round((float) ($agg['net_sales'] ?? 0), 2),
+                'totalSales'  => round((float) ($agg['total_sales'] ?? 0), 2),
+                'orders'      => (int) ($agg['orders'] ?? 0),
+                'refunds'     => round((float) ($agg['refunds'] ?? 0), 2),
+                'days'        => (int) ($agg['days'] ?? 0),
+                'isComplete'  => ! $forceIncomplete && (int) ($agg['incomplete_days'] ?? 0) === 0,
             ];
         };
 
-        $todayTile     = $tile('Today');
-        $yesterdayTile = $tile('Yesterday');
-        $last7Tile     = $tile('Last 7 days');
-        $last30Tile    = $tile('Last 30 days');
-        $allTile       = $tile('All time');
-
-        $todayTile['isComplete']     = false; // today is always partial
-        $yesterdayTile['days']       = 1;
-
-        foreach ($rows as $r) {
-            // We only aggregate Shopify rows here — ad platforms add spend later.
-            if ($r->platform !== 'shopify') {
-                continue;
+        $aggregate = function (?string $from, ?string $toExclusive) use ($brand): array {
+            $q = DailyMetric::query()
+                ->where('brand_id', $brand->id)
+                ->where('platform', 'shopify');
+            if ($from !== null) {
+                $q->where('date', '>=', $from);
+            }
+            if ($toExclusive !== null) {
+                $q->where('date', '<', $toExclusive);
             }
 
-            $d = $r->date->toDateString();
-            $rev = (float) ($r->revenue ?? 0);   // Total revenue (gross, before returns) — the toggle option
-            $net = (float) ($r->net_sales ?? 0);   // Net sales (hidden in UI, still aggregated)
-            // Total revenue = Shopify Total sales WITH refunds added back (Bosco
-            // 2026-06-25): total_sales already nets returns out, so we add them
-            // back. The Refunds figure ($ref) is still surfaced on its own.
-            $ref = (float) ($r->refunds_amount ?? 0);
-            $tot = (float) ($r->total_sales ?? 0) + $ref;
-            $ord = (int)   ($r->orders ?? 0);
+            $row = $q->selectRaw(
+                'SUM(COALESCE(revenue, 0))                                   as revenue,'
+                . 'SUM(COALESCE(net_sales, 0))                               as net_sales,'
+                . 'SUM(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0)) as total_sales,'
+                . 'SUM(COALESCE(orders, 0))                                  as orders,'
+                . 'SUM(COALESCE(refunds_amount, 0))                          as refunds,'
+                . 'COUNT(*)                                                  as days,'
+                . 'SUM(CASE WHEN is_complete THEN 0 ELSE 1 END)              as incomplete_days'
+            )->first();
 
-            $allTile['revenue'] += $rev;
-            $allTile['netSales']   += $net;
-            $allTile['totalSales'] += $tot;
-            $allTile['orders']     += $ord;
-            $allTile['refunds']    += $ref;
-            $allTile['days']       += 1;
-            if (! $r->is_complete) {
-                $allTile['isComplete'] = false;
-            }
+            return $row !== null ? (array) $row->getAttributes() : [];
+        };
 
-            if ($d === $todayKey) {
-                $todayTile['revenue'] = $rev;
-                $todayTile['netSales']   = $net;
-                $todayTile['totalSales'] = $tot;
-                $todayTile['orders']     = $ord;
-                $todayTile['refunds']    = $ref;
-                $todayTile['days']       = 1;
-                // isComplete already false above.
-            }
-            if ($d === $yesterdayKey) {
-                $yesterdayTile['revenue'] = $rev;
-                $yesterdayTile['netSales']   = $net;
-                $yesterdayTile['totalSales'] = $tot;
-                $yesterdayTile['orders']     = $ord;
-                $yesterdayTile['refunds']    = $ref;
-                $yesterdayTile['isComplete'] = (bool) $r->is_complete;
-            }
-            if ($d >= $l7StartKey && $d <= $todayKey) {
-                $last7Tile['revenue'] += $rev;
-                $last7Tile['netSales']   += $net;
-                $last7Tile['totalSales'] += $tot;
-                $last7Tile['orders']     += $ord;
-                $last7Tile['refunds']    += $ref;
-                $last7Tile['days']       += 1;
-                if (! $r->is_complete) {
-                    $last7Tile['isComplete'] = false;
-                }
-            }
-            if ($d >= $l30StartKey && $d <= $todayKey) {
-                $last30Tile['revenue'] += $rev;
-                $last30Tile['netSales']   += $net;
-                $last30Tile['totalSales'] += $tot;
-                $last30Tile['orders']     += $ord;
-                $last30Tile['refunds']    += $ref;
-                $last30Tile['days']       += 1;
-                if (! $r->is_complete) {
-                    $last30Tile['isComplete'] = false;
-                }
-            }
-        }
+        $todayAgg     = $aggregate($today->toDateString(), $tomorrow->toDateString());
+        $yesterdayAgg = $aggregate($yesterday->toDateString(), $today->toDateString());
+        $last7Agg     = $aggregate($l7Start->toDateString(), $tomorrow->toDateString());
+        $last30Agg    = $aggregate($l30Start->toDateString(), $tomorrow->toDateString());
+        $allAgg       = $aggregate(null, null);
 
-        // One row per date. Shopify carries sales (net sales, Total revenue =
-        // Shopify total_sales, orders, refunds); the polymorphic Meta/Google/
-        // TikTok rows carry spend, which we blend into one figure plus a Blended
-        // ROAS (Total revenue ÷ spend) in the brand's native currency. $rows is
-        // date-desc, so first-seen order keeps the table newest-first.
+        $todayTile              = $tile('Today', $todayAgg, forceIncomplete: true); // today is always partial
+        $yesterdayTile          = $tile('Yesterday', $yesterdayAgg);
+        $yesterdayTile['days']  = max(1, $yesterdayTile['days']);
+        $last7Tile              = $tile('Last 7 days', $last7Agg);
+        $last30Tile             = $tile('Last 30 days', $last30Agg);
+        $allTile                = $tile('All time', $allAgg);
+
+        // Daily drill-in: one row per date, Shopify sales + blended ad spend,
+        // newest first — same shape as before, now bounded to the window.
+        $dailyStart = $today->subDays($windowDays - 1)->toDateString();
+        $rows = DailyMetric::query()
+            ->where('brand_id', $brand->id)
+            ->where('date', '>=', $dailyStart)
+            ->where('date', '<', $tomorrow->toDateString())
+            ->orderByDesc('date')
+            ->get();
+
         $daily     = [];
         $idxByDate = [];
         foreach ($rows as $r) {
@@ -378,16 +347,17 @@ class BrandController extends Controller
         unset($dayRow);
 
         return response()->json([
-            'currency' => $brand->base_currency,
-            'timezone' => $brand->timezone,
-            'tiles'    => [
+            'currency'   => $brand->base_currency,
+            'timezone'   => $brand->timezone,
+            'windowDays' => $windowDays,
+            'tiles'      => [
                 'today'     => $todayTile,
                 'yesterday' => $yesterdayTile,
                 'last7'     => $last7Tile,
                 'last30'    => $last30Tile,
                 'allTime'   => $allTile,
             ],
-            'daily'    => $daily,
+            'daily'      => $daily,
         ]);
     }
 }

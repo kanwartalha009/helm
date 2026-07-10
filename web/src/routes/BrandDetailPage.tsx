@@ -437,6 +437,7 @@ function OverviewTab({
           Daily breakdown
         </h3>
         <span className="text-xs muted">
+          {metrics?.windowDays ? `last ${metrics.windowDays} days · ` : ''}
           {tiles!.allTime.days} day{tiles!.allTime.days === 1 ? '' : 's'} on file ·
           all-time total revenue {formatMoney(tiles!.allTime.totalSales, currency)}
         </span>
@@ -493,13 +494,16 @@ function OverviewTab({
         <h3 className="section-title">Quick links</h3>
         <Card style={{ padding: 4, maxWidth: 360 }}>
           <Link to={`/brands/${brand.slug}/ads`} className="dropdown-item">
-            Ad performance (Phase 2)
+            Ad performance
           </Link>
           <Link to={`/brands/${brand.slug}/products`} className="dropdown-item">
-            Product performance (Phase 2)
+            Product performance
+          </Link>
+          <Link to={`/brands/${brand.slug}/ask`} className="dropdown-item">
+            Ask the data (AI)
           </Link>
           <Link to={`/brands/${brand.slug}/audit`} className="dropdown-item">
-            Store audit (Phase 2)
+            Store audit
           </Link>
           <div className="dropdown-divider" />
           <Link to="/tickets" className="dropdown-item">

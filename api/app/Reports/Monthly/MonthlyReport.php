@@ -137,6 +137,7 @@ final class MonthlyReport implements ReportType
                 'bestSellers'    => $this->commerceSection('product', $brand->id, $months, $filters->usd, $limit),
                 'market'         => $this->marketSection($brand->id, $months, $filters->usd),
                 'gender'         => $this->genderSection($brand, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
+                'channelMix'     => $this->channelMixSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'roasByCountry'  => $this->roasByCountrySection($brand->id, $months, $filters->usd),
                 'placement'      => $this->placementSection($brand, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'landingSellers' => $this->landingSellersSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString()),
@@ -272,6 +273,69 @@ final class MonthlyReport implements ReportType
         usort($rows, static fn (array $a, array $b): int => $b['cost'] <=> $a['cost']);
 
         return ['status' => 'ready', 'metrics' => $rows];
+    }
+
+    /**
+     * Channel mix — Meta / Google / TikTok side by side for the report month:
+     * spend, spend share, purchases, attributed revenue, ROAS and CPA, all from
+     * daily_metrics (additive, fx-aware). This is the "which channel is working"
+     * headline. NOTE the per-platform revenue is each platform's OWN attributed
+     * value (Meta 7-day click, Google/TikTok their own models) — they overlap and
+     * over-claim, so they DON'T sum to Shopify revenue; the blended MER upstairs is
+     * the source of truth. The renderer footnotes this. A platform with no spend
+     * and no activity is dropped rather than shown as a €0 line.
+     *
+     * @return array<string, mixed>
+     */
+    private function channelMixSection(int $brandId, string $start, string $end, bool $usd): array
+    {
+        $disp = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+
+        $labels = ['meta' => 'Meta', 'google' => 'Google', 'tiktok' => 'TikTok'];
+
+        $rows = [];
+        $totalSpend = 0.0;
+        foreach (self::AD_PLATFORMS as $p) {
+            $agg = DailyMetric::query()
+                ->where('brand_id', $brandId)
+                ->where('platform', $p)
+                ->whereBetween('date', [$start, $end])
+                ->selectRaw("COALESCE(SUM({$disp('spend')}), 0) AS spend,
+                    COALESCE(SUM(conversions), 0) AS purchases,
+                    COALESCE(SUM({$disp('conversion_value')}), 0) AS revenue")
+                ->first();
+
+            $spend = round((float) ($agg->spend ?? 0), 2);
+            $purch = (int) ($agg->purchases ?? 0);
+            $rev   = round((float) ($agg->revenue ?? 0), 2);
+            if ($spend <= 0.0 && $purch <= 0 && $rev <= 0.0) {
+                continue; // platform not running this month
+            }
+
+            $totalSpend += $spend;
+            $rows[] = [
+                'platform'  => $p,
+                'label'     => $labels[$p] ?? ucfirst($p),
+                'spend'     => $spend,
+                'purchases' => $purch,
+                'revenue'   => $rev,
+                'roas'      => $spend > 0.0 ? round($rev / $spend, 2) : null,
+                'cpa'       => $purch > 0 ? round($spend / $purch, 2) : null,
+                'share'     => null,
+            ];
+        }
+
+        if ($rows === []) {
+            return ['status' => 'no_data'];
+        }
+
+        foreach ($rows as &$r) {
+            $r['share'] = $totalSpend > 0.0 ? round($r['spend'] / $totalSpend, 4) : null;
+        }
+        unset($r);
+        usort($rows, static fn (array $a, array $b): int => $b['spend'] <=> $a['spend']);
+
+        return ['status' => 'ready', 'channels' => $rows];
     }
 
     /**

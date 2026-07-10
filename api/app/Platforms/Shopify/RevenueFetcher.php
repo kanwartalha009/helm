@@ -44,7 +44,9 @@ use Throwable;
  * transient), net_sales is left null (missing, NOT zero — spec rule 9) and the
  * order-based revenue/orders/refunds still record. The failure is logged.
  */
-final class RevenueFetcher
+// Not final: SyncBrandDayJob type-hints this concrete class, and the job's
+// lifecycle tests need a test double at that seam (tests/Feature/SyncBrandDayJobTest).
+class RevenueFetcher
 {
     /** Phase-1 single-page limit per the spec. We log + flag if a day exceeds it. */
     private const PAGE_SIZE = 100;
