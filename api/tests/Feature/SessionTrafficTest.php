@@ -253,11 +253,13 @@ final class SessionTrafficTest extends TestCase
         $this->assertNotNull($ghost['sessionsByType'], '…not a null');
     }
 
-    public function test_only_shopifys_four_traffic_types_are_reported(): void
+    public function test_all_five_shopify_traffic_types_are_reported_including_the_rare_one(): void
     {
-        // Bosco's screenshot shows an "Unattributed" bucket. ShopifyQL has no such value
-        // (probe 2026-07-12: paid | direct | organic | unknown, and they sum EXACTLY to the
-        // store total). A stray value must not silently create a fifth column.
+        // REGRESSION. The first cut of this feature reported four types and dropped
+        // `unattributed`, because a 30-day probe never returned it. Over a FULL YEAR of a real
+        // store it is there: paid 3,117,263 · direct 2,599,142 · unknown 757,967 ·
+        // organic 457,105 · unattributed 7 — summing exactly to the 6,931,484 store total.
+        // 0.0001% is rare. Rare is not absent, and dropping it loses real sessions.
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-10 09:00:00', 'UTC'));
 
         $brand = $this->brand();
@@ -266,12 +268,19 @@ final class SessionTrafficTest extends TestCase
         foreach (['2026-07-03', '2026-07-04', '2026-07-05', '2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09'] as $d) {
             $this->row($brand, $d, 'product', 'jay', 'paid', 1);
         }
-        // Something Shopify has never returned sneaks into the table.
-        $this->row($brand, '2026-07-09', 'product', 'jay', 'unattributed', 999);
+        $this->row($brand, '2026-07-09', 'product', 'jay', 'unattributed', 3);
 
         $out = app(InventoryQuery::class)->run($brand->fresh(), ['period' => 'last7']);
 
-        $this->assertSame(['paid', 'direct', 'organic', 'unknown'], array_keys($out['sessions']['byType']));
-        $this->assertSame(7, $out['sessions']['total'], 'the unknown 999 must not enter the totals');
+        $this->assertSame(
+            ['paid', 'direct', 'organic', 'unknown', 'unattributed'],
+            array_keys($out['sessions']['byType']),
+        );
+        $this->assertSame(3, $out['sessions']['byType']['unattributed']);
+        $this->assertSame(10, $out['sessions']['total'], '7 paid + 3 unattributed — none dropped');
+
+        $jay = collect($out['products'])->firstWhere('handle', 'jay');
+        $this->assertSame(3, $jay['sessionsByType']['unattributed']);
+        $this->assertSame(10, $jay['sessions']);
     }
 }

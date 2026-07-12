@@ -1,8 +1,8 @@
-// Inventory Intelligence — per-brand product table (stock × Meta spend).
+// Inventory Intelligence — per-brand product table (stock × ad spend).
 // Mirrors the API shape returned by InventoryQuery::run (GET
 // /api/brands/{slug}/inventory). All money is in the brand's native currency;
 // revenue is Total sales + refunds (before returns), Online Store only; ROAS is
-// blended (revenue ÷ Meta spend) at the product level.
+// blended (revenue ÷ ad spend, all connected platforms) at the product level.
 
 export type InventoryStatus = 'ok' | 'alert' | 'pause';
 
@@ -18,10 +18,11 @@ export interface InventoryVariant {
   q: number;
 }
 
-// Shopify's own four traffic types. There is NO "unattributed" — Bosco's screenshot shows one,
-// but that value does not exist in the ShopifyQL `traffic_type` domain (probe, 2026-07-12), so
-// we don't manufacture a column for it.
-export type TrafficType = 'paid' | 'direct' | 'organic' | 'unknown';
+// Shopify's five traffic types, verified against a full year of a real store: paid 3,117,263 ·
+// direct 2,599,142 · unknown 757,967 · organic 457,105 · unattributed 7 (they sum exactly to the
+// store total). `unattributed` is 0.0001% of traffic and never shows up in a 30-day sample —
+// rare, but real, so it gets a column rather than being quietly dropped.
+export type TrafficType = 'paid' | 'direct' | 'organic' | 'unknown' | 'unattributed';
 
 export type SessionSplit = Record<TrafficType, number>;
 
@@ -43,7 +44,7 @@ export interface InventoryProduct {
   // missing) — distinct from 0 (covered window, product genuinely spent nothing).
   spend: number | null;
   revenue: number | null;
-  // null when the product had no attributed Meta spend (ROAS is undefined, not 0)
+  // null when the product had no attributed ad spend (ROAS is undefined, not 0)
   // or when spend data is missing for the window.
   roas: number | null;
   ads: number | null;
@@ -64,22 +65,29 @@ export interface InventorySummary {
   // null when no commerce rows are synced for the window — render '—', not 0.
   units: number | null;
   unitsPrev: number | null;
-  // Total Meta spend for the brand = attributed + unattributed. The blended
-  // ROAS below uses this (not attributedSpend) so the headline isn't flattered.
+  // Total AD spend for the brand = attributed + unattributed, across every platform in
+  // ad_product_daily (meta + google + tiktok). Was called `metaSpend`, which was never true:
+  // the query has always summed all platforms, so the old name mislabelled the number rather
+  // than describing it. `spendPlatforms` says which ones are actually in here.
+  // The blended ROAS below uses this (not attributedSpend) so the headline isn't flattered.
   // null when no ad-product rows are synced for the window — render '—', not €0.
-  metaSpend: number | null;
+  adSpend: number | null;
   attributedSpend: number | null;
   revenue: number | null;
   roas: number | null;
 }
 
-// Meta spend not tied to a single product (dynamic / Advantage+ catalog, home
+// Ad spend not tied to a single product (dynamic / Advantage+ catalog, home
 // and collection ads). Shown as a banner, never split across the product rows.
 export interface InventoryUnattributed {
   collection: number;
   other: number;
   total: number;
 }
+
+// The ad platforms actually contributing spend to this window, biggest first — e.g.
+// ['meta', 'google']. Empty = no ad rows at all. The UI names these instead of assuming Meta.
+export type SpendPlatform = 'meta' | 'google' | 'tiktok';
 
 // How far each dataset actually reaches. `catalog` is an ISO timestamp (same
 // meaning as the legacy top-level syncedAt); `commerce`/`adSpend` are Y-m-d —
@@ -128,6 +136,8 @@ export interface InventoryResponse {
   spendCurrencyMismatch?: boolean;
   // Archived/draft products excluded server-side from the table.
   excludedInactive?: number;
+  // Which ad platforms are in the spend/ROAS figures on this page.
+  spendPlatforms?: SpendPlatform[];
   // Sessions by traffic type (Bosco item B). Optional: brands whose backfill hasn't run yet
   // simply don't have it.
   sessions?: InventorySessions;

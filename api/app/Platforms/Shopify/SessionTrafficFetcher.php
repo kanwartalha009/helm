@@ -53,6 +53,16 @@ class SessionTrafficFetcher
     private const MAX_PAGES = 25;
 
     /**
+     * Shopify's traffic types, verified against a full YEAR of a real store (2026-07-12):
+     * paid 3,117,263 · direct 2,599,142 · unknown 757,967 · organic 457,105 · unattributed 7.
+     * They sum EXACTLY to the store total (6,931,484).
+     *
+     * `unattributed` is 0.0001% of traffic and does not appear in a 30-day sample at all —
+     * which is precisely why it must be in a named constant rather than inferred from a probe.
+     */
+    public const TRAFFIC_TYPES = ['paid', 'direct', 'organic', 'unknown', 'unattributed'];
+
+    /**
      * One day of session/traffic-type rows for a brand, aggregated by landing entity.
      *
      * @return array{rows: array<int, array<string, mixed>>, isComplete: bool, storeTotal: int|null, pagedTotal: int}
@@ -115,6 +125,26 @@ class SessionTrafficFetcher
                 'store_total' => $storeTotal,
                 'paged_total' => $pagedTotal,
             ]);
+        }
+
+        // A traffic type we don't know about would be counted in `pagedTotal` (so it still
+        // reconciles) but would have nowhere to go in the read model — it would be lost
+        // SILENTLY, with the day looking green. `unattributed` was exactly that bug: 7 sessions
+        // a year, invisible in a 30-day probe. So a sixth type fails the day loudly instead.
+        $unknownTypes = [];
+        foreach ($raw as $r) {
+            $t = strtolower(trim((string) $r['traffic_type']));
+            if ($t !== '' && ! in_array($t, self::TRAFFIC_TYPES, true)) {
+                $unknownTypes[$t] = true;
+            }
+        }
+        if ($unknownTypes !== []) {
+            Log::warning('shopify.session_traffic.unknown_traffic_type', [
+                'brand_id' => $conn->brand_id,
+                'date'     => $day,
+                'types'    => array_keys($unknownTypes),
+            ]);
+            $isComplete = false;
         }
 
         return [
@@ -181,17 +211,26 @@ class SessionTrafficFetcher
     }
 
     /**
-     * Shopify returns exactly four traffic types: paid, direct, organic, unknown. Bosco's
-     * screenshot also shows "Unattributed" — that value does NOT exist in the ShopifyQL
-     * `traffic_type` domain, so we do not manufacture it. An unrecognised value is dropped
-     * rather than guessed at; the reconciliation check will then fail and the day is marked
-     * incomplete, which is the correct outcome for "Shopify changed something under us".
+     * Shopify's five traffic types: paid, direct, organic, unknown, unattributed.
+     *
+     * `unattributed` is REAL but vanishingly rare — 7 sessions in a full year on a store doing
+     * 6.9M (0.0001%). A 30-day probe does not see it, which is exactly how it got left out of
+     * the first cut of this file. Rare is not absent: dropping it would silently break the
+     * invariant this whole class exists to defend (Σ rows = the store's own total), and the
+     * reconciliation check would NOT have caught it, because `pagedTotal` is summed from the
+     * raw rows BEFORE this filter runs. A row we cannot classify is a row we lose.
+     *
+     * An unrecognised value now poisons the day deliberately: it is returned as-is, fails the
+     * allowlist at write time, and the day is marked incomplete — the right outcome for
+     * "Shopify added a sixth type under us".
+     *
+     * @return string|null null ONLY for a genuinely empty value
      */
     private function normaliseTrafficType(string $type): ?string
     {
         $t = strtolower(trim($type));
 
-        return in_array($t, ['paid', 'direct', 'organic', 'unknown'], true) ? $t : null;
+        return $t === '' ? null : $t;
     }
 
     /**

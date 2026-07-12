@@ -3,7 +3,7 @@ import { AppLayout } from '@/components/shell/AppLayout';
 import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { Banner } from '@/components/ui';
 import { InventoryTable } from '@/components/inventory/InventoryTable';
-import { SessionTrafficStrip } from '@/components/inventory/SessionTraffic';
+import { EMPTY_SPLIT, SessionTrafficStrip, TRAFFIC_TYPES } from '@/components/inventory/SessionTraffic';
 import { useInventory } from '@/hooks/useInventory';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { useUsers } from '@/hooks/useApiData';
@@ -148,13 +148,12 @@ export function InventoryPage() {
       // member's sessions are null (window not reconciled) it contributes nothing, and a
       // group whose members are ALL null stays null rather than collapsing to 0.
       if (p.sessionsByType) {
-        const base = g.sessionsByType ?? { paid: 0, direct: 0, organic: 0, unknown: 0 };
-        g.sessionsByType = {
-          paid: base.paid + p.sessionsByType.paid,
-          direct: base.direct + p.sessionsByType.direct,
-          organic: base.organic + p.sessionsByType.organic,
-          unknown: base.unknown + p.sessionsByType.unknown,
-        };
+        const base = g.sessionsByType ?? EMPTY_SPLIT;
+        const next = { ...base };
+        // Iterate the type list rather than naming keys, so adding a sixth traffic type is a
+        // one-line change and cannot silently skip a bucket here.
+        for (const t of TRAFFIC_TYPES) next[t] = base[t] + p.sessionsByType[t];
+        g.sessionsByType = next;
       }
     }
     const groups = [...map.values()];
@@ -168,7 +167,7 @@ export function InventoryPage() {
           ? Math.round(((g.units - g.unitsPrev) / g.unitsPrev) * 100)
           : null;
       g.status = g.stock <= 0 ? 'pause' : g.stock <= 20 ? 'alert' : 'ok';
-      // null spend = unknown (unsynced window) — never claim "No Meta spend".
+      // null spend = unknown (unsynced window) — never claim "No ad spend".
       g.action =
         g.status === 'pause' ? 'out_of_stock'
         : g.status === 'alert' ? 'low_stock'
@@ -235,8 +234,8 @@ export function InventoryPage() {
   const s = data?.summary;
   const unitsDelta = s ? pctDelta(s.units, s.unitsPrev) : null;
   const attributedPct =
-    s && s.metaSpend != null && s.metaSpend > 0 && s.attributedSpend != null
-      ? Math.round((s.attributedSpend / s.metaSpend) * 100)
+    s && s.adSpend != null && s.adSpend > 0 && s.attributedSpend != null
+      ? Math.round((s.attributedSpend / s.adSpend) * 100)
       : null;
   // Whether Meta is connected — knowable from the dashboard brand row's
   // platform list. When the list isn't present at all, err on showing the
@@ -344,8 +343,8 @@ export function InventoryPage() {
         </svg>
         <span>
           {selectedBrand?.name ?? 'Brand'} — revenue is <strong>Total sales + refunds</strong> (before returns), Online
-          Store only. Spend &amp; ROAS are <strong>Meta only</strong>, blended (all-orders revenue ÷ Meta spend). Window
-          ends yesterday (today excluded), in the brand&rsquo;s timezone.
+          Store only. Spend &amp; ROAS cover <strong>{platformNames(data?.spendPlatforms)}</strong>, blended
+          (all-orders revenue ÷ ad spend). Window ends yesterday (today excluded), in the brand&rsquo;s timezone.
         </span>
       </div>
 
@@ -391,7 +390,7 @@ export function InventoryPage() {
                   </svg>
                 }
               >
-                <strong>{money(data.unattributed.total)}</strong> of Meta spend isn&rsquo;t attributed to a single product
+                <strong>{money(data.unattributed.total)}</strong> of ad spend isn&rsquo;t attributed to a single product
                 (dynamic / Advantage+ catalog, home and collection ads) — counted in the totals and shown here, not split
                 across the rows below.{attributedPct !== null ? ` ~${attributedPct}% of spend is attributed.` : ''}
               </Banner>
@@ -401,7 +400,7 @@ export function InventoryPage() {
           {/* Ad-spend not synced for this window — say so explicitly so the
               '—' cells read as "unknown", never as €0. Gated on Meta being
               connected when the platform list is available. */}
-          {data.summary.metaSpend === null && metaConnected && (
+          {data.summary.adSpend === null && metaConnected && (
             <div
               style={{
                 display: 'flex',
@@ -421,7 +420,7 @@ export function InventoryPage() {
                 style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--warning, #9a6700)', flexShrink: 0 }}
               />
               <span>
-                <strong>Meta product spend isn&rsquo;t synced for this window</strong>
+                <strong>Ad product spend isn&rsquo;t synced for this window</strong>
                 <span className="muted">
                   {' '}— spend and ROAS show &lsquo;—&rsquo;, not zero. Latest synced day:{' '}
                   {data.dataThrough?.adSpend ?? 'none'}. The daily sync now keeps this fresh going forward; for
@@ -453,12 +452,12 @@ export function InventoryPage() {
                 )
               }
             />
-            <SummaryCard label="Meta spend" value={money(data.summary.metaSpend)} hint="attributed + unattributed" />
+            <SummaryCard label="Ad spend" value={money(data.summary.adSpend)} hint={`${platformNames(data.spendPlatforms)} · attributed + unattributed`} />
             <SummaryCard label="Revenue" value={money(data.summary.revenue)} hint="before returns · Online Store" />
             <SummaryCard
               label="Blended ROAS"
               value={data.summary.roas != null ? formatRoas(data.summary.roas) : '—'}
-              hint="revenue ÷ Meta spend"
+              hint="revenue ÷ ad spend"
               tone={data.summary.roas != null && data.summary.roas >= 3 ? 'g' : undefined}
             />
           </div>
@@ -503,7 +502,7 @@ export function InventoryPage() {
               <rect x="3" y="4" width="18" height="18" rx="2" />
               <path d="M16 2v4M8 2v4M3 10h18" />
             </svg>
-            Rows with no attributed Meta spend show ROAS as “—”. Blended ROAS in the cards uses total Meta spend
+            Rows with no attributed ad spend show ROAS as “—”. Blended ROAS in the cards uses total ad spend
             (attributed + unattributed); the product column sums to attributed spend only.
           </div>
         </>
@@ -511,6 +510,31 @@ export function InventoryPage() {
       </div>
     </AppLayout>
   );
+}
+
+/* ---- Which ad platforms are actually in the spend figures --------------- */
+
+const PLATFORM_LABEL: Record<string, string> = {
+  meta: 'Meta',
+  google: 'Google',
+  tiktok: 'TikTok',
+};
+
+/**
+ * Names the platforms whose spend is genuinely summed into this page.
+ *
+ * This exists because the page used to hardcode "Meta only" while `InventoryQuery` summed every
+ * platform in ad_product_daily — so a brand running Google or TikTok was shown their spend under
+ * a Meta label. The number was right; the label was a lie. Now the copy reads what the data says.
+ *
+ * Falls back to "ad platforms" rather than "Meta" when the list is absent (older API response),
+ * because a vague true statement beats a precise false one.
+ */
+function platformNames(platforms: string[] | undefined): string {
+  if (!platforms || platforms.length === 0) return 'ad platforms';
+  const names = platforms.map((p) => PLATFORM_LABEL[p] ?? p);
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(', ')} + ${names[names.length - 1]}`;
 }
 
 /* ---- Data-freshness strip --------------------------------------------- */
@@ -538,7 +562,7 @@ function FreshnessStrip({ data }: { data: InventoryResponse }) {
       amber: !dt.commerce || dt.commerce < data.to,
     });
     segs.push({
-      text: dt.adSpend ? `Meta product spend through ${dt.adSpend}` : 'Meta product spend not synced yet',
+      text: dt.adSpend ? `Ad product spend through ${dt.adSpend}` : 'Ad product spend not synced yet',
       amber: !dt.adSpend || dt.adSpend < data.to,
     });
     // Sessions only appear once the brand has been backfilled at all — an absent segment
@@ -591,7 +615,7 @@ function BrandChooser({
     <div style={{ maxWidth: 560, margin: '7vh auto 0' }}>
       <h2 style={{ textAlign: 'center', marginBottom: 6 }}>Choose a brand</h2>
       <p className="lede" style={{ textAlign: 'center', margin: '0 auto 22px', maxWidth: 440 }}>
-        Open a store to see its stock, Meta spend and blended ROAS by product.
+        Open a store to see its stock, ad spend and blended ROAS by product.
       </p>
 
       {canFilterByManager && (

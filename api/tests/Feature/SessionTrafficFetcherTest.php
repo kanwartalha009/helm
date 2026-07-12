@@ -211,6 +211,77 @@ final class SessionTrafficFetcherTest extends TestCase
         $this->assertSame(6, $storeWide['sessions']);   // 3 + 1 + 1 + 1
     }
 
+    public function test_the_rare_unattributed_type_is_kept_not_dropped(): void
+    {
+        // REGRESSION. `unattributed` is 7 sessions a YEAR on a 6.9M-session store, so a 30-day
+        // probe never sees it — and the first cut of this fetcher therefore discarded it. That
+        // discard was SILENT: `pagedTotal` is summed before the type filter, so reconciliation
+        // still passed while the stored rows quietly summed to less than the store total.
+        // The store total INCLUDES the unattributed 2 — as Shopify's own report does.
+        Http::fake([
+            '*/graphql.json' => function ($request) {
+                $ql = (string) ($request->data()['variables']['q'] ?? '');
+                if (str_contains($ql, 'GROUP BY traffic_type')) {
+                    return Http::response($this->table(['traffic_type', 'sessions'], [
+                        ['paid', '10'],
+                        ['unattributed', '2'],
+                    ]), 200);
+                }
+
+                return Http::response($this->table(['landing_page_path', 'traffic_type', 'sessions'], [
+                    ['/products/jay', 'paid', '10'],
+                    ['/products/jay', 'unattributed', '2'],
+                ]), 200);
+            },
+        ]);
+
+        $result = app(SessionTrafficFetcher::class)->fetchDay($this->conn(), self::DAY);
+
+        $this->assertTrue($result['isComplete']);
+        $this->assertSame(12, $result['pagedTotal']);
+
+        $byType = collect($result['rows'])->keyBy('traffic_type');
+        $this->assertSame(2, $byType['unattributed']['sessions'], 'the rare bucket must survive');
+
+        // The invariant: the STORED rows sum to the store total. This is what silently broke.
+        $this->assertSame(
+            $result['storeTotal'],
+            collect($result['rows'])->sum('sessions'),
+            'stored rows must sum to the store total — nothing may be dropped on the floor',
+        );
+    }
+
+    public function test_a_traffic_type_shopify_has_never_returned_fails_the_day_loudly(): void
+    {
+        // If Shopify adds a SIXTH type, we have nowhere to put it in the read model. It must
+        // not be dropped while the day still reads green — that is the exact bug `unattributed`
+        // caused. An unknown type poisons the day, so the UI shows "—" and we go look.
+        Http::fake([
+            '*/graphql.json' => function ($request) {
+                $ql = (string) ($request->data()['variables']['q'] ?? '');
+                if (str_contains($ql, 'GROUP BY traffic_type')) {
+                    return Http::response($this->table(['traffic_type', 'sessions'], [
+                        ['paid', '10'],
+                        ['quantum', '5'],
+                    ]), 200);
+                }
+
+                return Http::response($this->table(['landing_page_path', 'traffic_type', 'sessions'], [
+                    ['/products/jay', 'paid', '10'],
+                    ['/products/jay', 'quantum', '5'],
+                ]), 200);
+            },
+        ]);
+
+        $result = app(SessionTrafficFetcher::class)->fetchDay($this->conn(), self::DAY);
+
+        // It reconciles arithmetically (15 = 15) — and is STILL marked incomplete, because we
+        // cannot faithfully represent it. Arithmetic agreement is not the same as understanding.
+        $this->assertSame(15, $result['pagedTotal']);
+        $this->assertSame(15, $result['storeTotal']);
+        $this->assertFalse($result['isComplete'], 'an unrepresentable type must fail the day');
+    }
+
     public function test_a_failed_totals_call_means_the_day_cannot_be_trusted(): void
     {
         // We could not establish what the truth WAS, so we cannot claim to have matched it.

@@ -15,13 +15,21 @@ use Carbon\CarbonImmutable;
 /**
  * Assembles the Inventory Intelligence report for one brand: per Shopify product,
  * joins current stock + variants (product_catalog), units + revenue
- * (commerce_daily_metrics, by product title) and Meta spend + ROAS + active ads
+ * (commerce_daily_metrics, by product title) and ad spend + ROAS + active ads
  * (ad_product_daily, by product handle) over a selectable window.
+ *
+ * This is a SHOPIFY page with an ads column, not an ads page: stock, units, revenue and
+ * sessions are all store truth. Ad spend is the cost side — one input, not the spine.
+ *
+ * Ad spend sums EVERY platform present in ad_product_daily (meta + google + tiktok since
+ * D-021), and `spendPlatforms` reports which ones actually contributed. It is not filtered to
+ * Meta: product ROAS divides all-channel Shopify revenue by product ad spend, so a Meta-only
+ * denominator overstates ROAS for any brand also running Google or TikTok.
  *
  * The catalog is the bridge: ad spend keys by product HANDLE, commerce by product
  * TITLE, and only the catalog knows both. Revenue is Total sales + refunds (before
  * returns), Online Store only; units are gross ordered quantity; ROAS is blended
- * (revenue ÷ Meta spend) at the product level.
+ * (revenue ÷ ad spend) at the product level.
  *
  * Honesty rules (2026-07-10):
  *  - Only ACTIVE catalog products are reported. Non-active (draft/archived —
@@ -91,9 +99,18 @@ final class InventoryQuery
             ->whereBetween('date', [$from, $to])
             ->exists();
 
-        // Meta spend (native + USD) + peak active ads per product handle, this window.
+        // AD spend (native + USD) + peak active ads per product handle, this window.
         // USD sums power ROAS so the math stays currency-correct (fx snapshot,
         // COALESCE 1 for legacy rows without a rate).
+        //
+        // ⚠️ This sums EVERY platform in ad_product_daily — meta, google and tiktok since D-021
+        // widened the table. It is deliberately NOT filtered to Meta. Product ROAS divides
+        // all-channel Shopify revenue by product ad spend, so a Meta-only denominator would
+        // OVERSTATE ROAS on any brand also running Google or TikTok. The complete denominator is
+        // the honest one. What was wrong was the LABEL: the UI used to call this "Meta spend"
+        // and claim "Meta only" while summing three platforms. `spendPlatforms` below now tells
+        // the UI which platforms are genuinely in the number, so the caption states a fact
+        // instead of an assumption.
         $adByHandle = AdProductDaily::query()
             ->where('brand_id', $bid)
             ->whereBetween('date', [$from, $to])
@@ -104,6 +121,20 @@ final class InventoryQuery
             ->groupBy('product_key')
             ->get()
             ->keyBy('product_key');
+
+        // The platforms actually contributing spend to this window, biggest first. Empty = no ad
+        // rows at all (and then every spend figure is null, not 0).
+        $spendPlatforms = AdProductDaily::query()
+            ->where('brand_id', $bid)
+            ->whereBetween('date', [$from, $to])
+            ->whereNotNull('platform')
+            ->selectRaw('platform, COALESCE(SUM(spend), 0) AS s')
+            ->groupBy('platform')
+            ->orderByDesc('s')
+            ->pluck('platform')
+            ->map(static fn ($p): string => (string) $p)
+            ->values()
+            ->all();
 
         // Any window ad row carrying a currency other than the brand base →
         // the native spend column mixes currencies (FE shows a caption).
@@ -200,7 +231,7 @@ final class InventoryQuery
         usort($rows, static fn (array $a, array $b): int => ($b['spend'] ?? 0) <=> ($a['spend'] ?? 0)
             ?: strcasecmp((string) $a['title'], (string) $b['title']));
 
-        // Meta spend NOT attributed to a single product — preserved, shown as a banner.
+        // Ad spend NOT attributed to a single product — preserved, shown as a banner.
         $un = AdProductDaily::query()
             ->where('brand_id', $bid)
             ->whereIn('product_key', ['__collection', '__other'])
@@ -213,7 +244,7 @@ final class InventoryQuery
         $other = (float) ($un->other ?? 0);
         $unUsd = (float) ($un->un_usd ?? 0);
 
-        // Brand-level blended ROAS uses TOTAL Meta spend — spend attributed to a
+        // Brand-level blended ROAS uses TOTAL ad spend — spend attributed to a
         // product PLUS the unattributed (collection/dynamic) spend. Dropping the
         // unattributed €-figure from the denominator would flatter the headline
         // ROAS, so we don't. The product rows still sum only to attributed spend;
@@ -250,6 +281,9 @@ final class InventoryQuery
             ],
             'excludedInactive'      => $excludedInactive,
             'spendCurrencyMismatch' => $spendCurrencyMismatch,
+            // Which ad platforms are in the spend figures on this page. The UI names them
+            // rather than assuming Meta — see the ad-spend query above.
+            'spendPlatforms'        => $spendPlatforms,
             'summary'  => [
                 'products'        => $products->count(),
                 'pause'           => $cPause,
@@ -258,7 +292,8 @@ final class InventoryQuery
                 'netStock'        => $sumStock,
                 'units'           => $hasCommerceData ? $sumUnits : null,
                 'unitsPrev'       => $hasCommerceData ? $sumUnitsPrev : null,
-                'metaSpend'       => $hasSpendData ? round($totalSpend, 2) : null,
+                // Renamed from `metaSpend`: it was never Meta-only. Same number, honest name.
+                'adSpend'         => $hasSpendData ? round($totalSpend, 2) : null,
                 'attributedSpend' => $hasSpendData ? round($sumSpend, 2) : null,
                 'revenue'         => $hasCommerceData ? round($sumRev, 2) : null,
                 'roas'            => ($hasSpendData && $hasCommerceData && $totalSpendUsd > 0)
@@ -288,8 +323,16 @@ final class InventoryQuery
         ];
     }
 
-    /** A covered window with no landings for a product is a real zero, not missing data. */
-    private const EMPTY_SPLIT = ['paid' => 0, 'direct' => 0, 'organic' => 0, 'unknown' => 0];
+    /**
+     * A covered window with no landings for a product is a real zero, not missing data.
+     *
+     * All FIVE of Shopify's traffic types. `unattributed` is real but tiny (7 sessions in a
+     * year on a 6.9M-session store) — it is here because a type that is rare is not a type that
+     * is absent, and omitting it would drop those sessions on the floor.
+     */
+    private const EMPTY_SPLIT = [
+        'paid' => 0, 'direct' => 0, 'organic' => 0, 'unknown' => 0, 'unattributed' => 0,
+    ];
 
     /**
      * Sessions by traffic type over the window, resolved per landing entity at sync time.

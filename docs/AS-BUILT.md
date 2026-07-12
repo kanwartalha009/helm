@@ -284,6 +284,29 @@ picker (schema + API already support it) and MER/spend-cap surfaces.
 - **RBAC hole closed:** target writes authorized `view`, meaning a team member attached to a brand could edit
   the goal their own performance is graded against. Now `BrandPolicy::update` (master_admin|manager).
 
+## Inventory: "Meta spend" → "Ad spend" (2026-07-12, D-027)
+
+Inventory Intelligence is a **Shopify page with an ads column**, not an ads page: stock, units,
+revenue and sessions are all store truth; ad spend is the cost side, one input.
+
+`InventoryQuery` has always summed `ad_product_daily` with **no platform filter**, and D-021
+widened that table to meta + google + tiktok. The UI nonetheless said "Meta spend" and captioned
+"Spend & ROAS are **Meta only**" — so any brand running Google or TikTok saw that spend under a
+Meta label. The number was right; the label was false.
+
+Kept the all-platform sum and fixed the label: product ROAS is all-channel Shopify revenue ÷
+product ad spend, so a **Meta-only denominator would overstate ROAS** on every brand also running
+Google or TikTok. Filtering to Meta would have made the caption true and the ROAS permanently
+flattering — the worse trade.
+
+- `summary.metaSpend` → **`summary.adSpend`** (same number, honest name).
+- New **`spendPlatforms`** — the platforms actually contributing, biggest first. The UI names them
+  (`"Meta + Google"`) instead of asserting Meta; with no ad rows it says "ad platforms" rather
+  than inventing one.
+- Column header → **Ad spend**; `no_spend` action → "No ad spend"; freshness segment → "Ad product
+  spend through …".
+- The dashboard's own `metaSpend` is a genuinely Meta-only figure and is untouched.
+
 ## Sessions by traffic type — Bosco item B (2026-07-12, D-026)
 
 Per-product sessions, split Paid / Direct / Organic / Unknown, on Inventory Intelligence.
@@ -318,9 +341,14 @@ combine (probe, 2026-07-12, Flabelus), so the full feature was buildable.
 - **The store-wide row is shown, not hidden.** ~51% of a real store's sessions land on the
   homepage, a collection, search or checkout — never on a product page. Sessions are attributed
   by LANDING page, and the UI says so rather than letting the operator assume otherwise.
-- **Four traffic types, not five.** Bosco's screenshot shows an "Unattributed" bucket; that value
-  does not exist in the ShopifyQL `traffic_type` domain, and the four Shopify does return sum
-  exactly to the store total. We render what exists.
+- **Five traffic types**: paid, direct, organic, unknown, **unattributed**. A 30-day probe
+  returned only four and I wrongly concluded `unattributed` didn't exist. Over a FULL YEAR of a
+  real store it does: paid 3,117,263 · direct 2,599,142 · unknown 757,967 · organic 457,105 ·
+  **unattributed 7** — summing exactly to the 6,931,484 store total. It is 0.0001% of traffic,
+  which is why a short sample misses it. **Rare is not absent**: the first cut dropped those rows
+  *after* `pagedTotal` was summed, so reconciliation still passed while the stored rows quietly
+  summed to less than the store total — the exact silent-loss failure this class exists to
+  prevent. A sixth, unrecognised type now marks the day incomplete rather than vanishing.
 
 ## GO-2.2 — Budget planner (2026-07-12)
 

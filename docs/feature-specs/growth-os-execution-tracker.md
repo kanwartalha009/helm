@@ -610,8 +610,19 @@ FROM sessions SHOW sessions GROUP BY traffic_type SINCE 2026-07-09 UNTIL 2026-07
 → paid 20,590 | direct 9,412 | organic 3,114 | unknown 2,109        (sum = 35,225)
 ```
 **It reconciles EXACTLY to the store total** — 20590+9412+3114+2109 = 35,225. No rounding gap, no hidden bucket.
-⚠️ Note: Shopify returns **four** values, not five. Bosco's screenshot shows an "Unattributed" row; that value does
-**not** appear in the ShopifyQL `traffic_type` domain. Do not invent it — render the four Shopify actually returns.
+
+🔴 **CORRECTION (2026-07-12, after Bosco's screenshot).** I concluded from this 30-day sample that Shopify returns
+**four** types and that the "Unattributed" row in Bosco's screenshot was not real. **That was wrong.** A full-year
+probe returns five:
+```
+FROM sessions SHOW sessions GROUP BY traffic_type SINCE 2025-07-12 UNTIL 2026-07-11
+→ paid 3,117,263 | direct 2,599,142 | unknown 757,967 | organic 457,105 | unattributed 7   (sum = 6,931,484 = store total)
+```
+`unattributed` is **0.0001%** of traffic — invisible in a 30-day window, undeniable in a year. **A short sample
+cannot prove a bucket does not exist.** The bug this caused was the nasty kind: the fetcher dropped unrecognised
+types *after* `pagedTotal` was summed, so the day still RECONCILED and read green while the stored rows quietly
+summed to less than the store total — precisely the silent-loss failure the reconciliation exists to prevent. Fixed:
+five types everywhere, and a sixth unrecognised type now marks the day incomplete instead of disappearing.
 
 **Probe 2 — does a landing-path dimension exist?** ✅
 ```
@@ -682,6 +693,30 @@ home/collections/pages. That is the honest size of the "Store-wide / other pages
   product page, so "sessions for this product" means "sessions that *landed* on this product".
 
 **Status:** probe ☑ complete, verdict **B1**.
+
+### B-followup — "show the META breakdown of traffic type per product?" → **REJECTED, with evidence** (2026-07-12)
+
+Kanwar's instinct was that because the Inventory table's spend column is Meta, the sessions split should be Meta
+too. It must not be. Sessions come from **Shopify's** `sessions` dataset, not from Meta — Meta cannot report
+sessions-by-landing-page at all (it reports clicks/impressions on its own side of the fence).
+
+The tempting move is to split paid sessions by platform via `referrer_name`. Probed (30d, Flabelus):
+```
+FROM sessions SHOW sessions WHERE traffic_type = 'paid' GROUP BY referrer_name ORDER BY sessions DESC SINCE -30d
+→ instagram 401,188 | (blank) 160,347 | google 66,805 | facebook 30,850 | gmail 3,568 | flabelus 1,458 | …
+   paid total = 664,526
+```
+Three reasons that is a wrong number waiting to happen:
+1. **24.1% of paid sessions carry NO `referrer_name` at all** (160,347 of 664,526). Any "Meta sessions" figure is
+   therefore systematically short by an unknown amount — and short in a way that looks precise.
+2. **`referrer_name` is a SOURCE, not an ad-platform attribution.** `instagram` also appears under `organic`
+   (6,390) and `unknown` (46,235) in the same window. It says where the click came from, not that Meta bought it.
+3. **Cardinality.** A third dimension multiplies the already-measured 2,501–5,000 rows/brand/day by ~10.
+
+**Decision:** the Sessions column stays Shopify's five traffic types — exactly what Bosco screenshotted — and Meta
+spend stays its own column, sourced from `ad_product_daily` where it is actually true. Two honest columns beside
+each other (what you paid on Meta · how many people landed here, and from what kind of traffic) beat one invented
+one. Revisit only if Shopify's blank-referrer share collapses.
 
 ### B1 — build ☑ 2026-07-12 (D-026)
 

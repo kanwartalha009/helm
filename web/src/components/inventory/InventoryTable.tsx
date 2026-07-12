@@ -25,7 +25,7 @@ const STATUS_STYLE: Record<InventoryStatus, { bg: string; fg: string; dot: strin
 const ACTION_LABEL: Record<InventoryAction, string> = {
   out_of_stock: 'Out of stock — pause ads',
   low_stock: 'Low stock — reorder',
-  no_spend: 'No Meta spend',
+  no_spend: 'No ad spend',
   ok: 'Stock OK',
 };
 const ACTION_COLOR: Record<InventoryAction, string> = {
@@ -119,7 +119,7 @@ export function InventoryTable(props: Props) {
               {collection && <th style={thBase}>Products</th>}
               <th style={thBase}>Units</th>
               <th style={thBase}>Units prev</th>
-              <th style={thBase}>Meta spend</th>
+              <th style={thBase} title="Ad spend attributed to this product, summed across every connected ad platform (Meta, Google, TikTok) — not Meta alone.">Ad spend</th>
               <th style={thBase}>Revenue</th>
               <th style={thBase}>ROAS blended</th>
               <th style={thBase}>Active ads</th>
@@ -231,7 +231,7 @@ function CollectionRows({
 }
 
 // Renders every cell after the name: Stock, [Products], Units+Δ, Units prev,
-// Meta spend, Revenue, ROAS, Active ads, Status, Action. `colores` omitted →
+// Ad spend, Revenue, ROAS, Active ads, Sessions, Status, Action. `colores` omitted →
 // no Products column (product view). `child` → subtle background for expanded
 // collection members.
 function metricCells(

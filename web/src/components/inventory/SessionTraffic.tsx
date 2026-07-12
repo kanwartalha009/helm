@@ -5,9 +5,11 @@ import type { InventorySessions, SessionSplit, TrafficType } from '@/types/inven
  *
  * Three rules this file exists to hold:
  *
- *  1. **Four types, not five.** Bosco's screenshot shows Paid / Direct / Organic / Unknown /
- *     Unattributed. "Unattributed" does not exist in ShopifyQL's `traffic_type` domain (probe,
- *     2026-07-12) — so we render the four Shopify actually returns and invent nothing.
+ *  1. **Five types.** Paid / Direct / Organic / Unknown / Unattributed — matching Shopify's own
+ *     report, which is what Bosco reads. `unattributed` is 0.0001% of traffic (7 sessions in a
+ *     year on a 6.9M-session store) and is invisible in a 30-day sample; it is here because a
+ *     rare bucket is not an absent one, and dropping it would break the invariant that the
+ *     parts sum to the store's own total.
  *
  *  2. **Landing-page attribution is a real limitation, so we say it out loud.** A visitor who
  *     lands on the homepage and then browses to a product is counted under Store-wide, NOT
@@ -19,13 +21,22 @@ import type { InventorySessions, SessionSplit, TrafficType } from '@/types/inven
  *     synced days would under-report every product by ~60% while looking perfectly precise.
  */
 
-const TYPES: TrafficType[] = ['paid', 'direct', 'organic', 'unknown'];
+/** The canonical order + the single source of the type list. Exported so aggregation code
+ *  (e.g. the collection blend on the Inventory page) can never miss a bucket by hand. */
+export const TRAFFIC_TYPES: TrafficType[] = ['paid', 'direct', 'organic', 'unknown', 'unattributed'];
+
+export const EMPTY_SPLIT: SessionSplit = {
+  paid: 0, direct: 0, organic: 0, unknown: 0, unattributed: 0,
+};
+
+const TYPES = TRAFFIC_TYPES;
 
 const LABEL: Record<TrafficType, string> = {
   paid: 'Paid',
   direct: 'Direct',
   organic: 'Organic',
   unknown: 'Unknown',
+  unattributed: 'Unattributed',
 };
 
 // Distinct hues, not a gradient — these are categories, not a scale.
@@ -34,6 +45,7 @@ const COLOR: Record<TrafficType, string> = {
   direct: 'var(--text-muted, #6b7280)',
   organic: 'var(--success, #1f6f5c)',
   unknown: 'var(--border-strong, #cbd5e1)',
+  unattributed: 'var(--warning, #9a6700)',
 };
 
 const fmt = (n: number) => n.toLocaleString();

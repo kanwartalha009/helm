@@ -80,6 +80,7 @@ final class InventoryQueryTest extends TestCase
         DB::table('ad_product_daily')->insert(array_merge([
             'brand_id'       => $this->brand->id,
             'date'           => $this->yesterday(),
+            'platform'       => 'meta',
             'product_key'    => 'red-shoe',
             'spend'          => 100.0,
             'ads_count'      => 2,
@@ -124,7 +125,7 @@ final class InventoryQueryTest extends TestCase
         $json = $this->getJson($this->url())->assertOk()->json();
 
         // Spend side: NULL, not €0 — the table was never filled for the window.
-        $this->assertNull($json['summary']['metaSpend']);
+        $this->assertNull($json['summary']['adSpend']);
         $this->assertNull($json['summary']['attributedSpend']);
         $this->assertNull($json['summary']['roas']);
         $this->assertNull($json['unattributed']);
@@ -163,7 +164,7 @@ final class InventoryQueryTest extends TestCase
 
         $this->assertEqualsWithDelta(100.0, (float) $rows['red-shoe']['spend'], 0.001);
         $this->assertSame('ok', $rows['red-shoe']['action']);
-        $this->assertEqualsWithDelta(100.0, (float) $json['summary']['metaSpend'], 0.001);
+        $this->assertEqualsWithDelta(100.0, (float) $json['summary']['adSpend'], 0.001);
         $this->assertSame(['collection' => 0, 'other' => 0, 'total' => 0], array_map('intval', $json['unattributed']));
     }
 
@@ -337,5 +338,43 @@ final class InventoryQueryTest extends TestCase
 
         $this->assertSame(0, $this->campaignSync($broken)->syncMetaAdProducts($conn, $date));
         $this->assertSame(0, DB::table('ad_product_daily')->count());
+    }
+
+    public function test_ad_spend_sums_every_platform_and_names_the_ones_it_used(): void
+    {
+        // The page shipped calling this column "Meta spend" and captioning it "Meta only", while
+        // the query summed EVERY platform in ad_product_daily. The number was right; the label
+        // was false. This pins the number AND the disclosure.
+        //
+        // Do NOT "fix" this by filtering to platform = 'meta'. Product ROAS divides all-channel
+        // Shopify revenue by product ad spend — a Meta-only denominator OVERSTATES ROAS for any
+        // brand also running Google or TikTok. The complete denominator is the honest one.
+        $this->seedProduct();
+        $this->seedAdRow(['platform' => 'meta',   'spend' => 100.0]);
+        $this->seedAdRow(['platform' => 'google', 'spend' => 40.0]);
+        $this->seedAdRow(['platform' => 'tiktok', 'spend' => 10.0]);
+
+        $json = $this->getJson($this->url())->assertOk()->json();
+
+        // 100 + 40 + 10 — the whole cost of advertising this product, not Meta's share of it.
+        $this->assertEqualsWithDelta(150.0, (float) $json['summary']['adSpend'], 0.001);
+
+        $row = collect($json['products'])->firstWhere('handle', 'red-shoe');
+        $this->assertEqualsWithDelta(150.0, (float) $row['spend'], 0.001);
+
+        // Biggest spender first, so the UI can name exactly what's in the number.
+        $this->assertSame(['meta', 'google', 'tiktok'], $json['spendPlatforms']);
+    }
+
+    public function test_spend_platforms_is_empty_when_the_brand_has_no_ad_rows(): void
+    {
+        // No ad rows → spend is null (never €0), and the UI has nothing to name, so it says
+        // "ad platforms" rather than inventing "Meta".
+        $this->seedProduct();
+
+        $json = $this->getJson($this->url())->assertOk()->json();
+
+        $this->assertNull($json['summary']['adSpend']);
+        $this->assertSame([], $json['spendPlatforms']);
     }
 }
