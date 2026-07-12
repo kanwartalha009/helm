@@ -306,17 +306,41 @@ final class SessionTrafficFetcherTest extends TestCase
         $this->assertNull($result['storeTotal']);
     }
 
-    public function test_an_empty_day_writes_nothing_rather_than_zeroes(): void
+    public function test_a_genuinely_zero_session_day_is_DONE_and_writes_nothing(): void
     {
-        // A day we learned nothing about must not be painted as a flatline. No rows written →
-        // the read layer has no row for that date → the window fails its completeness gate →
-        // the UI shows "—". Writing zeroes here would turn a sync gap into "nobody visited".
+        // Store reports 0 sessions, and our paged rows also sum to 0 → they RECONCILE. The day is
+        // established: it really had no traffic. Return 0 (done), write no rows — the read layer
+        // then has no row for that date, which is correct and renders "—" rather than a fake 0.
         $this->fakeShopify($this->totalsResponse(0, 0, 0, 0), [[]]);
 
-        $conn    = $this->conn();
-        $written = app(SessionTrafficSync::class)->syncDay($conn, self::DAY);
+        $written = app(SessionTrafficSync::class)->syncDay($this->conn(), self::DAY);
 
-        $this->assertSame(0, $written);
+        $this->assertSame(0, $written, 'reconciled-and-empty is a real zero day, not a failure');
+        $this->assertSame(0, SessionTrafficDaily::count());
+    }
+
+    public function test_a_failed_query_returns_NULL_so_the_day_is_never_marked_done(): void
+    {
+        // THE incident. ShopifyQL reports a malformed query as an EMPTY TABLE, not an exception.
+        // The old code collapsed that to `0 rows written`, identical to a genuinely quiet day —
+        // so the backfill recorded 90 days × 88 brands as "done, no data" and a re-run would have
+        // skipped them all. The gap would have been permanent and invisible.
+        //
+        // Empty rows + a store total we could NOT establish = we learned nothing. Return null.
+        Http::fake([
+            '*/graphql.json' => fn () => Http::response([
+                'data' => [
+                    'shopifyqlQuery' => [
+                        'tableData'   => ['columns' => [], 'rows' => []],
+                        'parseErrors' => ['Syntax no viable alternative at input LIMIT'],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $written = app(SessionTrafficSync::class)->syncDay($this->conn(), self::DAY);
+
+        $this->assertNull($written, 'a parse error must NOT look like a quiet day');
         $this->assertSame(0, SessionTrafficDaily::count());
     }
 

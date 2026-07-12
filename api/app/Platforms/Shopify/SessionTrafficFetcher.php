@@ -270,10 +270,19 @@ class SessionTrafficFetcher
      */
     private function page(ShopifyClient $client, string $day, int $offset): ?array
     {
+        // ⚠️ CLAUSE ORDER IS LOAD-BEARING. ShopifyQL's `shopifyqlQuery` endpoint parses with a
+        // strict ANTLR grammar: SINCE/UNTIL must come BEFORE ORDER BY / LIMIT / OFFSET. Putting
+        // them after (as the Shopify admin's own analytics console tolerates) is a parse error,
+        // and a parse error here returns an empty table — which reads downstream as "this store
+        // had no sessions", not as "the query was malformed". That is how every brand came back
+        // with 0 rows for 90 straight days while looking like a data problem.
+        //
+        // The order below matches RevenueFetcher::groupedFunnelByDay, which is proven in
+        // production against the same endpoint.
         $ql = 'FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type '
+            . "SINCE {$day} UNTIL {$day} "
             . 'ORDER BY sessions DESC '
-            . 'LIMIT ' . self::PAGE_SIZE . ' OFFSET ' . $offset . ' '
-            . "SINCE {$day} UNTIL {$day}";
+            . 'LIMIT ' . self::PAGE_SIZE . ' OFFSET ' . $offset;
 
         $table = $this->runQuery($client, $ql);
         if ($table === null) {

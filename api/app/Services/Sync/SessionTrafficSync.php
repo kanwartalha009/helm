@@ -26,12 +26,25 @@ class SessionTrafficSync
     public function __construct(private readonly SessionTrafficFetcher $fetcher) {}
 
     /**
-     * @return int the number of rows written (0 = nothing stored; the day stays as it was)
+     * ══ WHY THIS RETURNS ?int AND NOT int ══
+     * "We pulled the day and the store had no sessions" and "the pull FAILED" are different facts,
+     * and collapsing both to 0 caused a real incident: a malformed ShopifyQL query returned an
+     * empty table (ShopifyQL reports a parse error as empty data, not as an exception), every
+     * brand-day came back 0, and the backfill dutifully recorded all 90 days × 88 brands as
+     * DONE-with-no-data. A later re-run would have skipped them all and the gap would have been
+     * permanent and invisible.
+     *
+     *   null → we learned NOTHING (transport error, parse error, failed reconciliation).
+     *          The caller must NOT mark the day as covered. Nothing is written.
+     *   0    → we asked, and the store genuinely had no sessions. The day IS done.
+     *   >0   → rows written.
+     *
+     * @return int|null rows written, or null when the day could not be established at all
      */
-    public function syncDay(PlatformConnection $conn, string $day): int
+    public function syncDay(PlatformConnection $conn, string $day): ?int
     {
         if ($conn->platform !== 'shopify') {
-            return 0;
+            return null;
         }
 
         try {
@@ -43,15 +56,27 @@ class SessionTrafficSync
                 'error'    => $e->getMessage(),
             ]);
 
-            return 0;
+            return null;
         }
 
         $rows = $result['rows'];
         if ($rows === []) {
-            // No rows at all. This is NOT "zero sessions" — it is "we learned nothing".
-            // Writing zeroes here would paint a real trading day as a flatline, so we
-            // write nothing and the read surface shows "—" for a day it has no row for.
-            return 0;
+            // Empty AND reconciled = a real zero-session day (storeTotal 0 = pagedTotal 0). Done.
+            // Empty AND NOT reconciled = the query or the transport failed, and we know nothing.
+            // Writing zeroes in the second case would paint a real trading day as a flatline; and
+            // reporting it as "done" would bury the failure for good.
+            if ($result['isComplete'] === true) {
+                return 0;
+            }
+
+            Log::warning('sync.session_traffic.unusable_day', [
+                'brand_id'    => $conn->brand_id,
+                'date'        => $day,
+                'store_total' => $result['storeTotal'],
+                'paged_total' => $result['pagedTotal'],
+            ]);
+
+            return null;
         }
 
         $now     = now();

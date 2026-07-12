@@ -1,0 +1,184 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Console\Commands;
+
+use App\Models\Brand;
+use App\Platforms\Shopify\ShopifyClient;
+use Carbon\CarbonImmutable;
+use Illuminate\Console\Command;
+use Throwable;
+
+/**
+ * Why is `shopify:backfill-session-traffic` returning 0 rows for every brand, every day?
+ *
+ * A ShopifyQL parse error comes back as an EMPTY TABLE, not an exception. So a malformed query is
+ * indistinguishable, downstream, from "this store genuinely had no sessions" — which is how a
+ * broken query looked like a data problem across all 88 brands for 90 consecutive days.
+ *
+ * This runs a LADDER of queries through the app's own ShopifyClient (not the admin console, which
+ * has a more forgiving parser) and prints the raw `parseErrors` for each. The first rung that
+ * fails is the answer.
+ *
+ * It also answers the one question the whole pagination design rests on: does `shopifyqlQuery`
+ * support OFFSET at all? If it does not, paging must be redesigned — and we need to know that
+ * from the endpoint, not from a probe against a different engine.
+ *
+ *   php artisan shopify:diagnose-session-traffic flabelus
+ *   php artisan shopify:diagnose-session-traffic flabelus --date=2026-07-09
+ */
+class ShopifyDiagnoseSessionTrafficCommand extends Command
+{
+    protected $signature = 'shopify:diagnose-session-traffic '
+        . '{brand : slug or id} '
+        . '{--date= : the day to probe (Y-m-d); defaults to yesterday in the brand timezone}';
+
+    protected $description = 'Print the raw ShopifyQL response for each part of the session-traffic query, to find which clause the endpoint rejects.';
+
+    /** Must match SessionTrafficFetcher. */
+    private const SHOPIFYQL_API_VERSION = '2026-04';
+
+    public function handle(): int
+    {
+        $brand = $this->resolveBrand();
+        if (! $brand) {
+            $this->error('Brand not found.');
+
+            return self::FAILURE;
+        }
+
+        $conn = $brand->connections()->where('platform', 'shopify')->where('status', 'active')->first();
+        if (! $conn) {
+            $this->error("{$brand->name} has no active Shopify connection.");
+
+            return self::FAILURE;
+        }
+
+        $tz   = $brand->timezone ?: 'UTC';
+        $date = (string) ($this->option('date') ?? '');
+        if ($date === '') {
+            $date = CarbonImmutable::now($tz)->subDay()->toDateString();
+        }
+
+        $token = (string) ($conn->credentials['access_token'] ?? '');
+        if ($token === '') {
+            $this->error('Shopify connection has no access_token.');
+
+            return self::FAILURE;
+        }
+        $client = new ShopifyClient((string) $conn->external_id, $token);
+
+        $this->line("Brand: {$brand->name}  ·  day: {$date}  ·  ShopifyQL API " . self::SHOPIFYQL_API_VERSION);
+        $this->newLine();
+
+        // Each rung adds ONE thing. The first failure names the culprit.
+        $ladder = [
+            '1. baseline (does FROM sessions work at all?)'
+                => "FROM sessions SHOW sessions SINCE {$date} UNTIL {$date}",
+
+            '2. + GROUP BY traffic_type (does the dimension EXIST?)'
+                => "FROM sessions SHOW sessions GROUP BY traffic_type SINCE {$date} UNTIL {$date}",
+
+            '3. + GROUP BY landing_page_path (proven by the funnel sync)'
+                => "FROM sessions SHOW sessions GROUP BY landing_page_path SINCE {$date} UNTIL {$date}",
+
+            '4. + BOTH dimensions (do they COMBINE on this endpoint?)'
+                => "FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type SINCE {$date} UNTIL {$date}",
+
+            '5. + ORDER BY / LIMIT — clauses AFTER since/until (the fixed order)'
+                => "FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type SINCE {$date} UNTIL {$date} ORDER BY sessions DESC LIMIT 5",
+
+            '6. + OFFSET — PAGINATION DEPENDS ON THIS'
+                => "FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type SINCE {$date} UNTIL {$date} ORDER BY sessions DESC LIMIT 5 OFFSET 5",
+
+            '7. THE OLD, BROKEN ORDER (limit/offset BEFORE since) — expected to FAIL'
+                => "FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type ORDER BY sessions DESC LIMIT 5 OFFSET 0 SINCE {$date} UNTIL {$date}",
+        ];
+
+        foreach ($ladder as $label => $ql) {
+            $this->line($label);
+            $this->line('   ' . $ql);
+            $this->probe($client, $ql);
+            $this->newLine();
+        }
+
+        $this->line('──────────────────────────────────────────────');
+        $this->info('Read it top-down: the FIRST rung that errors is the cause.');
+        $this->info('If rung 6 fails, OFFSET is unsupported and paging must be redesigned.');
+        $this->info('If rung 7 is the only failure, the clause-order fix is the whole bug.');
+
+        return self::SUCCESS;
+    }
+
+    private function probe(ShopifyClient $client, string $ql): void
+    {
+        $gql = <<<'GQL'
+query ($q: String!) {
+  shopifyqlQuery(query: $q) {
+    tableData { columns { name } rows }
+    parseErrors
+  }
+}
+GQL;
+
+        try {
+            $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
+        } catch (Throwable $e) {
+            $this->error('   ✗ TRANSPORT FAILURE — ' . $e->getMessage());
+
+            return;
+        }
+
+        $resp = $data['shopifyqlQuery'] ?? null;
+        if (! is_array($resp)) {
+            $this->error('   ✗ no shopifyqlQuery in the response: ' . json_encode($data));
+
+            return;
+        }
+
+        if (! empty($resp['parseErrors'])) {
+            $this->error('   ✗ PARSE ERROR: ' . json_encode($resp['parseErrors']));
+
+            return;
+        }
+
+        $columns = $resp['tableData']['columns'] ?? [];
+        $rows    = $resp['tableData']['rows'] ?? [];
+        $names   = implode(', ', array_map(static fn ($c): string => (string) ($c['name'] ?? '?'), is_array($columns) ? $columns : []));
+        $count   = is_array($rows) ? count($rows) : 0;
+
+        // 0 rows with NO parse error is its own finding: the query is valid and the store really
+        // has nothing. Say so explicitly — that distinction is the entire point of this command.
+        if ($count === 0) {
+            $this->warn("   ⚠ valid query, but 0 rows returned (columns: {$names}) — the store genuinely has no data for this day, OR the dimension is silently unsupported here.");
+
+            return;
+        }
+
+        $this->info("   ✓ {$count} row(s) · columns: {$names}");
+        foreach (array_slice(is_array($rows) ? $rows : [], 0, 3) as $r) {
+            $this->line('     ' . json_encode($r));
+        }
+    }
+
+    private function resolveBrand(): ?Brand
+    {
+        $arg = (string) $this->argument('brand');
+
+        if (is_numeric($arg)) {
+            return Brand::query()->with('connections')->find((int) $arg);
+        }
+
+        $lower = strtolower(trim($arg));
+
+        return Brand::query()->with('connections')
+            ->whereRaw('LOWER(slug) = ?', [$lower])
+            ->orWhereRaw('LOWER(name) = ?', [$lower])
+            ->first()
+            ?: Brand::query()->with('connections')
+                ->where('name', 'like', '%' . $arg . '%')
+                ->orWhere('slug', 'like', '%' . $arg . '%')
+                ->first();
+    }
+}

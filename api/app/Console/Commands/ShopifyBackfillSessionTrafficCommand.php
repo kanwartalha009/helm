@@ -123,22 +123,40 @@ class ShopifyBackfillSessionTrafficCommand extends Command
                 $this->line("· {$brand->name}: resuming — {$skipped} of {$windowDays} day(s) already done.");
             }
 
+            $failedDays = 0;
+
             foreach ($pending as $dayStr) {
                 $written = $sync->syncDay($conn, $dayStr);
 
-                $brandRows += $written;
                 $brandDays++;
 
+                // null = we learned NOTHING (parse/transport error, or the day didn't reconcile).
+                // It must NOT be marked covered — doing so is how a broken query silently becomes
+                // "90 days, done, no data" and the gap turns permanent.
+                if ($written === null) {
+                    $failedDays++;
+                    usleep(self::SLEEP_MICROSECONDS);
+                    continue;
+                }
+
+                $brandRows += $written;
                 if ($written === 0) {
-                    $incompleteDays++;
+                    $incompleteDays++;   // a real zero-session day
                 }
 
                 // Mark AFTER the write. A day marked done but not written is a hole no future run
                 // will ever fill. `$written = 0` is still DONE — the store genuinely had no
-                // sessions to report, and asking again tomorrow will not change that.
+                // sessions, and asking again tomorrow will not change that.
                 $coverage->mark($brand->id, self::DATASET, '', $dayStr, $dayStr, $written);
 
                 usleep(self::SLEEP_MICROSECONDS);
+            }
+
+            if ($failedDays > 0) {
+                $this->error(
+                    "· {$brand->name}: {$failedDays} day(s) FAILED and were left UNMARKED — re-run to retry them. "
+                    . 'If every day fails, the query itself is broken: php artisan shopify:diagnose-session-traffic ' . $brand->slug,
+                );
             }
 
             // Count the days we stored but could NOT reconcile — these render "—", and the
