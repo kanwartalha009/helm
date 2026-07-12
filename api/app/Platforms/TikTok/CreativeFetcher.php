@@ -147,6 +147,37 @@ final class CreativeFetcher
      * @param array<int, string> $adIds
      * @return array<string, array{image: ?string, media: string}>
      */
+    /**
+     * Re-resolve creative ASSETS ONLY for a set of ads — no reporting call, no metrics.
+     *
+     * Mirrors MetaCreativeFetcher::refreshAssets. TikTok's asset URLs are also signed and
+     * short-lived, and the daily sync only writes today's rows, so an ad still visible in the
+     * 30-day Creatives view keeps a stored URL that quietly expires. Ads are looked up across
+     * every advertiser on the connection, because we don't know which one owns a given ad.
+     *
+     * @param array<int, string> $adIds
+     * @return array<string, array{image: ?string, media: string, body?: ?string}>
+     */
+    public function refreshAssets(PlatformConnection $conn, array $adIds): array
+    {
+        if ($adIds === []) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($this->advertiserIdsFor($conn) as $advertiserId) {
+            foreach ($this->resolveCreatives($advertiserId, $adIds) as $adId => $asset) {
+                $out[$adId] = $asset;   // an ad belongs to exactly one advertiser
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<int, string> $adIds
+     * @return array<string, array{image: ?string, media: string, body?: ?string}>
+     */
     private function resolveCreatives(string $advertiserId, array $adIds): array
     {
         $out = [];

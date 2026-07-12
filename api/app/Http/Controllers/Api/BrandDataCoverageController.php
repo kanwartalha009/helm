@@ -138,6 +138,14 @@ class BrandDataCoverageController extends Controller
                 'relevant' => $hasKlaviyo,
                 'tables'   => ['email_daily_metrics'],
             ],
+            // Sessions by traffic type + the web funnel (Bosco item B). Both grains must be
+            // present to count as covered — same rule as campaigns/ad-sets: a brand with a funnel
+            // but no session-traffic rows genuinely still needs the backfill.
+            'sessions'  => [
+                'label'    => 'Sessions by traffic type',
+                'relevant' => in_array('shopify', $connected, true),
+                'tables'   => ['shopify_funnel_daily', 'session_traffic_daily'],
+            ],
         ];
 
         foreach ($tracked as $key => $meta) {
@@ -196,7 +204,7 @@ class BrandDataCoverageController extends Controller
         $this->authorize('view', $brand);
 
         $data = $request->validate([
-            'dataset' => ['required', 'in:all,history,campaigns,creatives,commerce,email'],
+            'dataset' => ['required', 'in:all,history,campaigns,creatives,commerce,email,sessions'],
         ]);
         $dataset = $data['dataset'];
 

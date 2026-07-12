@@ -138,6 +138,26 @@ final class MetaCreativeFetcher
     private const THUMB_PX = 600;
 
     /**
+     * Re-resolve creative ASSETS ONLY for a set of ads — no insights call, no metrics.
+     *
+     * Meta's `thumbnail_url` is a short-lived signed CDN link. The daily sync only writes TODAY's
+     * rows, so an ad that ran three weeks ago keeps a stored URL that quietly expires while the
+     * ad is still visible in the 30-day Creatives view — and the card goes blank. This is the
+     * cheap way to refresh those: one batched creative lookup per 50 ads, no insights quota spent.
+     *
+     * @param array<int, string> $adIds
+     * @return array<string, array{image: ?string, media: string, body: ?string}>
+     */
+    public function refreshAssets(PlatformConnection $conn, array $adIds): array
+    {
+        // $conn is accepted for symmetry with the TikTok fetcher (which needs the advertiser id)
+        // and so the caller never has to know which platform needs what.
+        unset($conn);
+
+        return $adIds === [] ? [] : $this->resolveCreatives($adIds);
+    }
+
+    /**
      * ad_id => ['image' => best display image URL, 'media' => 'image'|'video'],
      * batched with pacing.
      *

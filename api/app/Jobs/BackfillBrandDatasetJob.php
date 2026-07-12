@@ -47,9 +47,9 @@ class BackfillBrandDatasetJob implements ShouldQueue
         // so a big onboarding pull never starves the daily sync pools. Pure ads
         // datasets ride ads-sync; commerce rides shopify-sync.
         $this->onQueue(match ($dataset) {
-            'commerce'         => 'shopify-sync',
+            'commerce', 'sessions'   => 'shopify-sync',
             'campaigns', 'creatives' => 'ads-sync',
-            default            => 'default', // history | all
+            default                  => 'default', // history | all
         });
     }
 
@@ -107,6 +107,13 @@ class BackfillBrandDatasetJob implements ShouldQueue
         }
         if ($wants('commerce') && in_array('shopify', $connected, true)) {
             $commands[] = ['shopify:backfill-commerce', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+        }
+        // Sessions by traffic type + the web funnel (Bosco item B) — both Shopify, both feed
+        // Inventory Intelligence. session-traffic is the most expensive command we run (day by
+        // day, ~5 ShopifyQL calls each), but it RESUMES: a re-click only fills what's missing.
+        if ($wants('sessions') && in_array('shopify', $connected, true)) {
+            $commands[] = ['shopify:backfill-funnel', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+            $commands[] = ['shopify:backfill-session-traffic', ['brand' => (string) $this->brand->slug, '--since' => $since]];
         }
         // Klaviyo email revenue (GO-1.1). Not a platform_connection — gated on the
         // brand having its own Klaviyo key. The command clamps --since to Klaviyo's

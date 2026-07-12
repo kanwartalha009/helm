@@ -126,6 +126,19 @@ return Application::configure(basePath: dirname(__DIR__))
             ->onOneServer()
             ->appendOutputTo(storage_path('logs/schedule.log'));
 
+        // Creative thumbnails: refresh the CDN links BEFORE they expire. Meta and TikTok both
+        // return short-lived signed URLs, and the daily sync only writes TODAY's rows — so an ad
+        // that ran three weeks ago is still on screen in the 30-day Creatives view with a URL that
+        // quietly dies, and the card goes blank. This re-resolves assets (no insights call, so no
+        // reporting quota) for every ad in the window and rewrites the URL on all its rows.
+        // 14:20 UTC, right after the catalog snapshot and before the 15:00 rolling sync.
+        $schedule->command('creatives:refresh-thumbnails')
+            ->dailyAt('14:20')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
         // Anomaly scan (GO-2.4). 15:30 UTC — after the 15:00 rolling sync and the
         // 14:10 catalog refresh, so the day it scans is as complete as it will get.
         // Deterministic rules only; idempotent, so a re-run refreshes rather than
