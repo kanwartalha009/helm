@@ -18,6 +18,7 @@ use App\Platforms\Support\Throttle;
 use App\Services\Currency\FxService;
 use App\Services\Sync\AdSetSync;
 use App\Services\Sync\CampaignSync;
+use App\Services\Sync\CreativeSync;
 use App\Services\Sync\KlaviyoSync;
 use App\Services\Sync\SessionTrafficSync;
 use Carbon\CarbonImmutable;
@@ -79,7 +80,7 @@ class SyncBrandDayJob implements ShouldQueue
         $this->onQueue($platformConnection->platform === 'shopify' ? 'shopify-sync' : 'ads-sync');
     }
 
-    public function handle(PlatformRegistry $registry, FxService $fx, CampaignSync $campaignSync, AdSetSync $adSetSync, RevenueFetcher $revenue, KlaviyoSync $klaviyoSync): void
+    public function handle(PlatformRegistry $registry, FxService $fx, CampaignSync $campaignSync, AdSetSync $adSetSync, CreativeSync $creativeSync, RevenueFetcher $revenue, KlaviyoSync $klaviyoSync): void
     {
         // Two paths in:
         //   - $logId set      → controller/command already wrote a `queued`
@@ -172,6 +173,13 @@ class SyncBrandDayJob implements ShouldQueue
             // range as the campaign pull; best-effort + self-guarded to the three ad
             // platforms, so it never affects the day sync that already succeeded.
             $adSetSync->syncRange($this->platformConnection, $this->date, $this->date);
+
+            // Ad-level (creative) rows for the same day — Meta + TikTok. Creatives were the ONE
+            // dataset never wired into the daily sync: they were written only by the backfill
+            // commands, so the Creatives tab went stale the moment a backfill finished. Worse,
+            // `thumbnail_url` is a short-lived CDN link, so previews on still-running ads went
+            // blank over time. Same self-guarding best-effort contract as the ad-set pull above.
+            $creativeSync->syncRange($this->platformConnection, $this->date, $this->date);
 
             // Meta audience-segment spend (ASC new/engaged/existing/unknown) for
             // the dashboard's Audience view. Meta-only + best-effort (self-guards
