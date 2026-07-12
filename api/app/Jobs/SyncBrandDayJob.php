@@ -19,6 +19,7 @@ use App\Services\Currency\FxService;
 use App\Services\Sync\AdSetSync;
 use App\Services\Sync\CampaignSync;
 use App\Services\Sync\KlaviyoSync;
+use App\Services\Sync\SessionTrafficSync;
 use Carbon\CarbonImmutable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -200,6 +201,13 @@ class SyncBrandDayJob implements ShouldQueue
             // best-effort — a funnel hiccup never fails the day's main sync.
             if ($this->platformConnection->platform === 'shopify') {
                 $this->syncShopifyFunnel($revenue, $this->platformConnection, $this->date);
+
+                // Sessions by traffic type per landing entity (Bosco item B) →
+                // session_traffic_daily, behind Inventory Intelligence. Self-guarding and
+                // self-reconciling: if the paged rows don't add up to Shopify's own store
+                // total for the day, the day is stored is_complete = false and reads show
+                // "—" rather than a short number nobody can trust.
+                app(SessionTrafficSync::class)->syncDay($this->platformConnection, $this->date->toDateString());
 
                 // Shopify commerce by country / product / category into
                 // commerce_daily_metrics for the monthly report's §1/§2/§7/§8 and

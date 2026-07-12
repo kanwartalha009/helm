@@ -258,6 +258,70 @@ data-quality score (the recommendation gate) · MER spine + bias annotations.
 - **Neither dashboard engine was touched** (porcelain-verified) — the chip is merged client-side, so the
   `helm:dashboard-parity` gate is unaffected. Third feature shipped on this pattern.
 
+## Brand goals — Bosco cut (2026-07-12, D-025)
+
+Extends GO-2.1. **Master plan §5.1 is now partially done**; what remains of it is the per-month *override*
+picker (schema + API already support it) and MER/spend-cap surfaces.
+
+- **`brand_targets.month` is now NULLABLE — null = the brand's STANDING goal**, in force for every month
+  with no explicit override. The Settings UI writes only this one; a month picker would ask the operator to
+  retype the same number twelve times a year.
+- **Uniqueness is enforced on a generated `month_key = COALESCE(month,'__default')`, not on `month`.**
+  The spec asked for `unique (brand_id, month)` with a nullable `month` — but **on MySQL, NULLs are DISTINCT
+  in a unique index**, so that key would have permitted a brand to accumulate several standing goals, with
+  pacing picking one at random. A brand could have silently carried two conflicting revenue targets. Same
+  trap already hit on `budget_plans.country` and `anomalies.subject`; same fix as D-024.
+- **Pacing ROAS is computed in USD from the fx snapshots** — `Σ(revenue × fx) ÷ Σ(spend × fx)`, never
+  native ÷ native. A brand booking revenue and spend in different currencies would otherwise be shown the
+  ratio of two incomparable numbers. This is the dashboard's and the truth spine's existing definition;
+  Helm does not carry a second one.
+- **Surfaces:** `GoalsSection` in the brand **Settings** tab (revenue / ROAS / optional spend cap);
+  `PacingCards` on the brand **Overview** (revenue bar + `day N/M · needs €X/day to hit goal`; ROAS vs
+  target with `✓ goal hit`). `TargetsCard` deleted — superseded by the two.
+- **No goals → no cards at all.** Not an empty state and not a 0% bar: a 0% bar reads as failure, and a brand
+  with no goal is not a brand failing its goal. Zero complete days → "—" + amber, and **no bar is drawn**.
+  No ad spend → ROAS "—", never 0×.
+- **RBAC hole closed:** target writes authorized `view`, meaning a team member attached to a brand could edit
+  the goal their own performance is graded against. Now `BrandPolicy::update` (master_admin|manager).
+
+## Sessions by traffic type — Bosco item B (2026-07-12, D-026)
+
+Per-product sessions, split Paid / Direct / Organic / Unknown, on Inventory Intelligence.
+Source: ShopifyQL `FROM sessions GROUP BY landing_page_path, traffic_type` — the two dimensions
+combine (probe, 2026-07-12, Flabelus), so the full feature was buildable.
+
+- **`session_traffic_daily`** — keyed on (brand, date, **entity_type, entity_key**, traffic_type).
+  The landing path is resolved to a product handle / collection handle / `'store-wide'` at SYNC
+  time, **not** stored raw. Raw paths have unbounded cardinality: a brand-day holds 2,501–5,000
+  distinct rows and the tail is one-off `/checkouts/cn/<token>` URLs. Storing them would write
+  ~100M rows/year across the live brands to keep single-session noise.
+- **`App\Support\LandingPathMapper`** — the ONE product-handle regex.
+  `AdProductFetcher::productHandle()` delegates to it, so a Meta ad's landing URL and a Shopify
+  session on the same product can't disagree about the handle and split its numbers in two.
+  `/es/products/jay`, `/fr/products/jay` and `/collections/x/products/jay` all resolve to `jay`.
+- **`SessionTrafficFetcher` pages, it does not cap.** The spec proposed a top-200-paths-per-day
+  cap; measured, a 300-row cap kept only 74.3% of product-page sessions and lost 100% of the
+  rest from the TAIL — i.e. exactly the low-traffic products this feature exists to find.
+  `OFFSET` works, so it pages until a short page and takes the whole day.
+- **Every day reconciles or it is marked incomplete.** The paged sum is compared to a second,
+  cheap ShopifyQL call (`GROUP BY traffic_type`, 4 rows = Shopify's own store total). Mismatch →
+  `is_complete = false`. **A window with any incomplete or missing day renders "—" for every
+  product.** A short row set that looks complete is the failure mode that matters: it would
+  under-report a product silently and the table would be sorted by the wrong number.
+- **Backfill is day-by-day** (`shopify:backfill-session-traffic`), unlike `backfill-funnel`'s
+  month chunks: ShopifyQL's `LIMIT` applies to the whole result set, not per day, so a
+  month-ranged limited query returns the busiest days and omits the quiet ones — and each
+  omission would read as "no traffic".
+- **Writes are an atomic delete+insert per brand-day**, not an upsert: a re-sync can legitimately
+  produce fewer rows, and a stale row left standing would keep reporting sessions Shopify no
+  longer reports. (`pulled_at` is second-precision, so "delete what I didn't touch" is racy.)
+- **The store-wide row is shown, not hidden.** ~51% of a real store's sessions land on the
+  homepage, a collection, search or checkout — never on a product page. Sessions are attributed
+  by LANDING page, and the UI says so rather than letting the operator assume otherwise.
+- **Four traffic types, not five.** Bosco's screenshot shows an "Unattributed" bucket; that value
+  does not exist in the ShopifyQL `traffic_type` domain, and the four Shopify does return sum
+  exactly to the store total. We render what exists.
+
 ## GO-2.2 — Budget planner (2026-07-12)
 
 - **`budget_plans`** — one planned spend per (brand, month, platform, country). `country` is **NOT NULL,

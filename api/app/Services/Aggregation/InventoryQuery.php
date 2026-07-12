@@ -8,6 +8,8 @@ use App\Models\AdProductDaily;
 use App\Models\Brand;
 use App\Models\CommerceDailyMetric;
 use App\Models\ProductCatalog;
+use App\Models\SessionTrafficDaily;
+use App\Support\LandingPathMapper;
 use Carbon\CarbonImmutable;
 
 /**
@@ -117,6 +119,10 @@ final class InventoryQuery
         $commByTitle = $this->commerce($bid, $from, $to);
         $commPrev    = $this->commerce($bid, $pFrom, $pTo);
 
+        // Sessions by traffic type (Bosco item B). Fails CLOSED: unless every day in the
+        // window has a reconciled row, the whole block is null and the UI renders "—".
+        $sessions = $this->sessions($bid, $from, $to);
+
         $rows = [];
         $sumSpend    = 0.0;
         $sumSpendUsd = 0.0;
@@ -154,6 +160,13 @@ final class InventoryQuery
                 default                      => 'ok',
             };
 
+            // Sessions that LANDED on this product's page, split by traffic type. Null (not 0)
+            // whenever the window isn't fully reconciled — see sessions(). A product with a
+            // covered window and genuinely no landings stays 0, which is a real fact.
+            $sess = $sessions['complete']
+                ? ($sessions['byProduct'][$p->handle] ?? self::EMPTY_SPLIT)
+                : null;
+
             $rows[] = [
                 'handle'       => $p->handle,
                 'title'        => $p->title,
@@ -167,6 +180,8 @@ final class InventoryQuery
                 'revenue'      => $hasCommerceData ? round($revenue, 2) : null,
                 'roas'         => $roas,
                 'ads'          => $hasSpendData ? $adsN : null,
+                'sessions'      => $sess === null ? null : array_sum($sess),
+                'sessionsByType' => $sess,
                 'status'       => $status,
                 'action'       => $action,
             ];
@@ -231,6 +246,7 @@ final class InventoryQuery
                 'catalog'  => $syncedAt,
                 'commerce' => $commThrough ? CarbonImmutable::parse((string) $commThrough)->toDateString() : null,
                 'adSpend'  => $adThrough ? CarbonImmutable::parse((string) $adThrough)->toDateString() : null,
+                'sessions' => $sessions['through'],
             ],
             'excludedInactive'      => $excludedInactive,
             'spendCurrencyMismatch' => $spendCurrencyMismatch,
@@ -252,7 +268,121 @@ final class InventoryQuery
             'unattributed' => $hasSpendData
                 ? ['collection' => round($coll, 2), 'other' => round($other, 2), 'total' => round($coll + $other, 2)]
                 : null,
+            // Sessions by traffic type (Bosco item B). `complete: false` → every per-product
+            // `sessions` is null and the UI must render "—" plus the coverage note.
+            'sessions'     => [
+                'complete'     => $sessions['complete'],
+                'windowDays'   => $sessions['windowDays'],
+                'completeDays' => $sessions['completeDays'],
+                'through'      => $sessions['through'],
+                // Header strip — the store-level split Bosco screenshotted.
+                'byType'       => $sessions['complete'] ? $sessions['storeTotals'] : null,
+                'total'        => $sessions['complete'] ? array_sum($sessions['storeTotals']) : null,
+                // The honest "Store-wide / other pages" row: home, collections index, /pages,
+                // search, checkout. Roughly half a store's sessions land here rather than on a
+                // product, so it is shown, not swept under the totals.
+                'storeWide'    => $sessions['complete'] ? $sessions['storeWide'] : null,
+                'productTotal' => $sessions['complete'] ? $sessions['productTotal'] : null,
+            ],
             'products'     => $rows,
+        ];
+    }
+
+    /** A covered window with no landings for a product is a real zero, not missing data. */
+    private const EMPTY_SPLIT = ['paid' => 0, 'direct' => 0, 'organic' => 0, 'unknown' => 0];
+
+    /**
+     * Sessions by traffic type over the window, resolved per landing entity at sync time.
+     *
+     * ══ WHY THIS FAILS CLOSED ══
+     * Sessions are only reported when EVERY day in the window has a reconciled row
+     * (`is_complete = true`). Summing whatever days happen to exist would produce a number
+     * that looks precise and is simply wrong — a 30-day window holding 12 synced days would
+     * under-report every product by ~60%, silently, and rank the table by that. So a window
+     * with any gap reports `complete: false`, the per-product figures are null, and the UI
+     * shows "—". Same "never show partial" gate the rest of the platform uses.
+     *
+     * @return array{complete: bool, windowDays: int, completeDays: int, through: string|null,
+     *               byProduct: array<string, array<string, int>>, storeWide: array<string, int>,
+     *               storeTotals: array<string, int>, productTotal: int}
+     */
+    private function sessions(int $bid, string $from, string $to): array
+    {
+        $windowDays = CarbonImmutable::parse($from)->diffInDays(CarbonImmutable::parse($to)) + 1;
+
+        $completeDays = (int) SessionTrafficDaily::query()
+            ->where('brand_id', $bid)
+            ->where('is_complete', true)
+            ->whereBetween('date', [$from, $to])
+            ->distinct()
+            ->count('date');
+
+        // How far the source reaches at all — unbounded, like commerce/adSpend above, so the
+        // FE can say "sessions synced through <date>" even when the window isn't covered.
+        $throughRaw = SessionTrafficDaily::query()
+            ->where('brand_id', $bid)->where('is_complete', true)->max('date');
+        $through = $throughRaw ? CarbonImmutable::parse((string) $throughRaw)->toDateString() : null;
+
+        $empty = [
+            'complete'     => false,
+            'windowDays'   => (int) $windowDays,
+            'completeDays' => $completeDays,
+            'through'      => $through,
+            'byProduct'    => [],
+            'storeWide'    => self::EMPTY_SPLIT,
+            'storeTotals'  => self::EMPTY_SPLIT,
+            'productTotal' => 0,
+        ];
+
+        if ($completeDays < $windowDays) {
+            return $empty;   // a gap anywhere → no number anywhere. "—", never a short sum.
+        }
+
+        $rows = SessionTrafficDaily::query()
+            ->where('brand_id', $bid)
+            ->where('is_complete', true)
+            ->whereBetween('date', [$from, $to])
+            ->selectRaw('entity_type, entity_key, traffic_type, COALESCE(SUM(sessions), 0) AS s')
+            ->groupBy('entity_type', 'entity_key', 'traffic_type')
+            ->get();
+
+        $byProduct    = [];
+        $storeWide    = self::EMPTY_SPLIT;
+        $storeTotals  = self::EMPTY_SPLIT;
+        $productTotal = 0;
+
+        foreach ($rows as $r) {
+            $type = (string) $r->traffic_type;
+            if (! array_key_exists($type, $storeTotals)) {
+                continue;   // a traffic type Shopify has never returned — don't invent a column
+            }
+
+            $n = (int) $r->s;
+            $storeTotals[$type] += $n;
+
+            if ((string) $r->entity_type === LandingPathMapper::TYPE_PRODUCT) {
+                $handle = (string) $r->entity_key;
+                $byProduct[$handle] ??= self::EMPTY_SPLIT;
+                $byProduct[$handle][$type] += $n;
+                $productTotal += $n;
+                continue;
+            }
+
+            // Collections and 'other' both roll into the store-wide row. A visitor landing on
+            // /collections/new-in did not land on a product, and pretending otherwise is how a
+            // product's sessions get inflated.
+            $storeWide[$type] += $n;
+        }
+
+        return [
+            'complete'     => true,
+            'windowDays'   => (int) $windowDays,
+            'completeDays' => $completeDays,
+            'through'      => $through,
+            'byProduct'    => $byProduct,
+            'storeWide'    => $storeWide,
+            'storeTotals'  => $storeTotals,
+            'productTotal' => $productTotal,
         ];
     }
 

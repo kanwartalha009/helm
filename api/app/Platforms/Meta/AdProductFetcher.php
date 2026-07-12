@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Platforms\Meta;
 
 use App\Models\PlatformConnection;
+use App\Support\LandingPathMapper;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -208,14 +209,17 @@ class AdProductFetcher
         return '';
     }
 
-    /** Shopify product handle from a landing URL, ignoring the market prefix (/it, /fr-fr, …). */
+    /**
+     * Shopify product handle from a landing URL, ignoring the market prefix (/it, /fr-fr, …).
+     *
+     * Delegates to LandingPathMapper, which now owns the ONE canonical regex. Shopify session
+     * landing paths resolve through the same code, so a Meta ad's landing URL and a Shopify
+     * session on the same product can never disagree about the handle — which would split one
+     * product's numbers across two rows.
+     */
     public static function productHandle(string $url): ?string
     {
-        if (preg_match('~(?:/[a-z]{2}(?:-[a-z]{2})?)?/products/([^/?#]+)~i', $url, $m)) {
-            return strtolower($m[1]);
-        }
-
-        return null;
+        return LandingPathMapper::productHandle($url);
     }
 
     /**

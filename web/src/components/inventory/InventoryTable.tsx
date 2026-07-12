@@ -1,10 +1,12 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { formatMoney, formatNumber, formatRoas } from '@/lib/formatters';
+import { SessionCell } from '@/components/inventory/SessionTraffic';
 import type {
   CollectionGroup,
   InventoryAction,
   InventoryProduct,
   InventoryStatus,
+  SessionSplit,
 } from '@/types/inventory';
 
 // Design tokens come from CSS variables so this stays in the Helm system (warm
@@ -75,6 +77,10 @@ type MetricItem = {
   revenue: number | null;
   roas: number | null;
   ads: number | null;
+  // Sessions that LANDED here (Bosco item B). Optional because the backend rolls out
+  // additively; null because an unreconciled window must render '—', never a short sum.
+  sessions?: number | null;
+  sessionsByType?: SessionSplit | null;
   action: InventoryAction;
 };
 
@@ -117,6 +123,9 @@ export function InventoryTable(props: Props) {
               <th style={thBase}>Revenue</th>
               <th style={thBase}>ROAS blended</th>
               <th style={thBase}>Active ads</th>
+              <th style={thBase} title="Sessions that landed on this product's page, split by traffic type. A visitor who lands on the homepage and then browses to this product is counted under Store-wide, not here.">
+                Sessions
+              </th>
               <th style={thL}>Status</th>
               <th style={thL}>Action</th>
             </tr>
@@ -263,6 +272,11 @@ function metricCells(
         {item.roas != null ? formatRoas(item.roas) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
       </td>
       <td style={num}>{item.ads != null ? item.ads : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+      <td style={{ ...num, textAlign: 'right' }}>
+        <div style={{ display: 'inline-block', textAlign: 'left' }}>
+          <SessionCell total={item.sessions} split={item.sessionsByType} />
+        </div>
+      </td>
       <td style={left}>
         <StatusPill status={item.status} />
       </td>

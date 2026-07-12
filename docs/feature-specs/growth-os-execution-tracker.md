@@ -199,6 +199,48 @@ deliberately deferred behind the parity gate.) suite+tsc+build green; AS-BUILT +
   brand tz, complete days only).
 - **Tests:** pacing math (mid-month, tz edges); CRUD + RBAC. **Proof:** standing.
 
+### 2.1b — Brand goals, Bosco cut ☑ 2026-07-12  *(Bosco item A — D-025)*
+> **Master plan §5.1 is now PARTIALLY DONE — do not rebuild it.** What 5.1 still owes: the per-month
+> **override** picker (schema + API already support it; only the UI is missing) and MER/spend-cap pacing
+> surfaces. Everything else in 5.1 (goal storage, the pacing engine, the dashboard chip) shipped in 2.1/2.1b.
+>
+> **Delta over 2.1** (Bosco asked for a *standing* goal in Settings and *cards* on Overview, not a combined
+> card on brand detail):
+> - `month` is now **NULLABLE** — null = the **standing goal**, applying to every month with no explicit
+>   override. The Settings UI writes only this one; a month picker would ask the operator to retype the same
+>   number twelve times a year.
+> - 🔴 **The spec's schema had a latent MySQL bug and was NOT followed literally.** §A.1 asks for nullable
+>   `month` + `unique (brand_id, month)`. On MySQL **NULLs are DISTINCT in a unique index**, so that key
+>   constrains nothing: a brand could accumulate several standing goals and pacing would pick one at random —
+>   two conflicting revenue targets, silently. Uniqueness is enforced on a generated
+>   **`month_key = COALESCE(month,'__default')`** instead (same pattern as D-024). Third time this trap has
+>   appeared (`budget_plans.country`, `anomalies.subject`).
+> - **ROAS is USD-correct.** Pacing divides Σ(revenue × fx) by Σ(spend × fx), never native ÷ native — a brand
+>   booking revenue and spend in different currencies would otherwise get a ratio of two incomparable numbers.
+>   Same math as the dashboard and the truth spine; Helm does not carry a second definition of ROAS.
+> - Payload gained `isStandingDefault`, `remainingDays`, `neededPerDay` (= gap ÷ remaining days, floored at 0 —
+>   "needs −250/day" is nonsense).
+> - **RBAC hole closed:** `store()`/`destroy()` authorized `view`, so a team member attached to a brand could
+>   edit the goal their own performance is graded against. Now `BrandPolicy::update` (master_admin|manager),
+>   matching the route middleware.
+- **Migration:** `2026_07_12_000009_add_standing_default_to_brand_targets` — additive: `month` → nullable,
+  `brand_targets_unique` swapped for `brand_targets_month_key_unique` on the generated `month_key`. No data touched.
+- **Files:** `web/src/components/brands/GoalsSection.tsx` (Settings tab; outside the brand `<form>` — the ui
+  `Button` has no default `type`, so a nested save button would submit the brand form), `PacingCards.tsx`
+  (Overview: revenue bar + "day N/M · needs €X/day", ROAS vs target with `✓ goal hit`).
+  `TargetsCard.tsx` **deleted** — superseded by the two.
+- **Missing-data contract:** **no goals → no cards at all**, not an empty state and not a 0% bar (a 0% bar reads
+  as failure; a brand with no goal is not failing). Zero complete days → "—" + amber, no bar drawn. No ad spend →
+  ROAS "—", never 0×.
+- **Tests** (`PacingTest`, 6 → **15**): standing goal applies to any month; a month override beats it; **only one
+  standing goal per brand can ever exist**; **ROAS in USD, not native ÷ native** (asserts 5.5×, the value
+  native-over-native would wrongly report as 10×); ROAS null when no spend; `neededPerDay` = 1450 for
+  (30000 − 1000) ÷ 20; `neededPerDay` floored at 0 once the goal is beaten; a 300× ROAS target is rejected as a
+  typo (422); clearing the standing goal removes the cards.
+- **Proof:** `npx tsc --noEmit` → exit 0. `npx vite build` → built, 0 errors. PHP brace/paren balance clean on all
+  4 touched files. ⏳ `php artisan test --filter=PacingTest` + `php artisan migrate` are **Kanwar-side** (no PHP/MySQL
+  on this machine) — reported unverified until he runs them.
+
 ### 2.2 — Budget planner (read-only) ☑ 2026-07-12
 > **Built:** `budget_plans` (brand, month 'Y-m', platform, **country NOT NULL default ''** = all — a nullable
 > country would break the unique key since MySQL treats NULLs as distinct; workspace_id seam) + model;
@@ -551,6 +593,134 @@ Next phase: **GO-4 — the seasonal playbook engine** (the market whitespace).
 - **Tests:** unconfirmed-style refusal path; palette determinism. **Proof:** standing.
 
 **GO-4 exit:** 4.1–4.4 ☑; one plan Kanwar-reviewed; suite+tsc+build green.
+
+---
+
+## Bosco item B — sessions by traffic type: PROBE EVIDENCE ☑ 2026-07-12
+
+**Verdict: B1 — the dimensions COMBINE. Full per-product build is supported.** Nothing below is recalled or
+assumed; every figure is the verbatim output of a query run against a real store this session.
+
+**Store probed:** Flabelus (`beatriz-536.myshopify.com`), Shopify Plus, EUR, Spain. Baseline day **2026-07-09**
+(the last complete day at probe time). Store total that day: **35,225 sessions**.
+
+**Probe 1 — does a traffic-type dimension exist?** ✅ `traffic_type` is real.
+```
+FROM sessions SHOW sessions GROUP BY traffic_type SINCE 2026-07-09 UNTIL 2026-07-09
+→ paid 20,590 | direct 9,412 | organic 3,114 | unknown 2,109        (sum = 35,225)
+```
+**It reconciles EXACTLY to the store total** — 20590+9412+3114+2109 = 35,225. No rounding gap, no hidden bucket.
+⚠️ Note: Shopify returns **four** values, not five. Bosco's screenshot shows an "Unattributed" row; that value does
+**not** appear in the ShopifyQL `traffic_type` domain. Do not invent it — render the four Shopify actually returns.
+
+**Probe 2 — does a landing-path dimension exist?** ✅
+```
+FROM sessions SHOW sessions GROUP BY landing_page_path ORDER BY sessions DESC LIMIT 5 SINCE -30d UNTIL today
+→ "/" 124,466 | /collections/new-in 38,224 | /es 37,630 | /products/oy 29,882 | /collections/best-sellers 28,931
+```
+
+**Probe 3 — THE question: do they combine?** ✅ **YES.**
+```
+FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type ORDER BY sessions DESC LIMIT 10 SINCE -30d UNTIL today
+→ ["/", direct, 46,025] ["/collections/new-in", paid, 34,121] ["/", organic, 33,359]
+  ["/products/oy", direct, 29,835] ["/products/anna", direct, 27,508] ["/", unknown, 24,321]
+  ["/products/jo", direct, 23,124] ["/", paid, 20,763] ["/collections/woman", paid, 19,545] …
+```
+
+**Probe 4 — does it survive the DATE dimension the sync needs?** ✅ date × landing_path × traffic_type all three.
+```
+FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type TIMESERIES day ORDER BY sessions DESC LIMIT 8 SINCE -3d UNTIL yesterday
+→ [2026-07-09, "/", direct, 1632] [2026-07-09, /products/jay, paid, 1352] [2026-07-09, "/", organic, 1120] …
+```
+⚠️ `LIMIT` applies to the **whole result set, not per day** — all 8 rows came back from a single day. The sync must
+therefore page **one day at a time**, never one ranged query with a global LIMIT.
+
+### Four findings that change the spec's §B.2 build plan
+
+**1. 🔴 The spec's "top-N landing paths per day (default 200), log a truncation note" cap is a bad trade — and
+unnecessary.** Any LIMIT truncates the *tail*, and the tail is precisely where low-traffic products live — the exact
+products an inventory tool exists to surface. Measured on the baseline day:
+
+| query | rows returned | sessions captured | share |
+|---|---|---|---|
+| all paths × type, `LIMIT 1000` | 1000 (= the limit → truncated) | 31,903 | **90.6%** of 35,225 (3,322 lost) |
+| product paths × type, `LIMIT 300` | 300 (= the limit → truncated) | 12,709 | **74.3%** of 17,102 (4,393 lost) |
+
+A 200-row cap would have quietly discarded roughly a quarter of product-page sessions, concentrated entirely in the
+long tail. Helm would then under-report sessions for slow products and call it complete.
+
+**2. ✅ `OFFSET` works — so the tail can be PAGED, not capped.** Verified:
+```
+FROM sessions SHOW sessions WHERE landing_page_path CONTAINS '/products/' GROUP BY landing_page_path, traffic_type
+  ORDER BY sessions DESC LIMIT 5 OFFSET 300 SINCE 2026-07-09 UNTIL 2026-07-09
+→ [/fr/products/mae-silver-leonor, paid, 7] [/de/products/dafne, paid, 7] … (rows 301-305, as expected)
+```
+**Build LIMIT+OFFSET pagination and take the whole day.** No cardinality cap, no truncation note, no silent loss.
+
+**3. ✅ `CONTAINS` works in `WHERE` (`LIKE` does NOT — ANTLR syntax error).** Filtering server-side to
+`landing_page_path CONTAINS '/products/'` cuts the rows we must page through by more than half:
+```
+FROM sessions SHOW sessions WHERE landing_page_path CONTAINS '/products/' GROUP BY traffic_type SINCE 2026-07-09 UNTIL 2026-07-09
+→ paid 12,350 | direct 3,531 | unknown 708 | organic 513            (sum = 17,102)
+```
+Product pages are **48.6%** of all sessions (17,102 / 35,225) — so the other half of the store's traffic lands on
+home/collections/pages. That is the honest size of the "Store-wide / other pages" bucket §B.3 asks for, and it is
+**not** a rounding error to be hidden: it is half the traffic.
+
+**4. ✅ History goes back ≥12 months** — `SINCE 2025-07-09 UNTIL 2025-07-09` returns 12,289 sessions
+(paid 6,511 / direct 3,276 / unknown 1,376 / organic 1,126). Ranged backfill and YoY are both feasible.
+
+### Consequent build plan (supersedes §B.2's cap; everything else in §B stands)
+- Page each day with `LIMIT 1000 OFFSET n` until a short page returns; **reconcile** the paged sum against a cheap
+  `GROUP BY traffic_type` total for the same day and mark the row `is_complete = false` if they disagree. Missing =
+  "—", never 0.
+- Keep `WHERE … CONTAINS '/products/'` **out** of the sync: the unmapped half of traffic is the "Store-wide / other
+  pages" row §B.3 requires, and dropping it would make the totals stop reconciling. Use `CONTAINS` only where a
+  product-scoped read genuinely wants it.
+- Render the four real traffic types (paid/direct/organic/unknown). No "unattributed".
+- The landing-path caveat tooltip in §B.4 is **not optional** — 51.4% of sessions land somewhere other than a
+  product page, so "sessions for this product" means "sessions that *landed* on this product".
+
+**Status:** probe ☑ complete, verdict **B1**.
+
+### B1 — build ☑ 2026-07-12 (D-026)
+
+> **Built:** `session_traffic_daily` (+ workspace_id seam) · `App\Support\LandingPathMapper` (now the ONE owner of
+> the product-handle regex; `AdProductFetcher::productHandle()` delegates to it) · `SessionTrafficFetcher`
+> (paged + self-reconciling) · `SessionTrafficSync` (one write path shared by the job and the backfill) ·
+> `shopify:backfill-session-traffic` · sessions in `InventoryQuery` + the Inventory page (store strip, per-product
+> split bar, freshness segment).
+>
+> **The three decisions that differ from the spec, each forced by a measurement:**
+> 1. **Not keyed on raw `landing_path`.** A brand-day holds 2,501–5,000 distinct (path × type) rows and the row at
+>    OFFSET 2500 was `/checkouts/cn/<unique-token>` — 1 session. Every checkout mints a unique URL, so the spec's
+>    key has **unbounded cardinality**: ~3.5k rows/brand/day ≈ 100M rows/year across ~80 brands, almost all junk.
+>    The path is resolved to product / collection / `store-wide` at sync time; the tail folds into 4 rows a day.
+> 2. **Paged, not capped.** The spec's top-200 cap would have dropped ~26% of product-page sessions, *all* of it
+>    tail — the low-traffic products this feature exists to surface. OFFSET works; we take the whole day.
+> 3. **Reconciled, and fails closed.** Each day is checked against Shopify's own store total. Mismatch →
+>    `is_complete = false`; any gap in the window → every session figure is null and the UI renders "—". A 30-day
+>    window holding 12 synced days would otherwise under-report every product by ~60% *while looking exact*, and
+>    the table would then be sorted by that number.
+- **Migration:** `2026_07_12_000010_create_session_traffic_daily_table` (additive, new table).
+- **Honesty surfaces:** store-wide row shown, not hidden — **51.4% of sessions never touch a product page**;
+  landing-path attribution stated on the page and in the column tooltip; four traffic types, no invented
+  "Unattributed".
+- **Tests** (`SessionTrafficTest` 6 + `SessionTrafficFetcherTest` 7 = **13 new**): mapper table (locales, region
+  locales, collection-nested products, query strings, mixed case, malformed `)`, checkout tokens); a
+  collection-nested product is a PRODUCT; locale variants collapse to one row; paging keeps the tail past a full
+  first page; a non-reconciling day is stored incomplete; a failed totals call means the day can't be trusted; an
+  empty day writes **nothing** rather than zeroes; a re-sync removes rows that no longer exist; one missing day
+  hides every session number; an unreconciled day counts as missing; a covered window with no landings is a real
+  **0**, not "—"; a stray fifth traffic type never enters the totals.
+- **Proof:** `npx tsc --noEmit` → exit 0. `npx vite build` → built, 0 errors. PHP brace/paren/bracket balance clean
+  on all 14 touched files (strings + comments stripped — the naive counter false-positives on `trim($h, ").,'\"")`).
+  ⏳ `php artisan test --filter=SessionTraffic` + `php artisan migrate` are **Kanwar-side** — unverified until run.
+- **Owed by Kanwar:** run the migration, then
+  `php artisan shopify:backfill-session-traffic <brand> --since=2025-07-01` (probe confirmed ≥12 months of history).
+  The **acceptance check from spec §B**: one brand's Inventory page must show per-product splits that reconcile to
+  Shopify admin's store totals for the same window — the sync now asserts exactly this per day, so a green page
+  means it reconciled.
 
 ---
 

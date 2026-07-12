@@ -3,6 +3,7 @@ import { AppLayout } from '@/components/shell/AppLayout';
 import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { Banner } from '@/components/ui';
 import { InventoryTable } from '@/components/inventory/InventoryTable';
+import { SessionTrafficStrip } from '@/components/inventory/SessionTraffic';
 import { useInventory } from '@/hooks/useInventory';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { useUsers } from '@/hooks/useApiData';
@@ -129,6 +130,7 @@ export function InventoryPage() {
         g = {
           key, name: first, productCount: 0, stock: 0, units: null, unitsPrev: null,
           deltaPct: null, spend: null, revenue: null, roas: null, ads: null,
+          sessions: null, sessionsByType: null,
           status: 'ok', action: 'ok', products: [],
         };
         map.set(key, g);
@@ -141,6 +143,19 @@ export function InventoryPage() {
       g.spend = addNullable(g.spend, p.spend);
       g.revenue = addNullable(g.revenue, p.revenue);
       g.ads = addNullable(g.ads, p.ads);
+      g.sessions = addNullable(g.sessions, p.sessions ?? null);
+      // The group's split is the sum of its members' splits — same fail-closed rule: if a
+      // member's sessions are null (window not reconciled) it contributes nothing, and a
+      // group whose members are ALL null stays null rather than collapsing to 0.
+      if (p.sessionsByType) {
+        const base = g.sessionsByType ?? { paid: 0, direct: 0, organic: 0, unknown: 0 };
+        g.sessionsByType = {
+          paid: base.paid + p.sessionsByType.paid,
+          direct: base.direct + p.sessionsByType.direct,
+          organic: base.organic + p.sessionsByType.organic,
+          unknown: base.unknown + p.sessionsByType.unknown,
+        };
+      }
     }
     const groups = [...map.values()];
     for (const g of groups) {
@@ -289,6 +304,11 @@ export function InventoryPage() {
       {/* Data-freshness strip — stock/sales/spend recency ("Stock synced …"
           moved here from the bar above so it isn't duplicated). */}
       {data && <FreshnessStrip data={data} />}
+
+      {/* Sessions by traffic type (Bosco item B) — the store-level split, plus the honest
+          share that never touched a product page. Absent entirely for a brand with no
+          session sync; an unreconciled window renders the amber note, never a number. */}
+      {data?.sessions && <SessionTrafficStrip s={data.sessions} windowTo={data.to} />}
 
       {/* View toggle + sort + status — segmented button groups (matches Ads). */}
       <div className="filter-bar mb-12">
@@ -521,6 +541,14 @@ function FreshnessStrip({ data }: { data: InventoryResponse }) {
       text: dt.adSpend ? `Meta product spend through ${dt.adSpend}` : 'Meta product spend not synced yet',
       amber: !dt.adSpend || dt.adSpend < data.to,
     });
+    // Sessions only appear once the brand has been backfilled at all — an absent segment
+    // means "this brand has no session sync", which is different from "stale".
+    if (data.sessions) {
+      segs.push({
+        text: dt.sessions ? `Sessions through ${dt.sessions}` : 'Sessions not synced yet',
+        amber: !dt.sessions || dt.sessions < data.to,
+      });
+    }
   }
 
   return (

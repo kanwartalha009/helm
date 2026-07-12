@@ -18,6 +18,13 @@ export interface InventoryVariant {
   q: number;
 }
 
+// Shopify's own four traffic types. There is NO "unattributed" — Bosco's screenshot shows one,
+// but that value does not exist in the ShopifyQL `traffic_type` domain (probe, 2026-07-12), so
+// we don't manufacture a column for it.
+export type TrafficType = 'paid' | 'direct' | 'organic' | 'unknown';
+
+export type SessionSplit = Record<TrafficType, number>;
+
 export interface InventoryProduct {
   handle: string;
   title: string;
@@ -40,6 +47,10 @@ export interface InventoryProduct {
   // or when spend data is missing for the window.
   roas: number | null;
   ads: number | null;
+  // Sessions that LANDED on this product's page (Bosco item B). null when the window isn't
+  // fully reconciled — render '—', never 0. A covered window with no landings is a real 0.
+  sessions?: number | null;
+  sessionsByType?: SessionSplit | null;
   status: InventoryStatus;
   action: InventoryAction;
 }
@@ -77,6 +88,27 @@ export interface InventoryDataThrough {
   catalog: string | null;
   commerce: string | null;
   adSpend: string | null;
+  sessions?: string | null;
+}
+
+// Sessions by traffic type over the window (Bosco item B).
+//
+// `complete` is a FAIL-CLOSED gate: unless every day in the window has a row that reconciled
+// against Shopify's own store total, it's false, every per-product figure is null, and the UI
+// renders '—'. Summing only the days that happen to exist would under-report every product and
+// then sort the table by that wrong number.
+export interface InventorySessions {
+  complete: boolean;
+  windowDays: number;
+  completeDays: number;
+  through: string | null;   // Y-m-d, latest reconciled day (unbounded, not window-limited)
+  byType: SessionSplit | null;      // store-level split — the strip Bosco screenshotted
+  total: number | null;
+  // Sessions that landed anywhere OTHER than a product page: home, collection pages, /pages,
+  // search, checkout. Roughly half of a real store's traffic, so it is shown rather than
+  // folded silently into the totals.
+  storeWide: SessionSplit | null;
+  productTotal: number | null;
 }
 
 export interface InventoryResponse {
@@ -96,6 +128,9 @@ export interface InventoryResponse {
   spendCurrencyMismatch?: boolean;
   // Archived/draft products excluded server-side from the table.
   excludedInactive?: number;
+  // Sessions by traffic type (Bosco item B). Optional: brands whose backfill hasn't run yet
+  // simply don't have it.
+  sessions?: InventorySessions;
 }
 
 // A collection = every product sharing a model name (the first word of the
@@ -116,6 +151,9 @@ export interface CollectionGroup {
   revenue: number | null;
   roas: number | null;
   ads: number | null;
+  // Sum of the member products' landings. null when the window isn't reconciled.
+  sessions: number | null;
+  sessionsByType: SessionSplit | null;
   status: InventoryStatus;
   action: InventoryAction;
   products: InventoryProduct[]; // members, shown when the row is expanded
