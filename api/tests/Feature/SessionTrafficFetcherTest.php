@@ -48,7 +48,22 @@ final class SessionTrafficFetcherTest extends TestCase
         ]);
     }
 
-    /** A ShopifyQL tableData payload. */
+    /**
+     * A ShopifyQL tableData payload.
+     *
+     * ⚠️ `rows` are OBJECTS KEYED BY COLUMN NAME — that is what Shopify actually returns:
+     *
+     *     {"landing_page_path": "/products/jay", "traffic_type": "paid", "sessions": "455"}
+     *
+     * This helper originally emitted POSITIONAL arrays (["/products/jay", "paid", "455"]), which
+     * matched the bug in the fetcher rather than reality. Every test passed while production
+     * returned zeros for 88 brands across 90 days. A fixture that agrees with the code instead of
+     * with the API tests nothing at all — so the shape is built from the column names here, and
+     * callers still pass rows positionally for readability.
+     *
+     * @param array<int, string>              $columns
+     * @param array<int, array<int, string>>  $rows positional; zipped onto $columns
+     */
     private function table(array $columns, array $rows): array
     {
         return [
@@ -56,7 +71,11 @@ final class SessionTrafficFetcherTest extends TestCase
                 'shopifyqlQuery' => [
                     'tableData'  => [
                         'columns' => array_map(static fn (string $c): array => ['name' => $c], $columns),
-                        'rows'    => $rows,
+                        // Zip each positional row onto the column names — Shopify's real shape.
+                        'rows'    => array_map(
+                            static fn (array $r): array => array_combine($columns, $r),
+                            $rows,
+                        ),
                     ],
                     'parseErrors' => [],
                 ],
@@ -304,6 +323,84 @@ final class SessionTrafficFetcherTest extends TestCase
 
         $this->assertFalse($result['isComplete']);
         $this->assertNull($result['storeTotal']);
+    }
+
+    public function test_rows_are_read_by_COLUMN_NAME_not_by_position(): void
+    {
+        // THE production bug, pinned. ShopifyQL returns each row as an object keyed by column
+        // name. The first cut read $row[2] by index — absent on a map — so every path came back
+        // '', every session count read 0, the day "reconciled" (0 === 0), and 88 brands were
+        // recorded as having had zero traffic for 90 days straight. With total confidence.
+        //
+        // This fixture is written as Shopify really sends it, deliberately by hand, so it cannot
+        // drift back into agreeing with the parser instead of with the API.
+        Http::fake([
+            '*/graphql.json' => function ($request) {
+                $ql = (string) ($request->data()['variables']['q'] ?? '');
+
+                $rows = str_contains($ql, 'GROUP BY traffic_type')
+                    ? [['traffic_type' => 'paid', 'sessions' => '455']]
+                    : [['landing_page_path' => '/products/jay', 'traffic_type' => 'paid', 'sessions' => '455']];
+
+                $cols = str_contains($ql, 'GROUP BY traffic_type')
+                    ? [['name' => 'traffic_type'], ['name' => 'sessions']]
+                    : [['name' => 'landing_page_path'], ['name' => 'traffic_type'], ['name' => 'sessions']];
+
+                return Http::response([
+                    'data' => ['shopifyqlQuery' => [
+                        'tableData'   => ['columns' => $cols, 'rows' => $rows],
+                        'parseErrors' => [],
+                    ]],
+                ], 200);
+            },
+        ]);
+
+        $result = app(SessionTrafficFetcher::class)->fetchDay($this->conn(), self::DAY);
+
+        $this->assertSame(455, $result['storeTotal'], 'sessions must be read by name, not index');
+        $this->assertSame(455, $result['pagedTotal']);
+        $this->assertTrue($result['isComplete']);
+        $this->assertCount(1, $result['rows']);
+        $this->assertSame('jay', $result['rows'][0]['entity_key']);
+        $this->assertSame(455, $result['rows'][0]['sessions']);
+    }
+
+    public function test_a_row_missing_its_columns_fails_the_day_instead_of_reading_as_zero(): void
+    {
+        // If Shopify ever changes the row shape again, the day must break LOUDLY. Silently
+        // skipping unreadable rows is what turned a parser bug into "your stores had no traffic".
+        Http::fake([
+            '*/graphql.json' => function ($request) {
+                $ql = (string) ($request->data()['variables']['q'] ?? '');
+
+                if (str_contains($ql, 'GROUP BY traffic_type')) {
+                    return Http::response([
+                        'data' => ['shopifyqlQuery' => [
+                            'tableData'   => ['columns' => [['name' => 'traffic_type'], ['name' => 'sessions']],
+                                'rows' => [['traffic_type' => 'paid', 'sessions' => '10']]],
+                            'parseErrors' => [],
+                        ]],
+                    ], 200);
+                }
+
+                // A shape we do not understand — e.g. Shopify reverts to positional arrays.
+                return Http::response([
+                    'data' => ['shopifyqlQuery' => [
+                        'tableData'   => ['columns' => [['name' => 'landing_page_path']],
+                            'rows' => [['/products/jay', 'paid', '10']]],
+                        'parseErrors' => [],
+                    ]],
+                ], 200);
+            },
+        ]);
+
+        $result = app(SessionTrafficFetcher::class)->fetchDay($this->conn(), self::DAY);
+
+        $this->assertFalse($result['isComplete'], 'an unreadable row shape must fail the day');
+        $this->assertSame([], $result['rows']);
+
+        // And the sync must therefore refuse to mark the day done.
+        $this->assertNull(app(SessionTrafficSync::class)->syncDay($this->conn(), self::DAY));
     }
 
     public function test_a_genuinely_zero_session_day_is_DONE_and_writes_nothing(): void

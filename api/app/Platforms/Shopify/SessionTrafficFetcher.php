@@ -248,15 +248,16 @@ class SessionTrafficFetcher
             return null;
         }
 
-        [$columns, $rows] = $table;
-        $idx = $this->columnIndex($columns, 'sessions');
-        if ($idx === null) {
-            return null;
-        }
+        [, $rows] = $table;
 
         $total = 0;
         foreach ($rows as $row) {
-            $total += (int) ($row[$idx] ?? 0);
+            if (! is_array($row) || ! array_key_exists('sessions', $row)) {
+                // A row we cannot read is NOT a row worth zero. Fail the day rather than
+                // silently under-count the number everything else reconciles against.
+                return null;
+            }
+            $total += (int) round((float) $row['sessions']);
         }
 
         return $total;
@@ -270,15 +271,6 @@ class SessionTrafficFetcher
      */
     private function page(ShopifyClient $client, string $day, int $offset): ?array
     {
-        // ⚠️ CLAUSE ORDER IS LOAD-BEARING. ShopifyQL's `shopifyqlQuery` endpoint parses with a
-        // strict ANTLR grammar: SINCE/UNTIL must come BEFORE ORDER BY / LIMIT / OFFSET. Putting
-        // them after (as the Shopify admin's own analytics console tolerates) is a parse error,
-        // and a parse error here returns an empty table — which reads downstream as "this store
-        // had no sessions", not as "the query was malformed". That is how every brand came back
-        // with 0 rows for 90 straight days while looking like a data problem.
-        //
-        // The order below matches RevenueFetcher::groupedFunnelByDay, which is proven in
-        // production against the same endpoint.
         $ql = 'FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type '
             . "SINCE {$day} UNTIL {$day} "
             . 'ORDER BY sessions DESC '
@@ -289,46 +281,53 @@ class SessionTrafficFetcher
             return null;
         }
 
-        [$columns, $rows] = $table;
+        [, $rows] = $table;
 
-        $pathIdx = $this->columnIndex($columns, 'landing_page_path');
-        $typeIdx = $this->columnIndex($columns, 'traffic_type');
-        $sessIdx = $this->columnIndex($columns, 'sessions');
-
-        if ($pathIdx === null || $typeIdx === null || $sessIdx === null) {
-            // An empty page legitimately returns no columns (probe-observed at OFFSET past the
-            // end). Distinguish that from a malformed response by checking the row set.
-            return $rows === [] ? [] : null;
-        }
-
+        // ⚠️ ShopifyQL returns each row as an OBJECT KEYED BY COLUMN NAME, not as a positional
+        // array:
+        //
+        //     {"landing_page_path": "/products/jay", "traffic_type": "paid", "sessions": "455"}
+        //
+        // The first cut of this method looked the columns up by index and read $row[2]. On a map
+        // that is simply absent — so every path came back '', every row was skipped, and every
+        // session count read as 0. The day then "reconciled" (0 === 0) and 88 stores were recorded
+        // as having had zero traffic for 90 consecutive days, with total confidence.
+        //
+        // RevenueFetcher::groupedFunnelByDay — which has worked in production for months against
+        // this same endpoint — reads $row['sessions'] by name. That was the pattern to copy.
         $out = [];
         foreach ($rows as $row) {
-            $path = (string) ($row[$pathIdx] ?? '');
-            if ($path === '') {
-                continue;
+            if (! is_array($row)) {
+                return null;   // unreadable response — fail the day, don't call it empty
             }
+
+            // A row missing the columns we asked for is a BROKEN response, not an empty one.
+            // Returning null fails the day loudly; skipping the row would resurrect the exact
+            // silent-zero bug this comment exists to describe.
+            if (! array_key_exists('landing_page_path', $row)
+                || ! array_key_exists('traffic_type', $row)
+                || ! array_key_exists('sessions', $row)) {
+                Log::warning('shopify.session_traffic.unexpected_row_shape', [
+                    'day'  => $day,
+                    'keys' => array_keys($row),
+                ]);
+
+                return null;
+            }
+
+            $path = trim((string) $row['landing_page_path']);
+            if ($path === '') {
+                continue;   // a genuinely blank landing path — nothing to attribute
+            }
+
             $out[] = [
                 'path'         => $path,
-                'traffic_type' => (string) ($row[$typeIdx] ?? ''),
-                'sessions'     => (int) ($row[$sessIdx] ?? 0),
+                'traffic_type' => (string) $row['traffic_type'],
+                'sessions'     => (int) round((float) $row['sessions']),
             ];
         }
 
         return $out;
-    }
-
-    /**
-     * @param array<int, mixed> $columns
-     */
-    private function columnIndex(array $columns, string $name): ?int
-    {
-        foreach ($columns as $i => $c) {
-            if ((string) (is_array($c) ? ($c['name'] ?? '') : '') === $name) {
-                return (int) $i;
-            }
-        }
-
-        return null;
     }
 
     /**
