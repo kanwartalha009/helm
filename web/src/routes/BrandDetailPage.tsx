@@ -576,14 +576,17 @@ function ConnectionsTab({
   return (
     <>
       <p className="text-sm muted mb-24">
-        Connect or manage the platforms feeding this brand’s metrics. Shopify is per-store; Meta, Google,
-        and TikTok use the agency-wide credentials configured in Settings.
+        Connect or manage the platforms feeding this brand’s metrics. Shopify and Klaviyo are per-store; Meta,
+        Google, and TikTok use the agency-wide credentials configured in Settings.
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
         <ShopifyCard brand={brand} conn={shopify} onInstall={onInstall} />
         <MetaConnectCard brand={brand} conn={meta} />
         <GoogleConnectCard brand={brand} conn={google} />
         <TikTokConnectCard brand={brand} conn={tiktok} />
+        {/* Klaviyo is a per-BRAND credential (each brand is its own Klaviyo account), which is
+            why it was originally parked in Settings — but it is a connection, so it belongs here. */}
+        <KlaviyoKeyCard slug={brand.slug} />
       </div>
     </>
   );
@@ -1745,9 +1748,6 @@ function SettingsTab({ brand }: { brand: Brand }) {
         <span className="field-hint">Groups this brand for the Ads Library — winners and competitor ads are filtered and ranked within a niche. Left empty, the brand shows under “Unassigned”.</span>
       </div>
 
-      {/* Klaviyo is a PER-BRAND credential (each brand is its own Klaviyo account),
-          so it lives here rather than on the workspace Platform-keys page. */}
-      <KlaviyoKeyCard slug={brand.slug} />
       <div className="field" style={{ marginTop: 8 }}>
         <label className="field-label">Performance rules</label>
         <span className="field-hint">Optional. Set these to switch on margin- and CPA-based flags across products, ad sets and the audit. Left empty, those flags stay off — Helm never guesses your numbers.</span>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button } from '@/components/ui';
+import { Button, Dot, Tag } from '@/components/ui';
 import {
   useBrandKlaviyo,
   useRemoveBrandKlaviyo,
@@ -9,12 +9,16 @@ import {
 import { toast } from '@/stores/toastStore';
 
 /**
- * Per-brand Klaviyo private key (GO-1.1). Unlike the agency-level platform tokens,
- * every brand has its own Klaviyo account and therefore its own key — so it lives on
- * the brand's Settings tab, not the workspace Platform-keys page.
+ * Per-brand Klaviyo private key (GO-1.1).
  *
- * The key is write-only (never returned by the API). Saving runs a live connection
- * test immediately so the operator gets real feedback instead of a silent save.
+ * Lives on the brand's **Connections** tab, beside Shopify/Meta/Google/TikTok — because that
+ * is what it is: a platform connection. It sat under Settings only because it's the one
+ * credential that is per-BRAND rather than agency-wide (each brand has its own Klaviyo
+ * account), and that's a fact about where the key comes from, not about where the operator
+ * looks for it.
+ *
+ * The key is write-only (never returned by the API). Saving runs a live connection test
+ * immediately, so the operator gets real feedback instead of a silent save.
  */
 export function KlaviyoKeyCard({ slug }: { slug: string }) {
   const { data } = useBrandKlaviyo(slug);
@@ -45,11 +49,23 @@ export function KlaviyoKeyCard({ slug }: { slug: string }) {
   };
 
   return (
-    <div className="field" style={{ marginTop: 8 }}>
-      <label className="field-label">
-        Klaviyo{' '}
-        <span className="text-xs muted">{connected ? '· connected' : '· not connected'}</span>
-      </label>
+    <div className="platform-card">
+      <div className="platform-card-head">
+        <span className="platform-logo">K</span>
+        <div>
+          <div style={{ fontWeight: 500 }}>Klaviyo</div>
+          <div className="text-xs muted">{connected ? 'Private key saved' : 'Not connected'}</div>
+        </div>
+        <Tag variant={connected ? 'success' : 'warning'} style={{ marginLeft: 'auto' }}>
+          <Dot variant={connected ? 'success' : 'warning'} />
+          {connected ? 'Connected' : 'Not connected'}
+        </Tag>
+      </div>
+
+      <div className="platform-card-status">
+        Email revenue syncs daily once a key is saved, and is reported as its own channel — never added to
+        store or ad revenue.
+      </div>
 
       <div className="flex items-center gap-8" style={{ flexWrap: 'wrap' }}>
         <input
@@ -60,14 +76,23 @@ export function KlaviyoKeyCard({ slug }: { slug: string }) {
           value={key}
           onChange={(e) => setKey(e.target.value)}
           maxLength={255}
-          style={{ maxWidth: 320 }}
+          style={{ maxWidth: 260 }}
         />
-        <Button size="sm" variant="secondary" disabled={key.trim().length < 10 || save.isPending} onClick={onSave}>
+        {/* type="button" is load-bearing: the ui Button has no default type, and this card
+            used to sit inside the brand Settings <form>, where every one of these silently
+            submitted that form. Moving it out fixes that, but the guard stays. */}
+        <Button
+          size="sm"
+          variant="secondary"
+          type="button"
+          disabled={key.trim().length < 10 || save.isPending}
+          onClick={onSave}
+        >
           {save.isPending ? 'Saving…' : connected ? 'Replace key' : 'Save key'}
         </Button>
         {connected && (
           <>
-            <Button size="sm" variant="secondary" disabled={test.isPending} onClick={onTest}>
+            <Button size="sm" variant="secondary" type="button" disabled={test.isPending} onClick={onTest}>
               {test.isPending ? 'Testing…' : 'Test'}
             </Button>
             <button
@@ -83,12 +108,11 @@ export function KlaviyoKeyCard({ slug }: { slug: string }) {
         )}
       </div>
 
-      <span className="field-hint">
+      <span className="field-hint" style={{ marginTop: 8 }}>
         A brand-specific <b>private</b> key (Klaviyo → Settings → API keys) with the read scopes
-        <code> campaigns:read flows:read metrics:read</code>. Klaviyo fixes a key's scopes <b>at creation</b> — they
-        cannot be changed later, so create the key with all three. Once saved, email revenue syncs daily and can be
-        backfilled from the data coverage card. Email revenue is reported as its own channel and is never added to
-        store or ad revenue.
+        <code> campaigns:read flows:read metrics:read</code>. Klaviyo fixes a key’s scopes <b>at creation</b> — they
+        cannot be changed later, so create the key with all three. Once saved, history can be backfilled from the
+        data coverage card.
       </span>
     </div>
   );
