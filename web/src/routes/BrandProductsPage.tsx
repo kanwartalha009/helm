@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { Breadcrumb } from '@/components/ui';
+import { BrandSubnav } from '@/components/shell/BrandSubnav';
 import { useBrandDetail } from '@/hooks/useApiData';
 import { BrandProductsView } from '@/components/products/BrandProductsView';
 
@@ -36,6 +37,8 @@ export function BrandProductsPage() {
           </div>
         </div>
       </div>
+
+      <BrandSubnav slug={slug} />
 
       <BrandProductsView slug={slug} />
     </AppLayout>

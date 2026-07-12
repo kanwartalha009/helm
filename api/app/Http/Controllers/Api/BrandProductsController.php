@@ -12,6 +12,7 @@ use App\Models\DailyMetric;
 use App\Models\InventorySnapshot;
 use App\Models\ProductCatalog;
 use App\Platforms\Meta\AdProductFetcher;
+use App\Services\Rules\CostResolver;
 use App\Services\Rules\ProductFlags;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -29,7 +30,10 @@ class BrandProductsController extends Controller
 {
     private const MAX_ROWS = 100;
 
-    public function __construct(private readonly ProductFlags $flags) {}
+    public function __construct(
+        private readonly ProductFlags $flags,
+        private readonly CostResolver $costs,
+    ) {}
 
     public function index(Request $request, Brand $brand): JsonResponse
     {
@@ -38,7 +42,7 @@ class BrandProductsController extends Controller
         $data = $request->validate([
             'period' => ['nullable', 'in:last7,last30,last90,mtd'],
             'search' => ['nullable', 'string', 'max:120'],
-            'sort'   => ['nullable', 'in:revenue,units,delta,refunds,cover'],
+            'sort'   => ['nullable', 'in:revenue,units,delta,refunds,cover,margin'],
         ]);
 
         $tz        = $brand->timezone ?: 'UTC';
@@ -109,7 +113,12 @@ class BrandProductsController extends Controller
         }
         $breakeven = $brand->breakevenRoas();
 
-        $rows = $current->map(function ($r) use ($prior, $totalRevenue, $flagMap, $adByHandle, $titleToHandle, $breakeven): array {
+        // GO-1.2 — unit costs as of the window END (the cost in force for the period
+        // being reported, not today's). Manual > Shopify; absent → brand margin → null.
+        $unitCosts = $this->costs->unitCosts((int) $brand->id, $end);
+        $margin    = $brand->gross_margin_pct !== null ? (float) $brand->gross_margin_pct : null;
+
+        $rows = $current->map(function ($r) use ($prior, $totalRevenue, $flagMap, $adByHandle, $titleToHandle, $breakeven, $unitCosts, $margin): array {
             $key     = (string) $r->dimension_key;
             $revenue = round((float) $r->revenue, 2);
             $refunds = round((float) $r->refunds, 2);
@@ -139,12 +148,28 @@ class BrandProductsController extends Controller
                 ]]);
             }
 
+            // GO-1.2 — contribution margin = revenue − COGS − mapped ad spend.
+            // COGS: units × unit cost (manual > Shopify), else revenue × (1 − brand
+            // margin), else UNKNOWN → null. A zero COGS is never inferred, so a
+            // product with no cost basis shows "—", never a fake 100% margin.
+            $units    = (int) $r->units;
+            $unitCost = $handle !== null ? ($unitCosts[$handle] ?? null) : null;
+            $cogs     = $this->costs->cogs($unitCost, $units, $revenue, $margin);
+            $contrib  = $this->costs->contribution($cogs, $revenue, $adSpend);
+
             return [
                 'key'        => $key,
                 'title'      => (string) ($r->label ?: $key),
                 'revenue'    => $revenue,
                 'orders'     => $orders,
-                'units'      => (int) $r->units,
+                'units'      => $units,
+                // Cost + margin (null = unknown, never 0). `costSource` tells the UI
+                // whether this is a real per-unit cost or a brand-rate estimate.
+                'unitCost'   => $unitCost !== null ? round($unitCost['cost'], 2) : null,
+                'costSource' => $contrib['source'] ?? null,   // manual | shopify | brand_margin
+                'cogs'       => $cogs['cogs'] ?? null,
+                'contributionMargin'    => $contrib['value'] ?? null,
+                'contributionMarginPct' => $contrib['pct'] ?? null,
                 'refunds'    => $refunds,
                 // Money-based refund rate: refunded amount as % of revenue.
                 'refundRatePct' => $revenue > 0 ? round($refunds / $revenue * 100, 1) : null,
@@ -172,6 +197,8 @@ class BrandProductsController extends Controller
             'refunds' => ($b['refundRatePct'] ?? -1) <=> ($a['refundRatePct'] ?? -1),
             'delta'   => ($a['deltaPct'] ?? 0) <=> ($b['deltaPct'] ?? 0),
             'cover'   => ($a['coverDays'] ?? PHP_INT_MAX) <=> ($b['coverDays'] ?? PHP_INT_MAX),
+            // Thinnest margin first; unknown margins sort last (never treated as 0).
+            'margin'  => ($a['contributionMarginPct'] ?? PHP_INT_MAX) <=> ($b['contributionMarginPct'] ?? PHP_INT_MAX),
             default   => $b['revenue'] <=> $a['revenue'],
         });
 
@@ -211,6 +238,17 @@ class BrandProductsController extends Controller
             'rows'        => $rows,
             'totalRevenue' => round($totalRevenue, 2),
             'adSpend'     => $adSpendMeta,
+            // GO-1.2 cost basis. `hasBasis` false → every margin cell is "—" and the
+            // UI shows the "set costs" hint instead of pretending the margin is 100%.
+            'costs'       => [
+                'hasBasis' => $this->costs->hasAnyCostBasis($brand),
+                'formula'  => 'Contribution margin = revenue − COGS − mapped ad spend. '
+                    . 'COGS uses the product’s unit cost (your manual cost first, then Shopify’s), '
+                    . 'or falls back to the brand gross-margin % when no unit cost is known. '
+                    . 'Only ad spend mapped to a product is deducted, so margin reads slightly high '
+                    . 'on brands with a lot of unmapped Advantage+/PMax spend. Shipping and payment '
+                    . 'fees are not modelled.',
+            ],
             'hasData'     => $rows !== [],
             'lastPulledAt' => $lastPulled ? CarbonImmutable::parse((string) $lastPulled)->toIso8601String() : null,
             'inventorySnapshotAt' => $snapshotOn ? CarbonImmutable::parse((string) $snapshotOn)->toDateString() : null,

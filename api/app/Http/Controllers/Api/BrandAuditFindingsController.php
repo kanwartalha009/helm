@@ -9,8 +9,10 @@ use App\Models\Brand;
 use App\Models\DailyMetric;
 use App\Reports\Support\AdAudit;
 use App\Reports\Support\DeadInventory;
+use App\Services\AdsLibrary\MarketAlerts;
 use App\Services\Rules\AdSetFlags;
 use App\Services\Rules\ProductFlags;
+use App\Services\Rules\SeasonalStale;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,6 +32,8 @@ class BrandAuditFindingsController extends Controller
         private readonly DeadInventory $inventory,
         private readonly ProductFlags $productFlags,
         private readonly AdSetFlags $adSetFlags,
+        private readonly MarketAlerts $marketAlerts,
+        private readonly SeasonalStale $seasonalStale,
     ) {}
 
     public function index(Request $request, Brand $brand): JsonResponse
@@ -290,6 +294,39 @@ class BrandAuditFindingsController extends Controller
                     ucfirst($pf) . ': budget spread thin across ' . $cnt . ' ad sets',
                     'These active ad sets each average under $' . number_format($fragmentUsd, 0) . '/day — consolidating to 3–5 usually improves optimization (industry guidance).',
                     ['platform' => $pf, 'flag' => 'fragmentation', 'count' => $cnt],
+                );
+            }
+        }
+
+        // --- Seasonal-stale creatives (GO-3.1): an ad still spending money on a hook
+        // whose season is over. Triggered by a keyword+date RULE, never a model — the
+        // matched terms are named in the detail so the claim is checkable on sight.
+        foreach ($this->seasonalStale->forBrand($brand, $yesterday) as $s) {
+            $findings[] = $this->finding(
+                'ads',
+                'warn',
+                $s['seasonLabel'] . ' creative still running ' . $s['daysStale'] . ' days after the season ended',
+                '“' . ($s['adName'] !== '' ? $s['adName'] : $s['adId']) . '” matched: ' . implode(', ', $s['matchedTerms'])
+                    . '. The season ended ' . $s['seasonEnded'] . ' and it has spent '
+                    . number_format($s['spend'], 2) . ' ' . $brand->base_currency . ' in the last '
+                    . $s['liveWindowDays'] . ' days. Refresh the creative or pause it.',
+                ['adId' => $s['adId'], 'season' => $s['season'], 'matchedTerms' => $s['matchedTerms'], 'platform' => $s['platform']],
+            );
+        }
+
+        // --- Market: competitor movement for this brand's niche (Ads Library
+        // Phase 5). Proxy signals from the tracked-page corpus — only surfaced
+        // when the brand HAS a niche and tracked pages have moved. Never blends
+        // into ROAS; it's a "what competitors are doing" nudge alongside the
+        // rules verdicts. Silent (and cheap) for brands with no niche set.
+        if (($brand->niche ?? '') !== '') {
+            foreach ($this->marketAlerts->forPages($brand->niche) as $alert) {
+                $findings[] = $this->finding(
+                    'market',
+                    $alert['severity'] === 'warn' ? 'warn' : 'info',
+                    'Market: ' . ($alert['pageName'] ?? 'A tracked competitor'),
+                    $alert['message'] . ' Proxy — public Ad Library signals, not performance.',
+                    ['type' => $alert['type'], 'pageId' => $alert['pageId'], 'niche' => $alert['niche']],
                 );
             }
         }

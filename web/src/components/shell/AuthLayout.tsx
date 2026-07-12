@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Wordmark } from '@/components/ui';
+import { APP_NAME } from '@/lib/branding';
 
 interface AuthLayoutProps {
   children: ReactNode;
@@ -15,8 +16,8 @@ export function AuthLayout({ children, homeTo = '/' }: AuthLayoutProps) {
       <main className="auth-main">{children}</main>
       <footer className="auth-footer">
         <div className="flex items-center justify-between">
-          <span>© 2026 Nova Solution</span>
-          <span>Roasdriven v1.0</span>
+          <span>© {new Date().getFullYear()} {APP_NAME}</span>
+          <span>{APP_NAME} v1.0</span>
         </div>
       </footer>
     </div>

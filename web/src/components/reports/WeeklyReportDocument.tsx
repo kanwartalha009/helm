@@ -43,6 +43,8 @@ export function WeeklyReportDocument({
   onNarrativeBlockChange?: (key: keyof NarrativeBlocksShape, value: string) => void;
 }) {
   const { brand, currency, week, comparison, kpis, dailySeries, spendByPlatform, campaignMovers, actions } = data;
+  const marketAlerts = data.marketAlerts ?? [];
+  const email = data.email ?? null;
   const content = data.content ?? undefined;
 
   const accent = data.branding?.accent || '#1f6f5c';
@@ -149,6 +151,61 @@ export function WeeklyReportDocument({
         </div>
       </section>
 
+      {email && (
+        <section className="rpt-sec">
+          <div className="rpt-sec-head"><span className="rpt-sec-num">{nextNum()}</span><h2>Email revenue</h2></div>
+          <div className="rpt-sec-sub">
+            {email.label} — shown as its own channel. It is <b>not</b> added to store or ad revenue.
+          </div>
+
+          <div className="rpt-kpis">
+            <div className="rpt-kpi">
+              <div className="rpt-kpi-l">Email revenue</div>
+              <div className="rpt-kpi-v">{money(email.revenue)}</div>
+              <div className="rpt-kpi-d"><span className="rpt-kpi-note">Klaviyo-attributed</span></div>
+            </div>
+            <div className="rpt-kpi">
+              <div className="rpt-kpi-l">Email orders</div>
+              <div className="rpt-kpi-v">{email.orders.toLocaleString()}</div>
+              <div className="rpt-kpi-d"><span className="rpt-kpi-note">placed orders</span></div>
+            </div>
+            <div className="rpt-kpi">
+              <div className="rpt-kpi-l">vs store revenue</div>
+              <div className="rpt-kpi-v">{email.shareOfStore === null ? '—' : `${email.shareOfStore}%`}</div>
+              <div className="rpt-kpi-d"><span className="rpt-kpi-note">ratio, not a split</span></div>
+            </div>
+          </div>
+
+          {email.topSources.length > 0 && (
+            <div className="rpt-tbl-wrap">
+              <table className="rpt-tbl rpt-tbl-dim">
+                <thead>
+                  <tr>
+                    <th>Flow / campaign</th>
+                    <th>Type</th>
+                    <th className="r">Revenue</th>
+                    <th className="r">Orders</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {email.topSources.map((s) => (
+                    <tr key={`${s.source}-${s.id}`}>
+                      <td className="name"><div className="rpt-dim-label">{s.name ?? s.id}</div></td>
+                      <td>{s.source === 'flow' ? 'Flow' : 'Campaign'}</td>
+                      <td className="r">{money(s.revenue)}</td>
+                      <td className="r">{s.orders.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* The attribution honesty box — mandatory wherever a Klaviyo number renders. */}
+          <div className="rpt-cap">{email.honestyBox}</div>
+        </section>
+      )}
+
       {campaignMovers.length > 0 && (
         <section className="rpt-sec">
           <div className="rpt-sec-head"><span className="rpt-sec-num">{nextNum()}</span><h2>Campaign movers</h2></div>
@@ -205,6 +262,25 @@ export function WeeklyReportDocument({
           </div>
           {/* The weekly window is always the complete Mon–Sun week — 7 days. */}
           <VerdictWindowCaption windowDays={7} />
+        </section>
+      )}
+
+      {marketAlerts.length > 0 && (
+        <section className="rpt-sec">
+          <div className="rpt-sec-head"><span className="rpt-sec-num">{nextNum()}</span><h2>Competitor watch</h2></div>
+          <div className="rpt-sec-sub">What tracked competitors in this brand's niche did this week. Proxy — public Ad Library signals (reach, longevity, new creatives), never spend or ROAS.</div>
+          <div className="rpt-actions rpt-actions-stack">
+            {marketAlerts.map((a, i) => (
+              <div className={`rpt-act ${a.severity === 'warn' ? 'wound' : 'hold'}`} key={i}>
+                <div className="rpt-act-k">
+                  {a.severity === 'warn' ? '◆ Watch' : '● Signal'}
+                  <span className="wk-act-plat"> · {a.pageName ?? 'competitor'}</span>
+                </div>
+                <div className="rpt-act-t">{a.message}</div>
+              </div>
+            ))}
+          </div>
+          <div className="rpt-cap">Proxy signals from the public EU Ad Library — a directional read on competitor activity, not a performance claim.</div>
         </section>
       )}
 

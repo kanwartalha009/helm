@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Jobs\BackfillBrandDatasetJob;
 use App\Models\BackfillRun;
 use App\Models\Brand;
+use App\Services\PlatformCredentialService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -39,10 +40,13 @@ class BrandDataCoverageController extends Controller
     /** Days of slack before an earliest-row date counts as a gap. */
     private const GRACE_DAYS = 7;
 
-    public function index(Brand $brand): JsonResponse
+    public function index(Brand $brand, PlatformCredentialService $credentials): JsonResponse
     {
         $this->authorize('view', $brand);
 
+        // Klaviyo is not a platform_connection — a brand "has email" when it has
+        // its own Klaviyo key (GO-1.1). Brands without one never see the card.
+        $hasKlaviyo  = $credentials->has('klaviyo', 'private_key', (int) $brand->id);
         $tz          = $brand->timezone ?: 'UTC';
         $today       = CarbonImmutable::now($tz)->startOfDay();
         $targetStart = $today->subMonths(self::TARGET_MONTHS);
@@ -129,6 +133,11 @@ class BrandDataCoverageController extends Controller
                 'relevant' => in_array('shopify', $connected, true),
                 'tables'   => ['commerce_daily_metrics'],
             ],
+            'email'     => [
+                'label'    => 'Email revenue (Klaviyo)',
+                'relevant' => $hasKlaviyo,
+                'tables'   => ['email_daily_metrics'],
+            ],
         ];
 
         foreach ($tracked as $key => $meta) {
@@ -164,7 +173,11 @@ class BrandDataCoverageController extends Controller
                 'needsBackfill' => $meta['relevant']
                     && ($earliest === null || $earliest > $targetStart->addDays(self::GRACE_DAYS)->toDateString()),
                 'running'       => $allActive || ($lastRun !== null && in_array($lastRun->status, ['queued', 'running'], true)),
-                'platforms'     => [['platform' => $key === 'commerce' ? 'shopify' : implode('+', $adPlatforms), 'earliest' => $earliest, 'latest' => $latest, 'gap' => $earliest === null]],
+                'platforms'     => [['platform' => match ($key) {
+                    'commerce' => 'shopify',
+                    'email'    => 'klaviyo',
+                    default    => implode('+', $adPlatforms),
+                }, 'earliest' => $earliest, 'latest' => $latest, 'gap' => $earliest === null]],
                 'lastRun'       => $runPayload($lastRun ?? ($allRun && $allRun->status !== 'queued' ? $allRun : null)),
             ];
         }
@@ -183,7 +196,7 @@ class BrandDataCoverageController extends Controller
         $this->authorize('view', $brand);
 
         $data = $request->validate([
-            'dataset' => ['required', 'in:all,history,campaigns,creatives,commerce'],
+            'dataset' => ['required', 'in:all,history,campaigns,creatives,commerce,email'],
         ]);
         $dataset = $data['dataset'];
 

@@ -111,6 +111,7 @@ final class MetaCreativeFetcher
                         'currency'         => strtoupper((string) ($r['account_currency'] ?? $fallbackCcy)),
                         'thumbnail_url'    => null,
                         'media_type'       => 'image',
+                        'body_text'        => null, // filled from the creative below (Ads Library winners search)
                     ];
                 }
                 usleep(150_000); // pace the per-day calls
@@ -126,6 +127,7 @@ final class MetaCreativeFetcher
             $c = $creatives[$row['ad_id']] ?? null;
             $row['thumbnail_url'] = $c['image'] ?? null;
             $row['media_type']    = $c['media'] ?? 'image';
+            $row['body_text']     = $c['body'] ?? null;
         }
         unset($row);
 
@@ -147,7 +149,7 @@ final class MetaCreativeFetcher
      * → sized thumbnail → link picture.
      *
      * @param array<int, string> $adIds
-     * @return array<string, array{image: ?string, media: string}>
+     * @return array<string, array{image: ?string, media: string, body: ?string}>
      */
     private function resolveCreatives(array $adIds): array
     {
@@ -156,14 +158,14 @@ final class MetaCreativeFetcher
             try {
                 $batch = $this->client->get('', [
                     'ids'              => implode(',', $chunk),
-                    'fields'           => 'id,creative{image_url,thumbnail_url,video_id,object_story_spec{video_data{video_id,image_url},link_data{picture}},asset_feed_spec{videos{video_id,thumbnail_url},images{url}}}',
+                    'fields'           => 'id,creative{image_url,thumbnail_url,video_id,body,object_story_spec{video_data{video_id,image_url,message},link_data{picture,message},template_data{message}},asset_feed_spec{videos{video_id,thumbnail_url},images{url},bodies}}',
                     'thumbnail_width'  => self::THUMB_PX,
                     'thumbnail_height' => self::THUMB_PX,
                 ]);
             } catch (Throwable $e) {
                 Log::warning('meta.creative.creatives_failed', ['error' => $e->getMessage(), 'count' => count($chunk)]);
                 foreach ($chunk as $id) {
-                    $out[$id] = ['image' => null, 'media' => 'image'];
+                    $out[$id] = ['image' => null, 'media' => 'image', 'body' => null];
                 }
                 usleep(400_000);
                 continue;
@@ -188,9 +190,19 @@ final class MetaCreativeFetcher
                     ?? ($feed['videos'][0]['thumbnail_url'] ?? null)
                     ?? ($oss['link_data']['picture'] ?? null);
 
+                // Primary creative body, in priority order (link/video message →
+                // dynamic template → asset-feed bodies → creative.body). Own-account
+                // data; powers the winners hook/copy search (Ads Library Phase 1).
+                $body = $oss['link_data']['message']
+                    ?? $oss['video_data']['message']
+                    ?? ($oss['template_data']['message'] ?? null)
+                    ?? ($feed['bodies'][0]['text'] ?? null)
+                    ?? ($cr['body'] ?? null);
+
                 $out[$id] = [
                     'image' => is_string($image) && $image !== '' ? $image : null,
                     'media' => $videoId ? 'video' : 'image',
+                    'body'  => is_string($body) && trim($body) !== '' ? trim($body) : null,
                 ];
             }
             usleep(250_000); // pace batches — Meta error 17 is complexity/volume based

@@ -179,6 +179,23 @@ export interface ReportContent {
   strategyRead?: string;
 }
 
+export interface TruthBlock {
+  storeRevenue: number;
+  totalSpend: number;
+  mer: number | null;
+  merLabel: string;
+  merFormula: string;
+  platforms: {
+    platform: 'meta' | 'google' | 'tiktok';
+    spend: number;
+    reportedRevenue: number;
+    reportedRoas: number | null;
+    label: string;
+    annotation: string;
+  }[];
+  divergenceNote: string;
+}
+
 export interface OverallPerformanceReportData {
   reportType: 'overall-performance';
   // LLM layer (D-016): stored draft for this filter selection + availability.
@@ -198,6 +215,14 @@ export interface OverallPerformanceReportData {
   revenueVsSpend: ReportRow[];
   byPlatform: ReportPlatformSpend[];
   spendComplete: boolean;
+  /**
+   * GO-1.4 triangulated truth. MER is the spine (store revenue ÷ total ad spend);
+   * `platforms` is a LIST of what each platform claims about itself, each with its
+   * bias annotation. There is deliberately NO total of reported revenue — two
+   * platforms routinely claim the same order, so summing them is a fiction.
+   * Optional so pre-migration cached payloads still render.
+   */
+  truth?: TruthBlock | null;
   // Slice 2.1 — null until shopify:backfill-commerce has landed rows.
   byRegion?: CommerceSection | null;
   byProduct?: CommerceSection | null;
@@ -400,6 +425,9 @@ export interface MonthlyReportData {
     newVsExisting: MonthlyReportSection;
     funnelCountry: MonthlyReportSection;
     funnelLanding: MonthlyReportSection;
+    // Klaviyo email revenue (GO-1.1) — its own channel, never summed into revenue.
+    // Optional so pre-migration cached payloads still render.
+    email?: MonthlyEmailSection;
   };
   branding: ReportBranding;
   content?: ReportContent | null;
@@ -451,6 +479,45 @@ export interface WeeklyAction {
   confidence?: AdConfidence;
 }
 
+/**
+ * Monthly Klaviyo email section. `status` follows the other monthly sections
+ * (ready | needs_source | no_data) — needs_source when the brand has no Klaviyo
+ * rows, so the report never renders a fabricated €0 email block.
+ */
+export interface MonthlyEmailSection {
+  status: 'ready' | 'needs_source' | 'no_data';
+  note?: string;
+  revenue?: number;
+  orders?: number;
+  shareOfStore?: number | null;
+  splits?: { flow: { revenue: number; orders: number }; campaign: { revenue: number; orders: number } };
+  rows?: { source: 'flow' | 'campaign'; id: string; name: string | null; revenue: number; orders: number }[];
+  label?: string;
+  honestyBox?: string;
+}
+
+/**
+ * Klaviyo email revenue — its OWN channel. NEVER added to store or ad revenue:
+ * Klaviyo is last-touch within its own windows and overlaps them. `shareOfStore`
+ * is a ratio of two measured numbers, not an additive split. Null block = no data
+ * (renders "—", never 0).
+ */
+export interface EmailRevenueBlock {
+  revenue: number;
+  orders: number;
+  shareOfStore: number | null;
+  topSources: { source: 'flow' | 'campaign'; id: string; name: string | null; revenue: number; orders: number }[];
+  label: string;
+  honestyBox: string;
+}
+
+export interface WeeklyMarketAlert {
+  type: 'new_ads' | 'variant_spike' | 'new_format';
+  severity: 'info' | 'warn';
+  message: string;
+  pageName: string | null;
+}
+
 export interface WeeklyReportData {
   reportType: 'weekly';
   narrative?: ReportNarrativePayload | null;
@@ -477,6 +544,12 @@ export interface WeeklyReportData {
   spendComplete: boolean;
   campaignMovers: WeeklyCampaignMover[];
   actions: WeeklyAction[];
+  // Competitor movement for the brand's niche (Ads Library Phase 5) — Proxy
+  // signals from the public Ad Library corpus, never blended into performance.
+  // Optional so pre-migration cached payloads stay renderable.
+  marketAlerts?: WeeklyMarketAlert[];
+  // Klaviyo email revenue (GO-1.1). Optional so pre-migration cached payloads render.
+  email?: EmailRevenueBlock | null;
   freshness?: { upToDate: boolean; lastSynced: string | null; staleDays: number; windowEnd: string };
   branding: ReportBranding;
   content?: ReportContent | null;

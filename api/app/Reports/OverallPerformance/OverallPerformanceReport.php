@@ -12,6 +12,7 @@ use App\Reports\Contracts\ReportType;
 use App\Reports\Support\AdAudit;
 use App\Reports\Support\CommerceBreakdown;
 use App\Reports\Support\DeadInventory;
+use App\Reports\Support\TruthSpine;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -40,6 +41,7 @@ final class OverallPerformanceReport implements ReportType
         private readonly CommerceBreakdown $commerce,
         private readonly AdAudit $ads,
         private readonly DeadInventory $inventory,
+        private readonly TruthSpine $truth,
     ) {}
 
     public function key(): string
@@ -91,6 +93,10 @@ final class OverallPerformanceReport implements ReportType
             // True only when every ad platform is connected; the SPA uses this to
             // caption blended ROAS honestly ("Meta only" etc.).
             'spendComplete'  => count(array_intersect(self::AD_PLATFORMS, $connected)) === count(self::AD_PLATFORMS),
+            // Triangulated truth (GO-1.4): MER as the spine + each platform's OWN
+            // reported ROAS beside it, every one carrying its documented bias
+            // direction. Platform figures are a LIST, never summed into a total.
+            'truth'          => $this->safely('truth', fn () => $this->truth->forBrand($brand->id, $connected, $start, $end, $filters->usd), null),
             // Granular commerce (slice 2.1). null until shopify:backfill-commerce
             // has landed rows for this brand/window — the SPA omits the section.
             // Each enrichment is fault-isolated: a failure in one new section logs

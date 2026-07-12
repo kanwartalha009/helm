@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import { Chip } from '@/components/ui';
 import { REPORT_CSS } from './ReportDocument';
-import type { MonthlyChannelRow, MonthlyCustomerRow, MonthlyFunnelRow, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyPlatformSection, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySeriesData } from '@/types/reports';
+import type { MonthlyChannelRow, MonthlyCustomerRow, MonthlyEmailSection, MonthlyFunnelRow, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyPlatformSection, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySeriesData } from '@/types/reports';
 
 const DEFAULT_COMMENTARY =
   'Summarise the month for the store owner here — what moved, how it landed against targets, and the plan for next month. Editable before you send.';
@@ -141,6 +141,13 @@ export function MonthlyReportDocument({
       <SectionBlock num="11" title="Web funnel by country" sub="Sessions → cart → checkout → purchase." section={sections.funnelCountry} currency={currency} editable={editable} />
       <SectionBlock num="12" title="Web funnel by landing path" sub="Which entry pages convert — top entry pages with at least one purchase." section={sections.funnelLanding} currency={currency} editable={editable} foot="The entry page of each session. Visitors often complete the purchase on a different page, so purchases are attributed to where the journey started." />
 
+      {sections.email && (
+        <>
+          <div className="mrt-group"><span>Email</span></div>
+          <EmailSection num="13" section={sections.email} currency={currency} />
+        </>
+      )}
+
       {(editable || nextStepsRaw) && (
         <section className="rpt-sec">
           <div className="rpt-narrative">
@@ -164,6 +171,91 @@ export function MonthlyReportDocument({
         <div className="rpt-foot-note">{brand.name} · Monthly report · {month.label}</div>
       </footer>
     </div>
+  );
+}
+
+/**
+ * Klaviyo email revenue (GO-1.1) — rendered as its OWN channel. It is deliberately
+ * NOT folded into revenue, channel mix, or any "total attributed" figure: Klaviyo
+ * attributes last-touch inside its own windows and overlaps ad + organic revenue.
+ * The honesty box ships with every render; `vs store revenue` is a ratio of two
+ * measured numbers, never an additive split.
+ */
+function EmailSection({ num, section, currency }: { num: string; section: MonthlyEmailSection; currency: string }) {
+  const money = (v: number) => formatMoney(v, currency);
+
+  if (section.status !== 'ready') {
+    const ribbon = RIBBON[section.status] ?? RIBBON.no_data;
+    return (
+      <section className="rpt-sec">
+        <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>Email revenue</h2></div>
+        <div className="rpt-sec-sub">{section.note ?? ribbon.desc}</div>
+      </section>
+    );
+  }
+
+  const splits = section.splits;
+
+  return (
+    <section className="rpt-sec">
+      <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>Email revenue</h2></div>
+      <div className="rpt-sec-sub">
+        {section.label} — its own channel. It is <b>not</b> added to store revenue, ad revenue, or the channel mix.
+      </div>
+
+      <div className="rpt-kpis">
+        <div className="rpt-kpi">
+          <div className="rpt-kpi-l">Email revenue</div>
+          <div className="rpt-kpi-v">{money(section.revenue ?? 0)}</div>
+          <div className="rpt-kpi-d"><span className="rpt-kpi-note">Klaviyo-attributed</span></div>
+        </div>
+        <div className="rpt-kpi">
+          <div className="rpt-kpi-l">Email orders</div>
+          <div className="rpt-kpi-v">{(section.orders ?? 0).toLocaleString()}</div>
+          <div className="rpt-kpi-d"><span className="rpt-kpi-note">placed orders</span></div>
+        </div>
+        <div className="rpt-kpi">
+          <div className="rpt-kpi-l">vs store revenue</div>
+          <div className="rpt-kpi-v">{section.shareOfStore == null ? '—' : `${section.shareOfStore}%`}</div>
+          <div className="rpt-kpi-d"><span className="rpt-kpi-note">ratio, not a split</span></div>
+        </div>
+        {splits && (
+          <div className="rpt-kpi">
+            <div className="rpt-kpi-l">Flows vs campaigns</div>
+            <div className="rpt-kpi-v">{money(splits.flow.revenue)} / {money(splits.campaign.revenue)}</div>
+            <div className="rpt-kpi-d"><span className="rpt-kpi-note">automated / broadcast</span></div>
+          </div>
+        )}
+      </div>
+
+      {(section.rows?.length ?? 0) > 0 && (
+        <div className="rpt-tbl-wrap">
+          <table className="rpt-tbl rpt-tbl-dim">
+            <thead>
+              <tr>
+                <th>Flow / campaign</th>
+                <th>Type</th>
+                <th className="r">Revenue</th>
+                <th className="r">Orders</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(section.rows ?? []).map((r) => (
+                <tr key={`${r.source}-${r.id}`}>
+                  <td className="name"><div className="rpt-dim-label">{r.name ?? r.id}</div></td>
+                  <td>{r.source === 'flow' ? 'Flow' : 'Campaign'}</td>
+                  <td className="r">{money(r.revenue)}</td>
+                  <td className="r">{r.orders.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Mandatory attribution honesty box — renders wherever a Klaviyo number does. */}
+      <div className="rpt-cap">{section.honestyBox}</div>
+    </section>
   );
 }
 

@@ -31,7 +31,12 @@ final class CatalogFetcher
           tags
           totalInventory
           variants(first: 100) {
-            nodes { id title inventoryQuantity }
+            nodes {
+              id
+              title
+              inventoryQuantity
+              inventoryItem { unitCost { amount currencyCode } }
+            }
           }
         }
         pageInfo { hasNextPage endCursor }
@@ -74,13 +79,30 @@ final class CatalogFetcher
                     continue;
                 }
 
-                $variants = [];
+                $variants  = [];
+                $costs     = [];   // non-null variant unit costs only
+                $costCcy   = null;
                 foreach (($p['variants']['nodes'] ?? []) as $v) {
                     $variants[] = [
                         't' => (string) ($v['title'] ?? ''),
                         'q' => (int) ($v['inventoryQuantity'] ?? 0),
                     ];
+
+                    // unitCost is NULLABLE (Shopify: unset cost, or the "View product
+                    // costs" permission not granted). Absent → skip; never coerce to 0.
+                    $raw = $v['inventoryItem']['unitCost']['amount'] ?? null;
+                    if ($raw !== null && $raw !== '' && is_numeric($raw)) {
+                        $costs[] = (float) $raw;
+                        $costCcy ??= (string) ($v['inventoryItem']['unitCost']['currencyCode'] ?? '') ?: null;
+                    }
                 }
+
+                // Product-level cost = mean of the variants that HAVE a cost (size
+                // variants nearly always share one). Products where no variant exposes
+                // a cost stay null → the resolver falls back to a manual cost, then the
+                // brand margin, then "—". Documented in the migration + surfaced as the
+                // cost `source` so nobody mistakes an inferred number for a real one.
+                $unitCost = $costs !== [] ? round(array_sum($costs) / count($costs), 2) : null;
 
                 $out[] = [
                     'product_id'      => (string) ($p['id'] ?? ''),
@@ -92,6 +114,8 @@ final class CatalogFetcher
                     'variant_count'   => count($variants),
                     'total_inventory' => (int) ($p['totalInventory'] ?? 0),
                     'variants'        => $variants,
+                    'unit_cost'          => $unitCost,
+                    'unit_cost_currency' => $unitCost !== null ? $costCcy : null,
                 ];
             }
 

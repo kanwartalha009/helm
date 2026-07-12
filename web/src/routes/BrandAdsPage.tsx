@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { Breadcrumb } from '@/components/ui';
+import { BrandSubnav } from '@/components/shell/BrandSubnav';
 import { AdsBrandOverview } from '@/components/ads/AdsBrandOverview';
+import { StaleCreativeCard } from '@/components/ads/StaleCreativeCard';
 import { AdPlatformToggle, adPlatformsOf } from '@/components/ads/AdPlatformToggle';
 import { useBrandDetail } from '@/hooks/useApiData';
 import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
@@ -46,6 +48,8 @@ export function BrandAdsPage() {
         ]}
       />
 
+      <BrandSubnav slug={slug} />
+
       <div className="filter-bar mb-16" style={{ marginTop: 12 }}>
         <div className="segmented">
           {PERIODS.map((p) => (
@@ -53,10 +57,23 @@ export function BrandAdsPage() {
           ))}
         </div>
         <span style={{ flex: 1 }} />
+        {brand?.niche && (
+          <Link
+            to={`/ads-library?tab=market&niche=${encodeURIComponent(brand.niche)}`}
+            className="text-sm"
+            style={{ color: 'var(--accent)', whiteSpace: 'nowrap' }}
+            title={`See what competitors in ${brand.niche} are running`}
+          >
+            Market ads ↗
+          </Link>
+        )}
         <AdPlatformToggle available={available} value={platform} onChange={setPlatform} />
       </div>
 
       <DataCoverageCard slug={slug} compact />
+      {/* GO-3.1 — live ads still spending on a dead seasonal hook. Rule-triggered
+          (matched words + season end date are shown), never model-guessed. */}
+      <StaleCreativeCard slug={slug} />
       <AdsBrandOverview slug={slug} period={period} platform={platform} />
     </AppLayout>
   );

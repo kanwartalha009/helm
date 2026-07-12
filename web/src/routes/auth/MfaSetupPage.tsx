@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/shell/AuthLayout';
 import { Banner, Button, Input, Tag } from '@/components/ui';
@@ -131,7 +132,7 @@ export function MfaSetupPage() {
             {secret}
           </div>
           <p className="text-xs muted mt-8">
-            Account name: <span className="mono">Roasdriven</span> · Type: <span className="mono">Time-based (TOTP)</span> · Digits: <span className="mono">6</span>
+            Account name: <span className="mono">{APP_NAME}</span> · Type: <span className="mono">Time-based (TOTP)</span> · Digits: <span className="mono">6</span>
           </p>
         </details>
 

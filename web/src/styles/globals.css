@@ -1873,3 +1873,32 @@ td.col-group-start {
 .audience-table .aud-compose {
   margin-top: 3px;
 }
+
+/* Per-brand sibling sub-nav (Ad performance · Products · Store audit · Ask) —
+   a quiet tab row under the breadcrumb; single accent underline on the active
+   tab, warm-neutral rest state. */
+.brand-subnav {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin: 4px 0 20px;
+  overflow-x: auto;
+}
+.brand-subnav-tab {
+  padding: 8px 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.brand-subnav-tab:hover {
+  color: var(--text);
+}
+.brand-subnav-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}

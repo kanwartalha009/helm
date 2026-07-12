@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AuthLayout } from '@/components/shell/AuthLayout';
 import { Banner, Button, Input, Tag } from '@/components/ui';
@@ -74,7 +75,7 @@ export function AcceptInvitePage() {
         password,
         password_confirmation: confirm,
       });
-      toast.success('Welcome to Roasdriven', `Signed in as ${previewState.preview.email}.`);
+      toast.success(`Welcome to ${APP_NAME}`, `Signed in as ${previewState.preview.email}.`);
       navigate('/onboarding', { replace: true });
     } catch (err: any) {
       const errors = err?.response?.data?.errors;

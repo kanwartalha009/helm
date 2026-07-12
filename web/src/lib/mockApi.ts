@@ -198,6 +198,12 @@ export async function getPlatformCredentialSchema(): Promise<PlatformCredentialS
     meta: [
       { key: 'system_user_token', label: 'System User token', sensitive: true },
     ],
+    meta_adlib: [
+      { key: 'access_token', label: 'Ad Library token', sensitive: true },
+    ],
+    slack: [
+      { key: 'webhook_url', label: 'Slack incoming-webhook URL', sensitive: true },
+    ],
     google: [
       { key: 'refresh_token', label: 'Refresh token', sensitive: true },
       { key: 'client_id', label: 'OAuth client ID', sensitive: false },

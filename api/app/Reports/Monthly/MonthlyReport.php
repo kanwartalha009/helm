@@ -8,6 +8,7 @@ use App\Models\AdProductDaily;
 use App\Models\Brand;
 use App\Models\CommerceDailyMetric;
 use App\Models\DailyMetric;
+use App\Models\EmailDailyMetric;
 use App\Models\MetaBreakdownDaily;
 use App\Models\PlatformConnection;
 use App\Models\ProductCatalog;
@@ -155,6 +156,8 @@ final class MonthlyReport implements ReportType
                 'newVsExisting'  => $newVsExisting,
                 'funnelCountry'  => $this->funnelSection($brand->id, 'country', $monthStart->toDateString(), $monthEnd->toDateString()),
                 'funnelLanding'  => $this->funnelSection($brand->id, 'landing', $monthStart->toDateString(), $monthEnd->toDateString()),
+                // Klaviyo email revenue (GO-1.1) — its OWN channel, never summed in.
+                'email'          => $this->emailSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
             ],
             // Is the data current through the report month's last day? Same
             // contract as OverallPerformanceReport::freshness — the SPA (and the
@@ -823,6 +826,79 @@ final class MonthlyReport implements ReportType
      *
      * @return array<string, mixed>
      */
+    /**
+     * Klaviyo email revenue for the month (GO-1.1) — its OWN channel section. NEVER
+     * summed into store or ad revenue (§0.1 honesty law: Klaviyo attributes last-touch
+     * within its own windows and OVERLAPS ad + organic revenue). `shareOfStore` is a
+     * RATIO of two measured numbers, not an additive split; the honesty box says so
+     * and renders with the section, always.
+     *
+     * needs_source (never a 0 block) when the brand has no Klaviyo rows — missing ≠ 0.
+     *
+     * @return array<string, mixed>
+     */
+    private function emailSection(int $brandId, string $start, string $end, bool $usd): array
+    {
+        $disp = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+
+        try {
+            $rows = EmailDailyMetric::query()
+                ->where('brand_id', $brandId)
+                ->whereBetween('date', [$start, $end])
+                ->groupBy('source', 'source_id')
+                ->selectRaw("source, source_id, MAX(source_name) AS name,
+                    COALESCE(SUM({$disp('conversion_value')}), 0) AS revenue,
+                    COALESCE(SUM(conversions), 0) AS orders")
+                ->orderByDesc('revenue')
+                ->get();
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'email', 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+
+        if ($rows->isEmpty()) {
+            return [
+                'status' => 'needs_source',
+                'note'   => 'Add this brand’s Klaviyo key (brand Settings) and run klaviyo:backfill to populate email revenue.',
+            ];
+        }
+
+        $revenue = round((float) $rows->sum('revenue'), 2);
+        $orders  = (int) $rows->sum('orders');
+
+        // Store revenue for the same month (D-005 basis) — used ONLY for the ratio.
+        $storeRev = (float) DailyMetric::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'shopify')
+            ->whereBetween('date', [$start, $end])
+            ->selectRaw('COALESCE(SUM(' . $disp('(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))') . '), 0) AS v')
+            ->value('v');
+
+        $flows     = $rows->where('source', 'flow');
+        $campaigns = $rows->where('source', 'campaign');
+
+        return [
+            'status'       => 'ready',
+            'revenue'      => $revenue,
+            'orders'       => $orders,
+            'shareOfStore' => $storeRev > 0.0 ? round($revenue / $storeRev * 100, 1) : null,
+            'splits'       => [
+                'flow'     => ['revenue' => round((float) $flows->sum('revenue'), 2), 'orders' => (int) $flows->sum('orders')],
+                'campaign' => ['revenue' => round((float) $campaigns->sum('revenue'), 2), 'orders' => (int) $campaigns->sum('orders')],
+            ],
+            'rows'         => $rows->take(10)->map(static fn ($r): array => [
+                'source'  => (string) $r->source,
+                'id'      => (string) $r->source_id,
+                'name'    => $r->name !== null && $r->name !== '' ? (string) $r->name : null,
+                'revenue' => round((float) $r->revenue, 2),
+                'orders'  => (int) $r->orders,
+            ])->values()->all(),
+            'label'        => 'Verified — Klaviyo-attributed',
+            'honestyBox'   => (string) config('klaviyo.honesty_box'),
+        ];
+    }
+
     private function funnelSection(int $brandId, string $dimension, string $start, string $end): array
     {
         try {

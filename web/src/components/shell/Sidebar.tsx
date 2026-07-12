@@ -45,6 +45,20 @@ const NAV: NavSection[] = [
         ),
       },
       {
+        to: '/tickets',
+        label: 'Tickets',
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
+    label: 'Analyze',
+    items: [
+      {
         to: '/inventory',
         label: 'Inventory',
         icon: (
@@ -66,12 +80,34 @@ const NAV: NavSection[] = [
         ),
       },
       {
+        to: '/ads-library',
+        label: 'Ads library',
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+          </svg>
+        ),
+      },
+      {
         to: '/products',
         label: 'Products',
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
             <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
             <line x1="7" y1="7" x2="7.01" y2="7" />
+          </svg>
+        ),
+      },
+      {
+        to: '/store-audit',
+        label: 'Store audit',
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+            <path d="M9 11l3 3L22 4" />
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
           </svg>
         ),
       },
@@ -85,15 +121,6 @@ const NAV: NavSection[] = [
             <line x1="8" y1="17" x2="8" y2="13" />
             <line x1="12" y1="17" x2="12" y2="11" />
             <line x1="16" y1="17" x2="16" y2="15" />
-          </svg>
-        ),
-      },
-      {
-        to: '/tickets',
-        label: 'Tickets',
-        icon: (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
           </svg>
         ),
       },
@@ -146,7 +173,7 @@ export function Sidebar() {
   const initials = user?.displayInitials || user?.name?.slice(0, 1)?.toUpperCase() || '?';
   return (
     <aside className="sidebar">
-      <Wordmark to="/dashboard" style={{ padding: '0 8px', marginBottom: 8 }} />
+      <Wordmark to="/dashboard" style={{ padding: '0 8px', marginBottom: 8 }} name={user?.agencyName} />
 
       {NAV.map((section) => (
         <div key={section.label}>

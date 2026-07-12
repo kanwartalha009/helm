@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useCurrentUser } from '@/hooks/useSettings';
 import { isAuthenticated } from '@/lib/auth';
+import { APP_NAME } from '@/lib/branding';
 
 /**
  * Wraps every authenticated route. Enforces three things in order:
@@ -76,7 +77,7 @@ function FullScreenLoader() {
         <circle cx="12" cy="12" r="10" opacity="0.25" />
         <path d="M22 12a10 10 0 0 1-10 10" />
       </svg>
-      Loading Roasdriven…
+      Loading {APP_NAME}…
       <style>{`@keyframes helm-spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );

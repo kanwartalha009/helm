@@ -1,3 +1,5 @@
+import { PacingChip } from '@/components/dashboard/PacingChip';
+import { QualityDot } from '@/components/dashboard/QualityDot';
 import { Link } from 'react-router-dom';
 import { Avatar, Card, Tag, Dot } from '@/components/ui';
 import { MetricCell } from './MetricCell';
@@ -39,7 +41,15 @@ export function BrandsTable({ rows, visibleAdPlatforms, currency }: Props) {
             {showGoogle && <th className="num">Google</th>}
             {showTikTok && <th className="num">TikTok</th>}
             {showAdRollup && <th className="num">Total spend</th>}
-            {showAdRollup && <th className="num">ROAS</th>}
+            {showAdRollup && (
+              <th
+                className="num"
+                /* GO-1.4: store-truth MER, not a platform-reported figure. */
+                title="MER (store truth): store revenue ÷ total ad spend. Computed from revenue Shopify actually recorded — not from what any ad platform claims it caused."
+              >
+                ROAS (MER)
+              </th>
+            )}
             <th className="num col-group-start">Total sales (7d)</th>
             <th />
           </tr>
@@ -119,8 +129,10 @@ function Row({
           <Avatar initials={brand.initials} />
           <div>
             <div style={{ fontWeight: 500 }}>{brand.name}</div>
-            <div className="brand-meta">
-              {brand.region} · {brand.baseCurrency}
+            <div className="brand-meta" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span>{brand.region} · {brand.baseCurrency}</span>
+              <QualityDot brandId={brand.id} />
+              <PacingChip brandId={brand.id} />
             </div>
           </div>
         </Link>

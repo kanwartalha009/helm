@@ -75,6 +75,17 @@ return Application::configure(basePath: dirname(__DIR__))
             ->onOneServer()
             ->appendOutputTo(storage_path('logs/schedule.log'));
 
+        // Market Ad Library corpus — 02:30 UTC nightly (Ads Library Phase 2).
+        // Sweeps tracked competitor pages + due saved searches within the hourly
+        // call budget, hard-stops at 06:00 UTC. No-op until an Ad Library token is
+        // configured (the command self-skips).
+        $schedule->command('adlib:refresh')
+            ->dailyAt('02:30')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
         // FX rates — 13:30 UTC, just after the 13:00 sync. Pulls yesterday's
         // native->USD rates for every active brand currency into currency_rates,
         // then (13:45) sweeps any rows that synced before the rate existed.
@@ -110,6 +121,52 @@ return Application::configure(basePath: dirname(__DIR__))
         // ran shopify:sync-catalog by hand, so stock went stale silently.
         $schedule->command('shopify:sync-catalog')
             ->dailyAt('14:10')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
+        // Anomaly scan (GO-2.4). 15:30 UTC — after the 15:00 rolling sync and the
+        // 14:10 catalog refresh, so the day it scans is as complete as it will get.
+        // Deterministic rules only; idempotent, so a re-run refreshes rather than
+        // duplicates. Every rule stays silent without a 14-day baseline.
+        $schedule->command('anomalies:scan')
+            ->dailyAt('15:30')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
+        // THE LEDGER (GO-2.5) — silent writer. 15:45 UTC, right after anomalies:scan, so
+        // the night's anomalies are already open and get logged with the rest.
+        // Insert-only and idempotent: advice already open is NOT re-recorded, so the
+        // acceptance rate is never diluted by duplicate rows. Nothing renders these yet —
+        // the track record (GO-3.3) can only be computed from history that already exists,
+        // which is exactly why this ships before the UI that needs it.
+        $schedule->command('ledger:record')
+            ->dailyAt('15:45')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
+        // Grade Helm's OWN advice (GO-3.3). 16:00 UTC, after ledger:record. Measures
+        // accepted/dismissed recommendations at 14/30 days against their frozen
+        // baselines, and expires advice nobody ever decided on. Outcomes are written
+        // once — a loss can never be re-graded into a win.
+        $schedule->command('ledger:measure')
+            ->dailyAt('16:00')
+            ->timezone('UTC')
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
+        // Weekly digest (GO-3.5). Monday 08:00 UTC — the start of the working week, after
+        // the weekend's syncs, ledger writes and measurements have all landed. Sends to
+        // Slack only if a webhook is configured; a missing webhook is NOT an error, and a
+        // Slack outage never fails the scheduler.
+        $schedule->command('digest:weekly')
+            ->weeklyOn(1, '08:00')
             ->timezone('UTC')
             ->withoutOverlapping()
             ->onOneServer()

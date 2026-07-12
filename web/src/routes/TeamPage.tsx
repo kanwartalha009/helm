@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import {
@@ -55,7 +56,7 @@ export function TeamPage() {
   if (isLoading) {
     return (
       <AppLayout title="Team">
-        <PageHeader title="Team" subtitle="Internal users and brand-side users with access to Roasdriven." />
+        <PageHeader title="Team" subtitle={`Internal users and brand-side users with access to ${APP_NAME}.`} />
         <div className="muted" style={{ padding: 24 }}>
           Loading team…
         </div>
@@ -66,7 +67,7 @@ export function TeamPage() {
   if (isError) {
     return (
       <AppLayout title="Team">
-        <PageHeader title="Team" subtitle="Internal users and brand-side users with access to Roasdriven." />
+        <PageHeader title="Team" subtitle={`Internal users and brand-side users with access to ${APP_NAME}.`} />
         <Banner
           variant="warning"
           icon={
@@ -160,7 +161,7 @@ export function TeamPage() {
     <AppLayout title="Team" tag={`${active.length} active`}>
       <PageHeader
         title="Team"
-        subtitle="Internal users and brand-side users with access to Roasdriven."
+        subtitle={`Internal users and brand-side users with access to ${APP_NAME}.`}
         actions={
           <button onClick={() => openInvite(true)} className="btn btn-primary btn-sm">
             <svg

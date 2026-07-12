@@ -276,6 +276,15 @@ export interface BrandProductRow {
   // maps ad spend to this product. A losing_on_ads entry may appear in flags.
   adSpend: number | null;
   roas: number | null;
+  // GO-1.2 — cost + contribution margin. ALL null when no cost basis exists:
+  // an unknown cost is never treated as 0 (that would fake a 100% margin).
+  // costSource tells you whether the number rests on a real per-unit cost
+  // ('manual' | 'shopify') or a brand-wide rate ('brand_margin').
+  unitCost: number | null;
+  costSource: 'manual' | 'shopify' | 'brand_margin' | null;
+  cogs: number | null;
+  contributionMargin: number | null;
+  contributionMarginPct: number | null;
   flags: ProductFlag[];
 }
 
@@ -287,9 +296,23 @@ export interface BrandProductsResponse {
   totalRevenue: number;
   // Phase 5 — ad-spend coverage for the footer honesty line.
   adSpend: { mappedSpend: number; totalSpend: number; mappedPct: number | null };
+  // GO-1.2 — hasBasis false → every margin cell is "—" + the "set costs" hint.
+  costs?: { hasBasis: boolean; formula: string };
   hasData: boolean;
   lastPulledAt: string | null;
   inventorySnapshotAt: string | null;
+}
+
+/** PUT /api/brands/{slug}/product-costs — set one product's unit cost (admin/manager). */
+export function useSetProductCost(slug: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { product_key: string; unit_cost: number; effective_from?: string }) => {
+      const { data } = await api.put(`/brands/${slug}/product-costs`, body);
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['brand', slug, 'products'] }),
+  });
 }
 
 /** GET /api/brands/{slug}/products — commerce product aggregates + flags for a window. */
@@ -308,7 +331,7 @@ export function useBrandProducts(slug: string | undefined, period: string, searc
 
 export interface AuditFinding {
   id: string;
-  area: 'data' | 'revenue' | 'tracking' | 'ads' | 'products' | 'inventory';
+  area: 'data' | 'revenue' | 'tracking' | 'ads' | 'products' | 'inventory' | 'market';
   severity: 'critical' | 'warn' | 'info' | 'good';
   title: string;
   detail: string;

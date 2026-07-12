@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Banner, Button, Drawer, Input, Stepper, Tag } from '@/components/ui';
+import { APP_NAME } from '@/lib/branding';
 import {
   useConnectShopifyToken,
   useCreateBrand,
@@ -464,7 +465,7 @@ function Step2Connect({
         <>
           <Banner variant="info" className="mb-16">
             Paste the <span className="mono">shpat_…</span> token shown by the store admin's{' '}
-            <strong>Settings → Apps and sales channels → Develop apps</strong> page. Roasdriven
+            <strong>Settings → Apps and sales channels → Develop apps</strong> page. {APP_NAME}
             validates against Shopify before saving.
           </Banner>
           <details className="mb-16" style={{ cursor: 'pointer' }}>
@@ -472,7 +473,7 @@ function Step2Connect({
             <ol className="text-sm muted mt-12" style={{ paddingLeft: 18, lineHeight: 1.7 }}>
               <li>Store admin: <span className="mono">Settings → Apps and sales channels → Develop apps</span>.</li>
               <li>Click <strong>"Allow custom app development"</strong> if prompted.</li>
-              <li>Click <strong>"Create an app"</strong>, name it <span className="mono">Roasdriven Analytics</span>.</li>
+              <li>Click <strong>"Create an app"</strong>, name it <span className="mono">{APP_NAME} Analytics</span>.</li>
               <li>
                 <strong>Configuration → Admin API integration → Configure</strong>. Tick:{' '}
                 <span className="mono">read_orders</span>, <span className="mono">read_products</span>,{' '}
@@ -557,7 +558,7 @@ function Step3Done({ brand }: { brand: Brand }) {
   return (
     <>
       <Banner variant="info">
-        <strong>{brand.name}</strong> is connected. Open it to trigger the first sync — Roasdriven will
+        <strong>{brand.name}</strong> is connected. Open it to trigger the first sync — {APP_NAME} will
         pull every historical order Shopify hands back. Daily syncs then run automatically at 13:00 UTC.
       </Banner>
 

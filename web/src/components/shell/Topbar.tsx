@@ -1,4 +1,5 @@
 import { useUiStore } from '@/stores/uiStore';
+import { AnomalyBell } from '@/components/shell/AnomalyBell';
 import { Button, Tag } from '@/components/ui';
 import type { ReactNode } from 'react';
 
@@ -19,6 +20,8 @@ export function Topbar({ title, tag, actions }: TopbarProps) {
         {tag && <Tag>{tag}</Tag>}
       </div>
       <div className="flex items-center gap-8">
+        {/* GO-2.4 — open anomalies. Renders nothing when there is nothing wrong. */}
+        <AnomalyBell />
         <Button
           size="sm"
           variant="secondary"

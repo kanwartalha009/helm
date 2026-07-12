@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { APP_NAME } from '@/lib/branding';
 import { api } from '@/lib/api';
 import { toast } from '@/stores/toastStore';
 import type {
@@ -160,7 +161,7 @@ export function useCompleteOnboarding() {
     onSuccess: (user) => {
       qc.setQueryData(['auth', 'me'], user);
       qc.invalidateQueries({ queryKey: ['workspace-settings'] });
-      toast.success('Setup complete', 'Welcome to Roasdriven.');
+      toast.success('Setup complete', `Welcome to ${APP_NAME}.`);
     },
     onError: (err: any) => {
       toast.error('Couldn\'t save', firstApiError(err));

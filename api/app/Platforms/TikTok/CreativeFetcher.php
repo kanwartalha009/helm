@@ -74,6 +74,7 @@ final class CreativeFetcher
                     'currency'         => $currency,
                     'thumbnail_url'    => null,
                     'media_type'       => 'image',
+                    'body_text'        => null, // filled from ad/get ad_text below (Ads Library winners search)
                 ];
             }
 
@@ -87,6 +88,7 @@ final class CreativeFetcher
                 if ($c !== null) {
                     $rows[$i]['thumbnail_url'] = $c['image'];
                     $rows[$i]['media_type']   = $c['media'];
+                    $rows[$i]['body_text']    = $c['body'] ?? null;
                 } elseif ((int) $rows[$i]['video_3s'] > 0) {
                     // Asset resolution failed but the ad has video views → it's a
                     // video (so TS/HR still render), just without a thumbnail.
@@ -153,7 +155,7 @@ final class CreativeFetcher
                 $data = $this->client->get('ad/get/', [
                     'advertiser_id' => $advertiserId,
                     'ad_ids'        => json_encode(array_values($chunk)),
-                    'fields'        => json_encode(['ad_id', 'video_id', 'image_ids']),
+                    'fields'        => json_encode(['ad_id', 'video_id', 'image_ids', 'ad_text']),
                 ]);
             } catch (RuntimeException $e) {
                 Log::warning('tiktok.creative.ad_get_failed', ['error' => $e->getMessage()]);
@@ -164,11 +166,13 @@ final class CreativeFetcher
             $imageByAd = [];
             $videoIds  = [];
             $imageIds  = [];
+            $textByAd  = [];
             foreach (($data['list'] ?? []) as $ad) {
                 $adId = (string) ($ad['ad_id'] ?? '');
                 if ($adId === '') {
                     continue;
                 }
+                $textByAd[$adId] = trim((string) ($ad['ad_text'] ?? ''));
                 $vid  = (string) ($ad['video_id'] ?? '');
                 $imgs = is_array($ad['image_ids'] ?? null) ? $ad['image_ids'] : [];
                 if ($vid !== '') {
@@ -188,6 +192,18 @@ final class CreativeFetcher
             }
             foreach ($imageByAd as $adId => $imgId) {
                 $out[$adId] = ['image' => $images[$imgId] ?? null, 'media' => 'image'];
+            }
+            // Attach ad_text to whatever media entry exists; a text-only ad still
+            // gets a body row so winners search finds it.
+            foreach ($textByAd as $adId => $text) {
+                if ($text === '') {
+                    continue;
+                }
+                if (isset($out[$adId])) {
+                    $out[$adId]['body'] = $text;
+                } else {
+                    $out[$adId] = ['image' => null, 'media' => 'image', 'body' => $text];
+                }
             }
             usleep(250_000);
         }

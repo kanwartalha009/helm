@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Banner, Button, Card, Dot, Input, Modal, Segmented, Tag } from '@/components/ui';
+import { APP_NAME } from '@/lib/branding';
 import {
   useSaveCredential,
   useRevokeCredential,
@@ -17,16 +18,19 @@ import type {
   PlatformCredentialSchemaItem,
 } from '@/types/domain';
 
-type PlatformKey = 'shopify' | 'meta' | 'google' | 'tiktok' | 'llm';
+type PlatformKey = 'shopify' | 'meta' | 'google' | 'tiktok' | 'meta_adlib' | 'llm' | 'slack';
 
 const PLATFORMS: { key: PlatformKey; label: string; sub: string }[] = [
   { key: 'shopify', label: 'Shopify',    sub: 'Partner app credentials — used for the OAuth install on each store.' },
   { key: 'meta',    label: 'Meta Ads',   sub: 'System User token covers every ad account in your Business Manager.' },
   { key: 'google',  label: 'Google Ads', sub: 'MCC OAuth refresh token + developer token + client credentials.' },
   { key: 'tiktok',  label: 'TikTok Ads', sub: 'Business Center owner token covers every advertiser under the BC.' },
+  { key: 'meta_adlib', label: 'Meta Ad Library', sub: 'Separate ads_read token for the competitor / market library. Needs your own Meta identity verification (facebook.com/id).' },
   // D-016: the agency adds the key for its provider of choice; only the
   // ACTIVE provider's key is required (the other row is optional).
   { key: 'llm',     label: 'AI / LLM',   sub: 'Powers the report narrative and \u201cAsk the data\u201d. Pick a provider, paste that provider\u2019s key.' },
+  // GO-3.5 \u2014 optional delivery for the weekly digest. The digest works in-app without it.
+  { key: 'slack',   label: 'Slack',      sub: 'Optional. Incoming-webhook URL from the Slack app install (the install flow lets you pick the channel). Delivers the weekly digest \u2014 which works in-app regardless. Test it before the first send.' },
 ];
 
 interface EditState {
@@ -72,7 +76,7 @@ export function PlatformKeysSection() {
     <div style={{ maxWidth: 760 }}>
       <h3 className="section-title">Platform keys</h3>
       <p className="text-sm muted mb-16">
-        Credentials Roasdriven uses to talk to Shopify, Meta, Google, and TikTok on the agency&rsquo;s behalf. Stored encrypted in the database (AES-256 via APP_KEY). Per-store Shopify access tokens live on each brand&rsquo;s connection card, not here.
+        Credentials {APP_NAME} uses to talk to Shopify, Meta, Google, and TikTok on the agency&rsquo;s behalf. Stored encrypted in the database (AES-256 via APP_KEY). Per-store Shopify access tokens live on each brand&rsquo;s connection card, not here.
       </p>
 
       <Banner

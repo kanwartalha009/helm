@@ -1,3 +1,5 @@
+import { PacingChip } from '@/components/dashboard/PacingChip';
+import { QualityDot } from '@/components/dashboard/QualityDot';
 import { Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar, Card, Tag, Dot } from '@/components/ui';
@@ -73,7 +75,16 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
               <tr>
                 <th className="brand-col group-head" rowSpan={2}>Brand</th>
                 <th className="group-head group-start" colSpan={3}>{revenueLabel}</th>
-                {showAdRollup && <th className="group-head group-start" colSpan={3}>Blended ROAS</th>}
+                {showAdRollup && (
+                  <th
+                    className="group-head group-start"
+                    colSpan={3}
+                    /* GO-1.4: this IS MER — store truth, not a platform-reported figure. */
+                    title="MER (store truth): store revenue ÷ total ad spend. Computed from revenue Shopify actually recorded — not from what any ad platform claims it caused. Open a brand to see each platform's self-reported ROAS and its known bias."
+                  >
+                    Blended ROAS (MER)
+                  </th>
+                )}
                 {showMeta   && <th className="group-head group-start" colSpan={3}>Meta inv.</th>}
                 {showGoogle && <th className="group-head group-start" colSpan={3}>Google inv.</th>}
                 {showTikTok && <th className="group-head group-start" colSpan={3}>TikTok inv.</th>}
@@ -100,7 +111,18 @@ export function BrandsTableWide({ rows, visibleAdPlatforms, currency, metric = '
                     {periodHeader(p)}
                   </th>
                 ))}
-                {showAdRollup && <th className="group-head group-start" rowSpan={2} colSpan={3}>Blended ROAS</th>}
+                {showAdRollup && (
+                  <th
+                    className="group-head group-start"
+                    rowSpan={2}
+                    colSpan={3}
+                    /* GO-1.4: this IS MER — store revenue ÷ total ad spend, from money the
+                       store actually took. It is not what any platform reports about itself. */
+                    title="MER (store truth): store revenue ÷ total ad spend. Computed from revenue Shopify actually recorded — not from what any ad platform claims it caused. Open a brand to see each platform's self-reported ROAS and its known bias."
+                  >
+                    Blended ROAS (MER)
+                  </th>
+                )}
                 {showMeta   && <th className="group-head group-start" rowSpan={2} colSpan={3}>Meta inv.</th>}
                 {showGoogle && <th className="group-head group-start" rowSpan={2} colSpan={3}>Google inv.</th>}
                 {showTikTok && <th className="group-head group-start" rowSpan={2} colSpan={3}>TikTok inv.</th>}
@@ -321,8 +343,10 @@ function Row({
           <Avatar initials={brand.initials} />
           <div>
             <div style={{ fontWeight: 500 }}>{brand.name}</div>
-            <div className="brand-meta">
-              {brand.region} · {brand.baseCurrency}
+            <div className="brand-meta" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span>{brand.region} · {brand.baseCurrency}</span>
+              <QualityDot brandId={brand.id} />
+              <PacingChip brandId={brand.id} />
             </div>
           </div>
         </Link>

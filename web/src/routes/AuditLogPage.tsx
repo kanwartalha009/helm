@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import {
@@ -88,7 +89,7 @@ export function AuditLogPage() {
             </svg>
           }
           title="No activity yet"
-          body="As you and your team work in Roasdriven, every sensitive action — sign-ins, invitations, credential rotations, brand access changes — lands here. Append-only, never deleted."
+          body={`As you and your team work in ${APP_NAME}, every sensitive action — sign-ins, invitations, credential rotations, brand access changes — lands here. Append-only, never deleted.`}
           footnote={
             <Link to="/sitemap" style={{ color: 'inherit' }}>
               Audit log explained →

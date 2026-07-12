@@ -81,6 +81,7 @@ export function ReportDocument({
   onNarrativeBlockChange?: (key: keyof NarrativeBlocksShape, value: string) => void;
 }) {
   const { brand, currency, period, comparison, kpis, revenueVsSpend, byPlatform, spendComplete } = data;
+  const truth = data.truth ?? null;
   const content = data.content ?? undefined;
   const hasComparison = !!comparison;
 
@@ -222,6 +223,39 @@ export function ReportDocument({
           </table>
         </div>
       </section>
+
+      {truth && (
+        <section className="rpt-sec">
+          <div className="rpt-sec-head"><span className="rpt-sec-num">02</span><h2>Truth</h2></div>
+          <div className="rpt-sec-sub">
+            MER is the spine — it uses the revenue the store actually recorded. Each platform's own reported
+            figure sits beside it with its known bias. They are <b>never added together</b>.
+          </div>
+
+          <div className="rpt-kpis">
+            <div className="rpt-kpi">
+              <div className="rpt-kpi-l">MER</div>
+              <div className="rpt-kpi-v">{truth.mer === null ? '—' : formatRoas(truth.mer)}</div>
+              <div className="rpt-kpi-d"><span className="rpt-kpi-note">{truth.merLabel}</span></div>
+            </div>
+            {truth.platforms.map((p) => (
+              <div className="rpt-kpi" key={p.platform}>
+                <div className="rpt-kpi-l">{PLATFORM_LABEL[p.platform] ?? p.platform} — reported</div>
+                <div className="rpt-kpi-v">{p.reportedRoas === null ? '—' : formatRoas(p.reportedRoas)}</div>
+                <div className="rpt-kpi-d"><span className="rpt-kpi-note">{p.label}</span></div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rpt-cap">{truth.merFormula}</div>
+          {truth.platforms.map((p) => (
+            <div className="rpt-cap" key={p.platform}>
+              <b>{PLATFORM_LABEL[p.platform] ?? p.platform}:</b> {p.annotation}
+            </div>
+          ))}
+          <div className="rpt-cap">{truth.divergenceNote}</div>
+        </section>
+      )}
 
       <section className="rpt-sec">
         <div className="rpt-sec-head"><span className="rpt-sec-num">02</span><h2>By ad platform</h2></div>

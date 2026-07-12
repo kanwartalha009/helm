@@ -18,6 +18,7 @@ use App\Platforms\Support\Throttle;
 use App\Services\Currency\FxService;
 use App\Services\Sync\AdSetSync;
 use App\Services\Sync\CampaignSync;
+use App\Services\Sync\KlaviyoSync;
 use Carbon\CarbonImmutable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -77,7 +78,7 @@ class SyncBrandDayJob implements ShouldQueue
         $this->onQueue($platformConnection->platform === 'shopify' ? 'shopify-sync' : 'ads-sync');
     }
 
-    public function handle(PlatformRegistry $registry, FxService $fx, CampaignSync $campaignSync, AdSetSync $adSetSync, RevenueFetcher $revenue): void
+    public function handle(PlatformRegistry $registry, FxService $fx, CampaignSync $campaignSync, AdSetSync $adSetSync, RevenueFetcher $revenue, KlaviyoSync $klaviyoSync): void
     {
         // Two paths in:
         //   - $logId set      → controller/command already wrote a `queued`
@@ -207,6 +208,14 @@ class SyncBrandDayJob implements ShouldQueue
                 // wrote, so months drift stale/€0; this keeps them fresh forward.
                 // Best-effort + self-guarded, like the funnel above.
                 $this->syncShopifyCommerce($revenue, $fx, $this->platformConnection, $this->date);
+
+                // Klaviyo email-attributed revenue (GO-1.1) → email_daily_metrics.
+                // Runs on the SHOPIFY connection so it fires once per brand-day (not
+                // once per ad connection). Re-pulls this day because Klaviyo attribution
+                // changes retroactively. Self-guarded — never throws (incl. rate limits),
+                // so it can never re-queue or fail the brand's main sync. No-op when the
+                // brand has no Klaviyo key. Email revenue is its OWN channel (§0.1).
+                $klaviyoSync->syncBrandDaySafe($this->brand, $this->date);
             }
         } catch (PlatformRateLimitedException $e) {
             // Not a failure — the platform asked us to wait. Hand the worker

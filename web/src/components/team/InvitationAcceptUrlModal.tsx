@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Banner, Button, Modal } from '@/components/ui';
 import { useUiStore } from '@/stores/uiStore';
+import { APP_NAME } from '@/lib/branding';
 
 /**
  * Surfaces the freshly minted invitation accept URL after a successful invite.
@@ -46,7 +47,7 @@ export function InvitationAcceptUrlModal() {
       }
     >
       <Banner variant="info" className="mb-16">
-        SMTP isn’t connected yet, so Roasdriven doesn’t auto-email invitees. Copy the link below and
+        SMTP isn’t connected yet, so {APP_NAME} doesn’t auto-email invitees. Copy the link below and
         send it to <strong>{state.email}</strong> however you like (DM, manual email, etc.).
         The link expires in 7 days.
       </Banner>

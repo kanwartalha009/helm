@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { Breadcrumb, Button, Card, Segmented } from '@/components/ui';
+import { BrandSubnav } from '@/components/shell/BrandSubnav';
 import { useBrandDetail } from '@/hooks/useApiData';
 import { api } from '@/lib/api';
 
@@ -69,6 +70,8 @@ export function BrandAskPage() {
           { label: 'Ask' },
         ]}
       />
+
+      <BrandSubnav slug={slug} />
 
       <div className="page-header">
         <div>

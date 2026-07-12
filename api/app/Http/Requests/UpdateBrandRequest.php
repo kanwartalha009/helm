@@ -25,6 +25,8 @@ class UpdateBrandRequest extends FormRequest
             // Phase 0 — margin-based rules stay off until set (spec §4 Phase 0).
             'gross_margin_pct' => ['sometimes', 'nullable', 'numeric', 'between:1,99'],
             'target_cpa'       => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            // Ads Library Phase 0 — niche drives both libraries' filtering/ranking.
+            'niche'            => ['sometimes', 'nullable', 'string', 'max:48'],
         ];
     }
 }

@@ -89,7 +89,7 @@ class TikTokBackfillCreativesCommand extends Command
                         AdCreativeDaily::upsert(
                             $chunk,
                             ['brand_id', 'platform', 'date', 'ad_id'],
-                            ['ad_name', 'campaign_id', 'thumbnail_url', 'media_type', 'spend', 'impressions', 'clicks', 'video_3s', 'thruplays', 'add_to_cart', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+                            ['ad_name', 'body_text', 'campaign_id', 'thumbnail_url', 'media_type', 'spend', 'impressions', 'clicks', 'video_3s', 'thruplays', 'add_to_cart', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                         );
                     }
                     $rows += count($records);
@@ -136,6 +136,7 @@ class TikTokBackfillCreativesCommand extends Command
                 'date'             => $date,
                 'ad_id'            => mb_substr($adId, 0, 64),
                 'ad_name'          => mb_substr((string) ($r['ad_name'] ?? ''), 0, 255),
+                'body_text'        => isset($r['body_text']) && $r['body_text'] !== null ? mb_substr((string) $r['body_text'], 0, 2000) : null,
                 'campaign_id'      => $r['campaign_id'] ? mb_substr((string) $r['campaign_id'], 0, 64) : null,
                 'thumbnail_url'    => $r['thumbnail_url'] ?? null,
                 'media_type'       => in_array($r['media_type'] ?? 'image', ['image', 'video'], true) ? $r['media_type'] : 'image',

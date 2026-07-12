@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Banner, Button, Card, Drawer, Input } from '@/components/ui';
 import { useBrandsLive } from '@/hooks/useApiData';
 import { useInviteUser } from '@/hooks/useInvitations';
@@ -172,7 +173,7 @@ export function InviteUserDrawer({ open, onClose }: InviteUserDrawerProps) {
             <textarea
               className="input"
               rows={3}
-              placeholder="Welcome to Roasdriven…"
+              placeholder={`Welcome to ${APP_NAME}…`}
               style={{ resize: 'vertical', fontFamily: 'inherit' }}
               value={note}
               onChange={(e) => setNote(e.target.value)}

@@ -26,7 +26,7 @@ class Brand extends Model
 
     protected $fillable = [
         'name', 'slug', 'timezone', 'base_currency', 'group_tag', 'status',
-        'shopify_app', 'gross_margin_pct', 'target_cpa',
+        'shopify_app', 'gross_margin_pct', 'target_cpa', 'niche',
     ];
 
     protected $casts = [

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import {
@@ -84,7 +85,7 @@ export function BrandsPage() {
             </svg>
           }
           title="No brands yet"
-          body="Add your first brand to start syncing revenue and ad spend. Roasdriven rolls up Shopify, Meta, Google, and TikTok into one daily view."
+          body={`Add your first brand to start syncing revenue and ad spend. ${APP_NAME} rolls up Shopify, Meta, Google, and TikTok into one daily view.`}
           primary={
             <button onClick={() => openAddBrand(true)} className="btn btn-primary btn-lg">
               <svg
@@ -116,7 +117,7 @@ export function BrandsPage() {
             {
               n: 2,
               title: 'Create a brand',
-              body: 'Name, timezone, base currency. Roasdriven uses the brand timezone for every metric.',
+              body: `Name, timezone, base currency. ${APP_NAME} uses the brand timezone for every metric.`,
               onClick: () => openAddBrand(true),
               cta: 'Add brand',
             },

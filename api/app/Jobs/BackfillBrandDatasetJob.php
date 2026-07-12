@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Models\BackfillRun;
 use App\Models\Brand;
+use App\Services\PlatformCredentialService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -52,7 +53,7 @@ class BackfillBrandDatasetJob implements ShouldQueue
         });
     }
 
-    public function handle(): void
+    public function handle(PlatformCredentialService $credentials): void
     {
         $run = BackfillRun::find($this->runId);
         if ($run === null || $run->status !== 'queued') {
@@ -106,6 +107,12 @@ class BackfillBrandDatasetJob implements ShouldQueue
         }
         if ($wants('commerce') && in_array('shopify', $connected, true)) {
             $commands[] = ['shopify:backfill-commerce', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+        }
+        // Klaviyo email revenue (GO-1.1). Not a platform_connection — gated on the
+        // brand having its own Klaviyo key. The command clamps --since to Klaviyo's
+        // 2023-06-01 data floor itself.
+        if ($wants('email') && $credentials->has('klaviyo', 'private_key', (int) $this->brand->id)) {
+            $commands[] = ['klaviyo:backfill', ['brand' => (string) $this->brand->slug, '--since' => $since]];
         }
 
         try {

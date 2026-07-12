@@ -7,10 +7,12 @@ namespace App\Reports\Weekly;
 use App\Models\AdCampaignDailyMetric;
 use App\Models\Brand;
 use App\Models\DailyMetric;
+use App\Models\EmailDailyMetric;
 use App\Models\PlatformConnection;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Contracts\ReportType;
 use App\Reports\Support\AdAudit;
+use App\Services\AdsLibrary\MarketAlerts;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Log;
@@ -34,7 +36,10 @@ final class WeeklyReport implements ReportType
 {
     private const AD_PLATFORMS = ['meta', 'google', 'tiktok'];
 
-    public function __construct(private readonly AdAudit $ads) {}
+    public function __construct(
+        private readonly AdAudit $ads,
+        private readonly MarketAlerts $marketAlerts,
+    ) {}
 
     public function key(): string
     {
@@ -132,6 +137,14 @@ final class WeeklyReport implements ReportType
             'spendComplete'   => count(array_intersect(self::AD_PLATFORMS, $connected)) === count(self::AD_PLATFORMS),
             'campaignMovers'  => $this->safely('campaignMovers', fn () => $this->campaignMovers($brand->id, $start, $end, $prevStart, $prevEnd, $filters->usd), []),
             'actions'         => $this->safely('actions', fn () => $this->actions($brand->id, $connected, $start, $end, $prevStart, $prevEnd, $filters->usd), []),
+            // Competitor movement for this brand's niche (Ads Library Phase 5) —
+            // Proxy signals from the tracked-page corpus, separate from `actions`
+            // (which are our own verified ad verdicts). Empty for brands with no
+            // niche set. Fault-isolated like every optional section.
+            'marketAlerts'    => $this->safely('marketAlerts', fn () => $this->marketMoves($brand), []),
+            // Klaviyo email revenue (GO-1.1) — its OWN channel. NULL (not 0) when the
+            // brand has no Klaviyo data for the week. NEVER added to revenue/spend.
+            'email'           => $this->safely('email', fn () => $this->emailBlock($brand, $start, $end, $filters->usd), null),
             // Is the data current through the week's Sunday? Same contract as the
             // overall-performance report — the SPA gates on it. On error, fail
             // CLOSED: gating a fresh report is annoying, un-gating a stale one
@@ -341,6 +354,99 @@ final class WeeklyReport implements ReportType
                 $action['platform'] = $platform;
                 $out[] = $action;
             }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Klaviyo email revenue for the week (GO-1.1) — its OWN channel, never summed
+     * into store or ad revenue (§0.1 honesty law: Klaviyo is last-touch within its
+     * own windows and OVERLAPS ad + organic revenue). `shareOfStore` is a RATIO of
+     * two measured numbers, not an additive split — the honesty box says so verbatim.
+     *
+     * Returns null (never a 0 block) when the brand has no Klaviyo rows for the week —
+     * missing ≠ zero. Money follows the report's usd/native mode like every other section.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function emailBlock(Brand $brand, string $start, string $end, bool $usd): ?array
+    {
+        $disp = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
+
+        $base = EmailDailyMetric::query()
+            ->where('brand_id', $brand->id)
+            ->whereBetween('date', [$start, $end]);
+
+        if (! (clone $base)->exists()) {
+            return null; // no Klaviyo data this week → "—", never €0
+        }
+
+        $totals = (clone $base)
+            ->selectRaw("COALESCE(SUM({$disp('conversion_value')}), 0) AS revenue, COALESCE(SUM(conversions), 0) AS orders")
+            ->first();
+
+        $revenue = round((float) ($totals->revenue ?? 0), 2);
+        $orders  = (int) ($totals->orders ?? 0);
+
+        // Store revenue for the same week, same currency mode (D-005 basis) — used
+        // ONLY for the share ratio, never to build a combined "total".
+        $storeRev = (float) DailyMetric::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', 'shopify')
+            ->whereBetween('date', [$start, $end])
+            ->selectRaw('COALESCE(SUM(' . $disp('(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))') . '), 0) AS v')
+            ->value('v');
+
+        $top = (clone $base)
+            ->groupBy('source', 'source_id')
+            ->selectRaw("source, source_id, MAX(source_name) AS name,
+                COALESCE(SUM({$disp('conversion_value')}), 0) AS revenue,
+                COALESCE(SUM(conversions), 0) AS orders")
+            ->orderByDesc('revenue')
+            ->limit(5)
+            ->get()
+            ->map(static fn ($r): array => [
+                'source'  => (string) $r->source,     // flow | campaign
+                'id'      => (string) $r->source_id,
+                'name'    => $r->name !== null && $r->name !== '' ? (string) $r->name : null,
+                'revenue' => round((float) $r->revenue, 2),
+                'orders'  => (int) $r->orders,
+            ])
+            ->all();
+
+        return [
+            'revenue'      => $revenue,
+            'orders'       => $orders,
+            // Ratio, not a share of a sum. Null when there's no store revenue to compare.
+            'shareOfStore' => $storeRev > 0.0 ? round($revenue / $storeRev * 100, 1) : null,
+            'topSources'   => $top,
+            'label'        => 'Verified — Klaviyo-attributed',
+            'honestyBox'   => (string) config('klaviyo.honesty_box'),
+        ];
+    }
+
+    /**
+     * Competitor movement for the brand's niche this week — Proxy signals only
+     * (public Ad Library corpus), never blended into performance. Empty when the
+     * brand has no niche set or no tracked pages have moved.
+     *
+     * @return array<int, array{type: string, severity: string, message: string, pageName: ?string}>
+     */
+    private function marketMoves(Brand $brand): array
+    {
+        if (($brand->niche ?? '') === '') {
+            return [];
+        }
+
+        $out = [];
+        foreach ($this->marketAlerts->forPages($brand->niche) as $a) {
+            $out[] = [
+                'type'     => $a['type'],
+                'severity' => $a['severity'],
+                'message'  => $a['message'],
+                'pageName' => $a['pageName'],
+            ];
         }
 
         return $out;

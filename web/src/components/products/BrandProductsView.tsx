@@ -2,8 +2,10 @@ import { useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { Button, Card, Chip, PageEmptyState } from '@/components/ui';
-import { useBrandDetail, useBrandProducts } from '@/hooks/useApiData';
+import { useBrandDetail, useBrandProducts, useSetProductCost } from '@/hooks/useApiData';
+import type { BrandProductRow } from '@/hooks/useApiData';
 import { formatMoney } from '@/lib/formatters';
+import { toast } from '@/stores/toastStore';
 
 const PERIODS: { key: string; label: string }[] = [
   { key: 'last7', label: 'Last 7 days' },
@@ -94,6 +96,8 @@ export function BrandProductsView({ slug }: { slug?: string }) {
                   <th className="num">AOV</th>
                   <th className="num" title="Mapped ad spend (window) — spend on ads whose landing URL is this product">Ad spend</th>
                   <th className="num" title="Product revenue ÷ mapped ad spend. Unmapped spend (Shopping/PMax) is excluded, so this reads high.">ROAS</th>
+                  <th className="num" title="Unit cost. Your manual cost wins over Shopify's. Click to set or correct one.">Cost</th>
+                  <SortTh label="Margin" col="margin" sort={sort} setSort={setSort} />
                   <SortTh label="Refund %" col="refunds" sort={sort} setSort={setSort} />
                   <SortTh label={snapshotStale ? 'Cover *' : 'Cover'} col="cover" sort={sort} setSort={setSort} amber={snapshotStale} />
                   <th>Flags</th>
@@ -113,7 +117,24 @@ export function BrandProductsView({ slug }: { slug?: string }) {
                     <td className="num">{r.units.toLocaleString()}</td>
                     <td className="num">{r.aov !== null ? formatMoney(r.aov, currency) : '—'}</td>
                     <td className="num">{r.adSpend !== null ? formatMoney(r.adSpend, currency) : '—'}</td>
-                    <td className="num">{r.roas !== null ? `${r.roas.toFixed(2)}×` : '—'}</td>
+                    <td className="num"><CostCell slug={slug} row={r} currency={currency} /></td>
+                    <td className="num">
+                      {r.contributionMargin === null ? (
+                        <span className="muted" title="No cost basis — set a unit cost or the brand's gross margin %.">—</span>
+                      ) : (
+                        <span
+                          style={{ color: r.contributionMargin < 0 ? 'var(--danger, #b3261e)' : undefined }}
+                          title={r.costSource === 'brand_margin'
+                            ? 'Estimated from the brand gross-margin %, not a per-unit cost.'
+                            : `Revenue − COGS (${r.costSource} cost) − mapped ad spend.`}
+                        >
+                          {formatMoney(r.contributionMargin, currency)}
+                          {r.contributionMarginPct !== null && (
+                            <span className="muted text-xs"> · {r.contributionMarginPct}%</span>
+                          )}
+                        </span>
+                      )}
+                    </td>
                     <td className="num" style={r.refundRatePct !== null && r.refundRatePct > 5 ? { color: 'var(--warning)' } : undefined}>
                       {r.refundRatePct !== null ? `${r.refundRatePct}%` : '—'}
                     </td>
@@ -130,7 +151,7 @@ export function BrandProductsView({ slug }: { slug?: string }) {
                   </tr>
                 ))}
                 {data.rows.length === 0 && (
-                  <tr><td colSpan={13} className="muted" style={{ padding: 18 }}>No products match “{search}”.</td></tr>
+                  <tr><td colSpan={15} className="muted" style={{ padding: 18 }}>No products match “{search}”.</td></tr>
                 )}
               </tbody>
             </table>
@@ -154,9 +175,82 @@ export function BrandProductsView({ slug }: { slug?: string }) {
               (e.g. Google Shopping/PMax) is excluded, so product ROAS reads high. Blended truth lives on the dashboard.
             </div>
           )}
+
+          {/* GO-1.2 — no cost basis at all: say so plainly rather than showing a
+              margin column of dashes with no explanation. */}
+          {data.costs && !data.costs.hasBasis && (
+            <div className="text-xs muted mt-8" style={{ maxWidth: 760 }}>
+              No cost basis for this brand yet, so margin is “—”. Set a unit cost on any product below, or a
+              gross-margin % in brand Settings. Helm never guesses a cost — an unknown cost is shown as unknown,
+              never as zero.
+            </div>
+          )}
+          {data.costs?.hasBasis && (
+            <div className="text-xs muted mt-8" style={{ maxWidth: 760 }}>{data.costs.formula}</div>
+          )}
         </>
       )}
     </>
+  );
+}
+
+/**
+ * Unit-cost cell with an inline setter (GO-1.2). Shows the cost and where it came
+ * from: a real per-unit cost (manual / Shopify) or nothing at all. A brand-margin
+ * estimate is NOT shown here as a unit cost — that would dress a brand-wide rate up
+ * as a measured per-product number; the Margin column carries the estimate instead.
+ *
+ * Saving is effective-dated server-side (from today), so correcting a cost never
+ * rewrites the margin of a window that has already been reported to a client.
+ */
+function CostCell({ slug, row, currency }: { slug?: string; row: BrandProductRow; currency: string }) {
+  const setCost = useSetProductCost(slug);
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(row.unitCost !== null ? String(row.unitCost) : '');
+
+  // The product key the API costs by is the Shopify handle; the table's key is the
+  // product title. The server lower-cases and matches, so send the title-derived key.
+  const save = () => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return;
+    setCost.mutate(
+      { product_key: row.key, unit_cost: n },
+      { onSuccess: () => { setEditing(false); toast.success('Cost saved', `${row.title}: ${formatMoney(n, currency)} per unit.`); },
+        onError: () => toast.error('Could not save the cost', 'Admins and managers only.') },
+    );
+  };
+
+  if (editing) {
+    return (
+      <span className="flex items-center gap-8" style={{ justifyContent: 'flex-end' }}>
+        <input
+          className="input"
+          type="number"
+          min={0}
+          step="0.01"
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+          style={{ maxWidth: 90, padding: '2px 6px' }}
+        />
+        <button type="button" className="text-xs" style={{ background: 'none', border: 0, cursor: 'pointer', color: 'var(--accent)' }} disabled={setCost.isPending} onClick={save}>save</button>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      title={row.costSource === 'manual' ? 'Your manual cost (overrides Shopify). Click to change.'
+        : row.costSource === 'shopify' ? 'Cost from Shopify. Click to override.'
+        : 'No unit cost known. Click to set one.'}
+      style={{ background: 'none', border: 0, cursor: 'pointer', font: 'inherit', color: 'inherit' }}
+      onClick={() => setEditing(true)}
+    >
+      {row.unitCost !== null ? formatMoney(row.unitCost, currency) : <span className="muted">set</span>}
+      {row.costSource === 'manual' && <span className="muted text-xs"> ·m</span>}
+    </button>
   );
 }
 

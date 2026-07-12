@@ -295,7 +295,7 @@ function Step2({
             label="Workspace name"
             value={form.workspace_name}
             onChange={(e) => setForm({ ...form, workspace_name: e.target.value })}
-            placeholder="e.g. Nova Solution"
+            placeholder="e.g. your agency"
             autoFocus
             required
           />

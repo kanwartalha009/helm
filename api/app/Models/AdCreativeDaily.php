@@ -36,7 +36,7 @@ class AdCreativeDaily extends Model
     protected $table = 'ad_creative_daily';
 
     protected $fillable = [
-        'brand_id', 'platform', 'date', 'ad_id', 'ad_name', 'campaign_id', 'thumbnail_url', 'media_type',
+        'brand_id', 'platform', 'date', 'ad_id', 'ad_name', 'body_text', 'campaign_id', 'thumbnail_url', 'media_type',
         'spend', 'impressions', 'clicks', 'conversions', 'conversion_value',
         'video_3s', 'thruplays', 'add_to_cart',
         'quality_ranking', 'engagement_ranking', 'conversion_ranking',

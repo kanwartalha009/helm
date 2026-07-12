@@ -30,6 +30,8 @@ class BrandResource extends JsonResource
             'grossMarginPct' => $this->gross_margin_pct !== null ? (float) $this->gross_margin_pct : null,
             'targetCpa'      => $this->target_cpa !== null ? (float) $this->target_cpa : null,
             'breakevenRoas'  => $this->resource->breakevenRoas(),
+            // Ads Library Phase 0 — brand niche (null = "Unassigned", never guessed).
+            'niche'          => $this->niche,
             // group_tag stands in for region until we add a real column.
             'region'       => $this->group_tag ?? '—',
             // Shop domain comes from the active Shopify connection. If the

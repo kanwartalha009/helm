@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/shell/AuthLayout';
 import { Button, Input } from '@/components/ui';
@@ -55,7 +56,7 @@ export function LoginPage() {
     <AuthLayout>
       <div className="auth-card">
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <h2>Sign in to Roasdriven</h2>
+          <h2>Sign in to {APP_NAME}</h2>
           <p className="mt-8 text-sm">Use the email tied to your invitation.</p>
         </div>
 

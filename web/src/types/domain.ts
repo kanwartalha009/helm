@@ -43,6 +43,11 @@ export interface User {
   // onboarding wizard shows the workspace step (invited users skip it).
   workspaceConfigured?: boolean;
   lastLoginAt: string | null;
+  // Workspace-level white-label + capability signals (same for every user).
+  // agencyName drives the shell wordmark; llmEnabled hides the AI surfaces when
+  // no LLM key is configured.
+  agencyName?: string | null;
+  llmEnabled?: boolean;
 }
 
 export interface Brand {
@@ -60,6 +65,8 @@ export interface Brand {
   grossMarginPct?: number | null;
   targetCpa?: number | null;
   breakevenRoas?: number | null;
+  // Ads Library Phase 0 — brand niche (null = "Unassigned").
+  niche?: string | null;
   shopDomain?: string;
   // True when the brand has its own Shopify Partner app credentials stored.
   // Drives the OAuth flow UI — when false, the Client ID + Secret fields
@@ -365,7 +372,9 @@ export type PlatformCredentialSchema = {
   meta: PlatformCredentialSchemaItem[];
   google: PlatformCredentialSchemaItem[];
   tiktok: PlatformCredentialSchemaItem[];
+  meta_adlib: PlatformCredentialSchemaItem[]; // Ads Library — per-workspace ads_read token
   llm: PlatformCredentialSchemaItem[]; // D-016 — AI provider keys
+  slack: PlatformCredentialSchemaItem[]; // GO-3.5 — optional weekly-digest webhook
 };
 
 export type CompareBaseline =

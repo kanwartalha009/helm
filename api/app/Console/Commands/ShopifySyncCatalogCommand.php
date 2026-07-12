@@ -68,6 +68,10 @@ class ShopifySyncCatalogCommand extends Command
                     'variant_count'   => (int) $p['variant_count'],
                     'total_inventory' => (int) $p['total_inventory'],
                     'variants'        => json_encode($p['variants'] ?? []),
+                    // GO-1.2: Shopify unitCost (nullable — a product with no cost set,
+                    // or a shop that withholds the permission, stays NULL, never 0).
+                    'unit_cost'          => $p['unit_cost'] ?? null,
+                    'unit_cost_currency' => $p['unit_cost_currency'] ?? null,
                     'captured_at'     => $now,
                     'created_at'      => $now,
                     'updated_at'      => $now,
@@ -78,7 +82,7 @@ class ShopifySyncCatalogCommand extends Command
                 ProductCatalog::upsert(
                     $chunk,
                     ['brand_id', 'handle'],
-                    ['product_id', 'title', 'product_type', 'status', 'tags', 'variant_count', 'total_inventory', 'variants', 'captured_at', 'updated_at'],
+                    ['product_id', 'title', 'product_type', 'status', 'tags', 'variant_count', 'total_inventory', 'variants', 'unit_cost', 'unit_cost_currency', 'captured_at', 'updated_at'],
                 );
             }
 

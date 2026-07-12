@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/shell/AuthLayout';
 import { Banner, Button, Input, Tag } from '@/components/ui';
@@ -66,7 +67,7 @@ export function MfaVerifyPage() {
           <h2>Enter your 6-digit code</h2>
           <p className="mt-8 text-sm">
             Open your authenticator app (Google Authenticator, Authy, 1Password) and enter the
-            current code for Roasdriven.
+            current code for {APP_NAME}.
           </p>
         </div>
 

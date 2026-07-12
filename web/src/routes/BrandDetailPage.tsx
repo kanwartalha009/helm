@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
+import { AnomalyStrip } from '@/components/brands/AnomalyStrip';
 import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
+import { DataQualityCard } from '@/components/brands/DataQualityCard';
+import { KlaviyoKeyCard } from '@/components/brands/KlaviyoKeyCard';
+import { TargetsCard } from '@/components/brands/TargetsCard';
+import { TruthPanel } from '@/components/brands/TruthPanel';
 import {
   Avatar,
   Banner,
@@ -187,7 +193,18 @@ export function BrandDetailPage() {
         }
       />
 
+      {/* GO-2.4 — open anomalies, evidence inline; dismissing requires a reason. */}
+      <AnomalyStrip slug={brand.slug} />
       <DataCoverageCard slug={brand.slug} />
+      {/* GO-1.3 — the score that gates recommendations. Sits under coverage because
+          its "fix" actions point straight at the backfill buttons above. */}
+      <DataQualityCard slug={brand.slug} />
+      {/* GO-2.1 — monthly targets + pacing. Counts only complete days, so a brand is
+          never called "behind" merely because today hasn't finished. */}
+      <TargetsCard slug={brand.slug} canEdit={currentUser?.role === 'master_admin' || currentUser?.role === 'manager'} />
+      {/* GO-1.4 — MER (store truth) as the spine, platform-reported ROAS beside it
+          with each platform's documented bias direction. Never summed. */}
+      <TruthPanel slug={brand.slug} />
 
       <Tabs
         tabs={[
@@ -374,6 +391,7 @@ function OverviewTab({
   onSync: () => void;
   syncing: boolean;
 }) {
+  const { data: currentUser } = useCurrentUser();
   const metricsQ = useBrandMetrics(shopifyConnected ? brand.slug : undefined);
 
   if (!shopifyConnected) {
@@ -382,7 +400,7 @@ function OverviewTab({
         title="Connect Shopify to start syncing"
         description={
           <>
-            <strong>{brand.name}</strong> is created, but Roasdriven needs a Shopify connection to pull orders, refunds, and revenue. Install the Roasdriven Shopify app on this brand’s store and the dashboard will populate the moment the first sync finishes.
+            <strong>{brand.name}</strong> is created, but {APP_NAME} needs a Shopify connection to pull orders, refunds, and revenue. Install the {APP_NAME} Shopify app on this brand’s store and the dashboard will populate the moment the first sync finishes.
           </>
         }
         action={
@@ -502,9 +520,11 @@ function OverviewTab({
           <Link to={`/brands/${brand.slug}/products`} className="dropdown-item">
             Product performance
           </Link>
-          <Link to={`/brands/${brand.slug}/ask`} className="dropdown-item">
-            Ask the data (AI)
-          </Link>
+          {currentUser?.llmEnabled && (
+            <Link to={`/brands/${brand.slug}/ask`} className="dropdown-item">
+              Ask the data (AI)
+            </Link>
+          )}
           <Link to={`/brands/${brand.slug}/audit`} className="dropdown-item">
             Store audit
           </Link>
@@ -586,7 +606,7 @@ function ShopifyCard({
 
   const onDisconnect = () => {
     if (!conn) return;
-    const msg = `Disconnect Shopify from ${brand.name}? Roasdriven will stop syncing this store. You can re-install at any time.`;
+    const msg = `Disconnect Shopify from ${brand.name}? ${APP_NAME} will stop syncing this store. You can re-install at any time.`;
     if (!window.confirm(msg)) return;
     disconnect.mutate({ connectionId: conn.id, brandSlug: brand.slug });
   };
@@ -627,7 +647,7 @@ function ShopifyCard({
         {authErrored ? (
           <>Last error: <span className="mono">{conn?.lastError ?? 'unknown'}</span>. Disconnect and re-add with a fresh token.</>
         ) : syncWarning ? (
-          <>Last sync attempt failed: <span className="mono">{conn?.lastError ?? 'unknown'}</span>. The connection is healthy — Roasdriven will retry automatically on the next sync.</>
+          <>Last sync attempt failed: <span className="mono">{conn?.lastError ?? 'unknown'}</span>. The connection is healthy — {APP_NAME} will retry automatically on the next sync.</>
         ) : connected
           ? `Last sync ${conn?.lastSyncAt ? new Date(conn.lastSyncAt).toLocaleString() : '—'}.`
           : `Create an admin custom app in the store, copy its Admin API access token, and paste it here. Takes 3 minutes per store.`}
@@ -1275,7 +1295,7 @@ function ShopifyOAuthButton({
                 won't need them again.
               </>
             ) : (
-              <>This brand's Partner app credentials are stored. Roasdriven opens Shopify in a new tab; you approve and Shopify redirects back with the access token.</>
+              <>This brand's Partner app credentials are stored. {APP_NAME} opens Shopify in a new tab; you approve and Shopify redirects back with the access token.</>
             )}
           </Banner>
 
@@ -1419,7 +1439,7 @@ function ShopifyInstallDrawer({
         <ol className="text-sm muted mt-12" style={{ paddingLeft: 18, lineHeight: 1.7 }}>
           <li>In the store admin: <span className="mono">Settings → Apps and sales channels → Develop apps</span>.</li>
           <li>Click <strong>"Allow custom app development"</strong> if prompted (one-time).</li>
-          <li>Click <strong>"Create an app"</strong>, name it <span className="mono">Roasdriven Analytics</span>.</li>
+          <li>Click <strong>"Create an app"</strong>, name it <span className="mono">{APP_NAME} Analytics</span>.</li>
           <li>
             Open <strong>Configuration → Admin API integration → Configure</strong>. Tick exactly:{' '}
             <span className="mono">read_orders</span>, <span className="mono">read_products</span>,{' '}
@@ -1575,8 +1595,10 @@ function SettingsTab({ brand }: { brand: Brand }) {
   // Phase 0 — margin/CPA as strings so empty = "not set" (never coerced to 0).
   const marginSeed = brand.grossMarginPct != null ? String(brand.grossMarginPct) : '';
   const cpaSeed = brand.targetCpa != null ? String(brand.targetCpa) : '';
+  const nicheSeed = brand.niche ?? '';
   const [grossMargin, setGrossMargin] = useState(marginSeed);
   const [targetCpa, setTargetCpa] = useState(cpaSeed);
+  const [niche, setNiche] = useState(nicheSeed);
 
   // Re-seed when the underlying brand changes (e.g. after an upstream refetch).
   useEffect(() => {
@@ -1587,7 +1609,8 @@ function SettingsTab({ brand }: { brand: Brand }) {
     setStatus(brand.status);
     setGrossMargin(brand.grossMarginPct != null ? String(brand.grossMarginPct) : '');
     setTargetCpa(brand.targetCpa != null ? String(brand.targetCpa) : '');
-  }, [brand.id, brand.name, brand.timezone, brand.baseCurrency, brand.groupTag, brand.status, brand.grossMarginPct, brand.targetCpa]);
+    setNiche(brand.niche ?? '');
+  }, [brand.id, brand.name, brand.timezone, brand.baseCurrency, brand.groupTag, brand.status, brand.grossMarginPct, brand.targetCpa, brand.niche]);
 
   const updateBrand = useUpdateBrand();
 
@@ -1598,7 +1621,8 @@ function SettingsTab({ brand }: { brand: Brand }) {
     (groupTag || '') !== (brand.groupTag || '') ||
     status !== brand.status ||
     grossMargin !== marginSeed ||
-    targetCpa !== cpaSeed;
+    targetCpa !== cpaSeed ||
+    niche !== nicheSeed;
 
   const onSave = () => {
     const patch: Record<string, unknown> = {};
@@ -1609,6 +1633,7 @@ function SettingsTab({ brand }: { brand: Brand }) {
     if (status !== brand.status) patch.status = status;
     if (grossMargin !== marginSeed) patch.gross_margin_pct = grossMargin === '' ? null : Number(grossMargin);
     if (targetCpa !== cpaSeed) patch.target_cpa = targetCpa === '' ? null : Number(targetCpa);
+    if (niche !== nicheSeed) patch.niche = niche.trim() === '' ? null : niche.trim();
 
     if (Object.keys(patch).length === 0) return;
     updateBrand.mutate({ slug: brand.slug, patch });
@@ -1697,6 +1722,27 @@ function SettingsTab({ brand }: { brand: Brand }) {
           </select>
         </div>
       </div>
+      <div className="field" style={{ marginTop: 8 }}>
+        <label className="field-label">Niche</label>
+        <input
+          className="input"
+          list="brand-niche-suggestions"
+          value={niche}
+          onChange={(e) => setNiche(e.target.value)}
+          placeholder="e.g. footwear"
+          maxLength={48}
+        />
+        <datalist id="brand-niche-suggestions">
+          {['fashion', 'footwear', 'jewelry', 'skincare', 'beauty', 'supplements', 'backpacks', 'home'].map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
+        <span className="field-hint">Groups this brand for the Ads Library — winners and competitor ads are filtered and ranked within a niche. Left empty, the brand shows under “Unassigned”.</span>
+      </div>
+
+      {/* Klaviyo is a PER-BRAND credential (each brand is its own Klaviyo account),
+          so it lives here rather than on the workspace Platform-keys page. */}
+      <KlaviyoKeyCard slug={brand.slug} />
       <div className="field" style={{ marginTop: 8 }}>
         <label className="field-label">Performance rules</label>
         <span className="field-hint">Optional. Set these to switch on margin- and CPA-based flags across products, ad sets and the audit. Left empty, those flags stay off — Helm never guesses your numbers.</span>

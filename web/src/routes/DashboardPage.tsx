@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
+import { APP_NAME } from '@/lib/branding';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { BrandsTableWide } from '@/components/dashboard/BrandsTableWide';
+import { DigestCard } from '@/components/dashboard/DigestCard';
 import { AudienceTable } from '@/components/dashboard/AudienceTable';
 import {
   Banner,
@@ -270,6 +272,9 @@ export function DashboardPage() {
   return (
     <AppLayout title="All brands" tag={tag}>
       <div className="page-scroll">
+      {/* GO-3.5 — the weekly digest, in-app. Slack is optional delivery, not the
+          feature. A quiet week says "quiet week" and stops. */}
+      <DigestCard />
       {/*
         Filter bar — only the filters that actually drive the data live here.
         Period chips, comparison baseline, and the columns picker were removed
@@ -654,7 +659,7 @@ function DashboardEmptyState() {
           maxWidth: 480,
         }}
       >
-        Roasdriven shows blended revenue and ROAS across every store you manage. Connect a brand&rsquo;s
+        {APP_NAME} shows blended revenue and ROAS across every store you manage. Connect a brand&rsquo;s
         Shopify and ad accounts to see real numbers here.
       </p>
 
@@ -692,7 +697,7 @@ function DashboardEmptyState() {
         <StepCard
           n={2}
           title="Create a brand"
-          body="Name, timezone, base currency. Roasdriven uses the brand timezone for every metric date."
+          body={`Name, timezone, base currency. ${APP_NAME} uses the brand timezone for every metric date.`}
           onClick={() => openAddBrand(true)}
           cta="Add brand"
         />

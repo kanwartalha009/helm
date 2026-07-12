@@ -58,12 +58,20 @@ class PlatformCredentialService
         ],
     ];
 
-    public function get(string $platform, string $key): string
+    /**
+     * Resolve a credential. $brandId null = agency-level (the historical behaviour —
+     * reads only brand_id IS NULL rows, then env/default). A non-null $brandId reads
+     * that brand's own row (per-brand secrets like the Klaviyo private key); there is
+     * no env/default fallback for brand-scoped creds.
+     */
+    public function get(string $platform, string $key, ?int $brandId = null): string
     {
         $row = PlatformCredential::query()
             ->where('platform', $platform)
             ->where('key', $key)
             ->where('status', 'active')
+            ->when($brandId !== null, fn ($q) => $q->where('brand_id', $brandId))
+            ->when($brandId === null, fn ($q) => $q->whereNull('brand_id'))
             ->first();
 
         if ($row) {
@@ -74,33 +82,40 @@ class PlatformCredentialService
             return $row->value;
         }
 
-        $envKey = self::ENV_MAP[$platform][$key] ?? null;
-        $envValue = $envKey ? env($envKey) : null;
-
-        if ($envValue) {
-            return $envValue;
-        }
-
-        $default = self::DEFAULTS[$platform][$key] ?? null;
-        if ($default !== null) {
-            return $default;
+        // env / default fallbacks are agency-level only.
+        if ($brandId === null) {
+            $envKey = self::ENV_MAP[$platform][$key] ?? null;
+            $envValue = $envKey ? env($envKey) : null;
+            if ($envValue) {
+                return $envValue;
+            }
+            $default = self::DEFAULTS[$platform][$key] ?? null;
+            if ($default !== null) {
+                return $default;
+            }
         }
 
         throw new RuntimeException(
-            "Missing platform credential: {$platform}.{$key}. "
+            "Missing platform credential: {$platform}.{$key}" . ($brandId !== null ? " (brand {$brandId})" : '') . '. '
             . 'Add it at Settings → Platform keys.'
         );
     }
 
-    public function has(string $platform, string $key): bool
+    public function has(string $platform, string $key, ?int $brandId = null): bool
     {
         if (PlatformCredential::query()
             ->where('platform', $platform)
             ->where('key', $key)
             ->where('status', 'active')
+            ->when($brandId !== null, fn ($q) => $q->where('brand_id', $brandId))
+            ->when($brandId === null, fn ($q) => $q->whereNull('brand_id'))
             ->exists()
         ) {
             return true;
+        }
+
+        if ($brandId !== null) {
+            return false; // no env/default fallback for per-brand secrets
         }
 
         $envKey = self::ENV_MAP[$platform][$key] ?? null;
@@ -113,14 +128,16 @@ class PlatformCredentialService
         return isset(self::DEFAULTS[$platform][$key]);
     }
 
-    public function set(string $platform, string $key, string $value, ?string $label = null, ?array $metadata = null): PlatformCredential
+    public function set(string $platform, string $key, string $value, ?string $label = null, ?array $metadata = null, ?int $brandId = null): PlatformCredential
     {
-        return DB::transaction(function () use ($platform, $key, $value, $label, $metadata) {
-            // Flip any existing active row to 'rotated' first.
+        return DB::transaction(function () use ($platform, $key, $value, $label, $metadata, $brandId) {
+            // Flip any existing active row (same brand scope) to 'rotated' first.
             $existing = PlatformCredential::query()
                 ->where('platform', $platform)
                 ->where('key', $key)
                 ->where('status', 'active')
+                ->when($brandId !== null, fn ($q) => $q->where('brand_id', $brandId))
+                ->when($brandId === null, fn ($q) => $q->whereNull('brand_id'))
                 ->first();
 
             $created = PlatformCredential::create([
@@ -129,6 +146,7 @@ class PlatformCredentialService
                 'value'              => $value,
                 'label'              => $label,
                 'metadata'           => $metadata,
+                'brand_id'           => $brandId,
                 'status'             => 'active',
                 'created_by_user_id' => Auth::id(),
             ]);
@@ -185,11 +203,23 @@ class PlatformCredentialService
             'tiktok' => [
                 ['key' => 'bc_token', 'label' => 'Business Center access token', 'sensitive' => true],
             ],
+            // Meta Ad Library (Ads Library feature). A per-workspace `ads_read`
+            // user token from the agency's OWN Meta identity verification (D-022) —
+            // never a shared identity. Powers the market/competitor library.
+            'meta_adlib' => [
+                ['key' => 'access_token', 'label' => 'Ad Library token', 'sensitive' => true],
+            ],
             // AI / LLM (D-016). Paste the key for the provider selected via
             // HELM_LLM_PROVIDER (default anthropic); the other key is optional.
             'llm' => [
                 ['key' => 'anthropic_api_key', 'label' => 'Anthropic API key', 'sensitive' => true],
                 ['key' => 'openai_api_key',    'label' => 'OpenAI API key',    'sensitive' => true],
+            ],
+            // Slack incoming webhook for the weekly digest (GO-3.5). Created via the
+            // Slack app install flow, which lets the workspace pick the channel. It is a
+            // SECRET (Slack revokes leaked ones) → encrypted at rest, never returned.
+            'slack' => [
+                ['key' => 'webhook_url', 'label' => 'Slack incoming-webhook URL', 'sensitive' => true],
             ],
         ];
     }
@@ -215,6 +245,18 @@ class PlatformCredentialService
             $ping = app(\App\Services\Llm\LlmManager::class)->ping();
 
             return ['ok' => $ping['ok'], 'message' => $ping['message']];
+        }
+
+        // Meta Ad Library: no per-brand adapter — one ads_archive call via the
+        // dedicated client (its own token, not the ad-account System User token).
+        if ($platform === 'meta_adlib') {
+            return app(\App\Platforms\MetaAdLibrary\AdLibraryClient::class)->test();
+        }
+
+        // Slack: post a harmless test message so the operator can confirm it lands in
+        // the right channel BEFORE a real digest goes out.
+        if ($platform === 'slack') {
+            return app(\App\Platforms\Slack\SlackClient::class)->test();
         }
 
         // Check every expected key has a value.

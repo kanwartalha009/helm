@@ -22,6 +22,7 @@ import { BrandDetailPage } from '@/routes/BrandDetailPage';
 import { BrandAdsPage } from '@/routes/BrandAdsPage';
 import { BrandProductsPage } from '@/routes/BrandProductsPage';
 import { BrandAuditPage } from '@/routes/BrandAuditPage';
+import { BrandPlanningPage } from '@/routes/BrandPlanningPage';
 import { BrandAskPage } from '@/routes/BrandAskPage';
 import { ReportsPage } from '@/routes/ReportsPage';
 import { ReportViewPage } from '@/routes/ReportViewPage';
@@ -29,6 +30,8 @@ import { PublicReportPage } from '@/routes/PublicReportPage';
 import { InventoryPage } from '@/routes/InventoryPage';
 import { AdsPage } from '@/routes/AdsPage';
 import { ProductsPage } from '@/routes/ProductsPage';
+import { StoreAuditPage } from '@/routes/StoreAuditPage';
+import { AdsLibraryPage } from '@/routes/AdsLibraryPage';
 
 // /add-brand routes removed — brand creation is now an in-place drawer
 // triggered from the topbar / empty states / search palette.
@@ -111,6 +114,8 @@ export function App() {
           <Route path="/brands/:slug/ads" element={<Guarded><BrandAdsPage /></Guarded>} />
           <Route path="/brands/:slug/products" element={<Guarded><BrandProductsPage /></Guarded>} />
           <Route path="/brands/:slug/audit" element={<Guarded><BrandAuditPage /></Guarded>} />
+          {/* GO-2.2 — budget planner (a plan document; Helm never writes to ad platforms). */}
+          <Route path="/brands/:slug/planning" element={<Guarded><BrandPlanningPage /></Guarded>} />
           {/* Ask-the-data chat (D-016 LLM layer, admin/manager only server-side) */}
           <Route path="/brands/:slug/ask" element={<Guarded><BrandAskPage /></Guarded>} />
 
@@ -122,6 +127,8 @@ export function App() {
               with an in-page brand switcher; /brands/:slug/ads deep-links a brand. */}
           <Route path="/ads" element={<Guarded><AdsPage /></Guarded>} />
           <Route path="/products" element={<Guarded><ProductsPage /></Guarded>} />
+          <Route path="/store-audit" element={<Guarded><StoreAuditPage /></Guarded>} />
+          <Route path="/ads-library" element={<Guarded><AdsLibraryPage /></Guarded>} />
 
           {/* Reporting & Creative Intelligence (Phase 2, slice 2.0) */}
           <Route path="/reports" element={<Guarded><ReportsPage /></Guarded>} />

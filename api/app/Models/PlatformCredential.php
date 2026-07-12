@@ -24,7 +24,7 @@ class PlatformCredential extends Model
 {
     protected $fillable = [
         'platform', 'key', 'value', 'label', 'metadata', 'status',
-        'last_used_at', 'expires_at', 'created_by_user_id',
+        'brand_id', 'last_used_at', 'expires_at', 'created_by_user_id',
     ];
 
     protected $casts = [
