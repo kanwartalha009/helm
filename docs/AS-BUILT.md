@@ -284,6 +284,39 @@ picker (schema + API already support it) and MER/spend-cap surfaces.
 - **RBAC hole closed:** target writes authorized `view`, meaning a team member attached to a brand could edit
   the goal their own performance is graded against. Now `BrandPolicy::update` (master_admin|manager).
 
+## Backfill resume — `backfill_coverage` (2026-07-12, D-028)
+
+A full-history backfill across ~80 brands takes hours. When it dies partway, re-running it used to
+repeat everything. Now it resumes at day granularity.
+
+- **`backfill_coverage`** — (brand, dataset, scope, date) + `rows_written`. Records the ATTEMPT,
+  not the outcome.
+- **`rows_written = 0` is a first-class fact**: "we asked, and there was nothing." Every backfill
+  writes no rows for a day the platform had no data for (a paused ad account, a quiet Sunday), so
+  a presence-based check ("does a row exist?") cannot tell *no data* from *never fetched* — and
+  would re-pull every empty day on every run, forever. Those are precisely the days that cost an
+  API call and return nothing.
+- **`--missing` is NOT resume, and is dangerous on an interrupted run.** It skips a brand that has
+  ANY rows — so a brand cut off three months into an eighteen-month pull gets skipped entirely and
+  those fifteen months are lost for good. Left in place for fresh-brand onboarding; use the resume
+  path for everything else.
+- **`--force`** forgets a window so it is genuinely re-pulled (`forget()` is scoped to the window,
+  so days either side stay done).
+- **Marking happens AFTER the write, never before.** A day marked done but not written is a
+  permanent hole no future run will ever look at — and it is invisible, because a missing row and
+  a genuinely-zero day render identically.
+- **`backfill:seed-coverage`** back-populates the ledger from rows that already exist, so the
+  hours already spent count. Run it ONCE before the first resumed backfill, or the ledger is empty
+  and everything is re-pulled. Span mode marks MIN(date)..MAX(date) per (brand, dataset, scope) —
+  sound because every backfill walks its window in ascending order, so what it wrote is a prefix
+  and any empty day inside it was fetched-and-empty. `--strict` marks only days with actual rows
+  (never over-claims; re-fetches empty days once).
+- **Resume-aware today:** `ads:backfill-spend`, `ads:backfill-campaigns`, `ads:backfill-adsets`,
+  `meta:backfill-creatives`, `tiktok:backfill-creatives`, `shopify:backfill-session-traffic` — the
+  six that dominate the runtime. The rest (`shopify:backfill-sales|commerce|funnel`,
+  `meta|google:backfill-breakdown`, `meta|ads:backfill-ad-products`, `klaviyo:backfill`) still
+  re-pull; `backfill-sales` is one call per brand so it barely matters, the others are owed.
+
 ## Inventory: "Meta spend" → "Ad spend" (2026-07-12, D-027)
 
 Inventory Intelligence is a **Shopify page with an ads column**, not an ads page: stock, units,

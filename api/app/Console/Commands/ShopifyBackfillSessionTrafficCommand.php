@@ -7,6 +7,7 @@ namespace App\Console\Commands;
 use App\Models\Brand;
 use App\Models\SessionTrafficDaily;
 use App\Services\Sync\SessionTrafficSync;
+use App\Support\BackfillCoverage;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -38,14 +39,17 @@ class ShopifyBackfillSessionTrafficCommand extends Command
         . '{brand? : slug or id; omit for all active brands} '
         . '{--since= : first day to pull (Y-m-d); default 90 days ago} '
         . '{--until= : last day to pull (Y-m-d); default yesterday} '
-        . '{--missing : only brands with NO existing rows}';
+        . '{--missing : only brands with NO existing rows} '
+        . '{--force : re-pull days already recorded in backfill_coverage}';
 
     protected $description = 'Backfill sessions by traffic type per product/collection into session_traffic_daily.';
 
     /** Politeness pause between days — ShopifyQL is cost-throttled. */
     private const SLEEP_MICROSECONDS = 200_000;
 
-    public function handle(SessionTrafficSync $sync): int
+    private const DATASET = 'session_traffic';
+
+    public function handle(SessionTrafficSync $sync, BackfillCoverage $coverage): int
     {
         $sinceOpt = (string) ($this->option('since') ?? '');
         $untilOpt = (string) ($this->option('until') ?? '');
@@ -97,8 +101,30 @@ class ShopifyBackfillSessionTrafficCommand extends Command
             $brandDays       = 0;
             $incompleteDays  = 0;
 
-            for ($day = $since; $day->lessThanOrEqualTo($until); $day = $day->addDay()) {
-                $written = $sync->syncDay($conn, $day->toDateString());
+            // RESUME. This command costs ~5 ShopifyQL calls per brand-day, so a full year is
+            // thousands of calls — the single most expensive backfill we run. Re-pulling days
+            // already done is the whole cost with none of the benefit.
+            if ((bool) $this->option('force')) {
+                $coverage->forget($brand->id, self::DATASET, '', $since->toDateString(), $until->toDateString());
+            }
+
+            $pending = $coverage->pendingDays(
+                $brand->id, self::DATASET, '', $since->toDateString(), $until->toDateString(),
+            );
+
+            $windowDays = (int) $since->diffInDays($until) + 1;
+            $skipped    = $windowDays - count($pending);
+
+            if ($pending === []) {
+                $this->line("· {$brand->name}: all {$windowDays} day(s) already backfilled — skipped (--force to re-pull).");
+                continue;
+            }
+            if ($skipped > 0) {
+                $this->line("· {$brand->name}: resuming — {$skipped} of {$windowDays} day(s) already done.");
+            }
+
+            foreach ($pending as $dayStr) {
+                $written = $sync->syncDay($conn, $dayStr);
 
                 $brandRows += $written;
                 $brandDays++;
@@ -106,6 +132,11 @@ class ShopifyBackfillSessionTrafficCommand extends Command
                 if ($written === 0) {
                     $incompleteDays++;
                 }
+
+                // Mark AFTER the write. A day marked done but not written is a hole no future run
+                // will ever fill. `$written = 0` is still DONE — the store genuinely had no
+                // sessions to report, and asking again tomorrow will not change that.
+                $coverage->mark($brand->id, self::DATASET, '', $dayStr, $dayStr, $written);
 
                 usleep(self::SLEEP_MICROSECONDS);
             }

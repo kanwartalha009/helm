@@ -10,6 +10,7 @@ use App\Platforms\Google\ReportsFetcher;
 use App\Platforms\Meta\InsightsFetcher;
 use App\Platforms\TikTok\ReportsFetcher as TikTokReportsFetcher;
 use App\Services\Currency\FxService;
+use App\Support\BackfillCoverage;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Throwable;
@@ -36,11 +37,14 @@ class AdsBackfillCampaignsCommand extends Command
         . '{brand? : slug or id; omit for all active brands} '
         . '{--since=2025-01-01 : first day to pull (Y-m-d)} '
         . '{--platform= : meta|google|tiktok; omit for all} '
-        . '{--chunk-days=7 : days per API request; lower it (e.g. 3 or 1) if Meta returns "reduce the amount of data"}';
+        . '{--chunk-days=7 : days per API request; lower it (e.g. 3 or 1) if Meta returns "reduce the amount of data"} '
+        . '{--force : re-pull windows already recorded in backfill_coverage}';
+
+    private const DATASET = 'campaigns';
 
     protected $description = 'Backfill campaign-level Meta + Google + TikTok performance into ad_campaign_daily_metrics for the ads audit.';
 
-    public function handle(InsightsFetcher $meta, ReportsFetcher $google, TikTokReportsFetcher $tiktok, FxService $fx): int
+    public function handle(InsightsFetcher $meta, ReportsFetcher $google, TikTokReportsFetcher $tiktok, FxService $fx, BackfillCoverage $coverage): int
     {
         $since = (string) $this->option('since');
         if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) {
@@ -92,12 +96,25 @@ class AdsBackfillCampaignsCommand extends Command
 
                 $rows   = 0;
                 $failed = false;
-                $cursor = $from;
-                while ($cursor->lessThanOrEqualTo($until)) {
-                    $chunkEnd = $cursor->addDays($chunkDays - 1);
-                    if ($chunkEnd->greaterThan($until)) {
-                        $chunkEnd = $until;
-                    }
+
+                // RESUME: only the windows this brand+platform is still missing. At --chunk-days=7
+                // an 18-month backfill is ~78 API calls per brand per platform; re-running one that
+                // died at 90% used to repeat all of them.
+                if ((bool) $this->option('force')) {
+                    $coverage->forget($brand->id, self::DATASET, $platform, $from->toDateString(), $until->toDateString());
+                }
+                $chunks = $coverage->pendingChunks(
+                    $brand->id, self::DATASET, $platform,
+                    $from->toDateString(), $until->toDateString(), $chunkDays,
+                );
+                if ($chunks === []) {
+                    $this->line("· {$brand->name} [{$platform}]: already backfilled — skipped (--force to re-pull).");
+                    continue;
+                }
+
+                foreach ($chunks as [$chunkFrom, $chunkTo]) {
+                    $cursor   = CarbonImmutable::parse($chunkFrom, $tz);
+                    $chunkEnd = CarbonImmutable::parse($chunkTo, $tz);
 
                     try {
                         $fetched = match ($platform) {
@@ -108,9 +125,10 @@ class AdsBackfillCampaignsCommand extends Command
                     } catch (Throwable $e) {
                         $this->error("· {$brand->name} [{$platform}] {$cursor->toDateString()}: {$e->getMessage()}");
                         $failed = true;
-                        break;
+                        break;   // everything marked so far stays marked — that work is real
                     }
 
+                    $written = 0;
                     if ($fetched !== []) {
                         $records = $this->records($brand, $platform, $fetched, $currency, $fxCache, $fx);
                         foreach (array_chunk($records, 500) as $chunk) {
@@ -120,10 +138,14 @@ class AdsBackfillCampaignsCommand extends Command
                                 ['campaign_name', 'status', 'channel_type', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'all_conversions', 'view_through_conversions', 'search_impression_share', 'search_budget_lost_is', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                             );
                         }
-                        $rows += count($records);
+                        $written = count($records);
+                        $rows   += $written;
                     }
 
-                    $cursor = $chunkEnd->addDay();
+                    // Marked only once the rows are down. A window that returned nothing is still
+                    // done (0) — the account simply ran no campaigns then.
+                    $coverage->mark($brand->id, self::DATASET, $platform, $chunkFrom, $chunkTo, $written);
+
                     usleep(150_000);
                 }
 

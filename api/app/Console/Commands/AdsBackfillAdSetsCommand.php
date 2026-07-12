@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Models\Brand;
 use App\Services\Sync\AdSetSync;
+use App\Support\BackfillCoverage;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -36,11 +37,14 @@ class AdsBackfillAdSetsCommand extends Command
         . '{brand? : slug or id; omit for all active brands} '
         . '{--since=2025-01-01 : first day to pull (Y-m-d)} '
         . '{--platform= : meta|google|tiktok; omit for all} '
-        . '{--chunk-days=7 : days per API request; lower it (e.g. 3 or 1) if Meta returns "reduce the amount of data"}';
+        . '{--chunk-days=7 : days per API request; lower it (e.g. 3 or 1) if Meta returns "reduce the amount of data"} '
+        . '{--force : re-pull windows already recorded in backfill_coverage}';
+
+    private const DATASET = 'adsets';
 
     protected $description = 'Backfill ad-set-level Meta + Google + TikTok performance into ad_set_daily_metrics for the under-performer drill-down.';
 
-    public function handle(AdSetSync $adSetSync): int
+    public function handle(AdSetSync $adSetSync, BackfillCoverage $coverage): int
     {
         $since = (string) $this->option('since');
         if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) {
@@ -86,15 +90,27 @@ class AdsBackfillAdSetsCommand extends Command
 
                 $rows   = 0;
                 $failed = false;
-                $cursor = $from;
-                while ($cursor->lessThanOrEqualTo($until)) {
-                    $chunkEnd = $cursor->addDays($chunkDays - 1);
-                    if ($chunkEnd->greaterThan($until)) {
-                        $chunkEnd = $until;
-                    }
+
+                // RESUME: skip the windows already pulled for this brand+platform.
+                if ((bool) $this->option('force')) {
+                    $coverage->forget($brand->id, self::DATASET, $platform, $from->toDateString(), $until->toDateString());
+                }
+                $chunks = $coverage->pendingChunks(
+                    $brand->id, self::DATASET, $platform,
+                    $from->toDateString(), $until->toDateString(), $chunkDays,
+                );
+                if ($chunks === []) {
+                    $this->line("· {$brand->name} [{$platform}]: already backfilled — skipped (--force to re-pull).");
+                    continue;
+                }
+
+                foreach ($chunks as [$chunkFrom, $chunkTo]) {
+                    $cursor   = CarbonImmutable::parse($chunkFrom, $tz);
+                    $chunkEnd = CarbonImmutable::parse($chunkTo, $tz);
 
                     try {
-                        $rows += $adSetSync->syncRange($conn, $cursor, $chunkEnd);
+                        $written = $adSetSync->syncRange($conn, $cursor, $chunkEnd);
+                        $rows   += $written;
                     } catch (Throwable $e) {
                         // AdSetSync self-guards and returns 0 on a platform error,
                         // so reaching here is an unexpected fault — stop this
@@ -104,7 +120,10 @@ class AdsBackfillAdSetsCommand extends Command
                         break;
                     }
 
-                    $cursor = $chunkEnd->addDay();
+                    // syncRange has written by the time it returns, so the window is done.
+                    // 0 written is still done — no ad sets ran in it.
+                    $coverage->mark($brand->id, self::DATASET, $platform, $chunkFrom, $chunkTo, $written);
+
                     usleep(150_000);
                 }
 

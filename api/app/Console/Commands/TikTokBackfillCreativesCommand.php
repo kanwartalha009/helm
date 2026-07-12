@@ -8,6 +8,7 @@ use App\Models\AdCreativeDaily;
 use App\Models\Brand;
 use App\Platforms\TikTok\CreativeFetcher;
 use App\Services\Currency\FxService;
+use App\Support\BackfillCoverage;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -27,11 +28,14 @@ class TikTokBackfillCreativesCommand extends Command
     protected $signature = 'tiktok:backfill-creatives '
         . '{brand? : slug or id; omit for all active TikTok brands} '
         . '{--since=2026-06-01 : first day to pull (Y-m-d)} '
-        . '{--chunk-days=7 : days per fetch window}';
+        . '{--chunk-days=7 : days per fetch window} '
+        . '{--force : re-pull windows already recorded in backfill_coverage}';
+
+    private const DATASET = 'creatives';
 
     protected $description = 'Backfill ad-level (creative) TikTok performance + thumbnails into ad_creative_daily for the ads hub Creatives tab.';
 
-    public function handle(CreativeFetcher $tiktok, FxService $fx): int
+    public function handle(CreativeFetcher $tiktok, FxService $fx, BackfillCoverage $coverage): int
     {
         $since = (string) $this->option('since');
         if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) {
@@ -68,12 +72,23 @@ class TikTokBackfillCreativesCommand extends Command
             $fxCache  = [];
             $rows     = 0;
             $failed   = false;
-            $cursor   = $from;
-            while ($cursor->lessThanOrEqualTo($until)) {
-                $chunkEnd = $cursor->addDays($chunkDays - 1);
-                if ($chunkEnd->greaterThan($until)) {
-                    $chunkEnd = $until;
-                }
+
+            // RESUME: skip the windows already pulled for this brand.
+            if ((bool) $this->option('force')) {
+                $coverage->forget($brand->id, self::DATASET, 'tiktok', $from->toDateString(), $until->toDateString());
+            }
+            $chunks = $coverage->pendingChunks(
+                $brand->id, self::DATASET, 'tiktok',
+                $from->toDateString(), $until->toDateString(), $chunkDays,
+            );
+            if ($chunks === []) {
+                $this->line("· {$brand->name}: already backfilled — skipped (--force to re-pull).");
+                continue;
+            }
+
+            foreach ($chunks as [$chunkFrom, $chunkTo]) {
+                $cursor   = CarbonImmutable::parse($chunkFrom, $tz);
+                $chunkEnd = CarbonImmutable::parse($chunkTo, $tz);
 
                 try {
                     $fetched = $tiktok->fetchCreativeRange($conn, $cursor, $chunkEnd);
@@ -83,6 +98,7 @@ class TikTokBackfillCreativesCommand extends Command
                     break;
                 }
 
+                $written = 0;
                 if ($fetched !== []) {
                     $records = $this->records($brand, $fetched, $currency, $fxCache, $fx);
                     foreach (array_chunk($records, 500) as $chunk) {
@@ -92,10 +108,12 @@ class TikTokBackfillCreativesCommand extends Command
                             ['ad_name', 'body_text', 'campaign_id', 'thumbnail_url', 'media_type', 'spend', 'impressions', 'clicks', 'video_3s', 'thruplays', 'add_to_cart', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                         );
                     }
-                    $rows += count($records);
+                    $written = count($records);
+                    $rows   += $written;
                 }
 
-                $cursor = $chunkEnd->addDay();
+                $coverage->mark($brand->id, self::DATASET, 'tiktok', $chunkFrom, $chunkTo, $written);
+
                 usleep(150_000);
             }
 

@@ -10,6 +10,7 @@ use App\Platforms\Contracts\MetricSnapshot;
 use App\Platforms\Google\ReportsFetcher;
 use App\Platforms\Meta\InsightsFetcher;
 use App\Services\Currency\FxService;
+use App\Support\BackfillCoverage;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Throwable;
@@ -33,11 +34,13 @@ use Throwable;
  */
 class AdsBackfillSpendCommand extends Command
 {
-    protected $signature = 'ads:backfill-spend {brand? : slug or id; omit for all active brands} {--since=2025-01-01 : first day to pull (Y-m-d)} {--platform= : meta|google; omit for both}';
+    protected $signature = 'ads:backfill-spend {brand? : slug or id; omit for all active brands} {--since=2025-01-01 : first day to pull (Y-m-d)} {--platform= : meta|google; omit for both} {--force : re-pull windows already recorded in backfill_coverage}';
+
+    private const DATASET = 'ad_spend';
 
     protected $description = 'Backfill historical daily Meta + Google spend for the year-over-year spend/ROAS comparison (ad-only upsert, never touches Shopify rows).';
 
-    public function handle(InsightsFetcher $meta, ReportsFetcher $google, FxService $fx): int
+    public function handle(InsightsFetcher $meta, ReportsFetcher $google, FxService $fx, BackfillCoverage $coverage): int
     {
         $since = (string) $this->option('since');
         if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) {
@@ -89,15 +92,28 @@ class AdsBackfillSpendCommand extends Command
                 // is how a brand that has advertised for years still shows last
                 // year as "new". Each small window returns complete; we stitch
                 // them together. Google is chunked the same way for parity.
+                // RESUME: skip the months this brand+platform already has. `--force` re-pulls.
+                if ((bool) $this->option('force')) {
+                    $coverage->forget($brand->id, self::DATASET, $platform, $from->toDateString(), $until->toDateString());
+                }
+                $chunks = $coverage->pendingChunks(
+                    $brand->id, self::DATASET, $platform,
+                    $from->toDateString(), $until->toDateString(), 31,
+                );
+                if ($chunks === []) {
+                    $this->line("· {$brand->name} [{$platform}]: already backfilled — skipped (--force to re-pull).");
+                    continue;
+                }
+
                 /** @var array<string, MetricSnapshot> $snapshots */
                 $snapshots = [];
                 $failed    = false;
-                $cursor    = $from;
-                while ($cursor->lessThanOrEqualTo($until)) {
-                    $chunkEnd = $cursor->addMonth()->subDay();
-                    if ($chunkEnd->greaterThan($until)) {
-                        $chunkEnd = $until;
-                    }
+                /** @var array<int, array{0: string, 1: string}> $doneChunks */
+                $doneChunks = [];
+
+                foreach ($chunks as [$chunkFrom, $chunkTo]) {
+                    $cursor   = CarbonImmutable::parse($chunkFrom);
+                    $chunkEnd = CarbonImmutable::parse($chunkTo);
 
                     try {
                         $chunk = $platform === 'meta'
@@ -106,16 +122,18 @@ class AdsBackfillSpendCommand extends Command
                     } catch (Throwable $e) {
                         $this->error("· {$brand->name} [{$platform}] {$cursor->toDateString()}..{$chunkEnd->toDateString()}: {$e->getMessage()}");
                         $failed = true;
-                        break;
+                        break;   // stop this platform; the chunks already fetched still get marked
                     }
 
                     foreach ($chunk as $day => $snap) {
                         $snapshots[$day] = $snap;
                     }
-                    $cursor = $chunkEnd->addDay();
+                    // Remember which windows genuinely came back, so we can mark them AFTER the
+                    // write below. Marking here would claim days whose rows never landed.
+                    $doneChunks[] = [$chunkFrom, $chunkTo];
                 }
-                if ($failed) {
-                    continue; // a window errored — fix the cause, then re-run (idempotent)
+                if ($failed && $doneChunks === []) {
+                    continue; // nothing usable — fix the cause, then re-run (idempotent)
                 }
 
                 if ($snapshots === []) {
@@ -123,6 +141,12 @@ class AdsBackfillSpendCommand extends Command
                     // (e.g. a fresh ad account created at onboarding, so last
                     // year's spend lives in the brand's old, unconnected account).
                     $this->warn("· {$brand->name} [{$platform}]: 0 day-rows — account has no spend on record for {$since}..{$until->toDateString()}.");
+
+                    // Still DONE. The platform was asked and had nothing — that is an answer, not
+                    // a gap. Without this, every empty window is re-pulled on every future run.
+                    foreach ($doneChunks as [$cf, $ct]) {
+                        $coverage->mark($brand->id, self::DATASET, $platform, $cf, $ct, 0);
+                    }
                     continue;
                 }
 
@@ -149,6 +173,13 @@ class AdsBackfillSpendCommand extends Command
                         ['brand_id', 'platform', 'date'],
                         ['spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'reach', 'link_clicks', 'landing_page_views', 'currency', 'fx_rate_to_usd', 'metadata', 'is_complete', 'pulled_at'],
                     );
+                }
+
+                // The rows are DOWN. Only now is it true that these windows are done. Marking any
+                // earlier would let a crash between fetch and write leave a permanent hole that no
+                // future run would ever look at again.
+                foreach ($doneChunks as [$cf, $ct]) {
+                    $coverage->mark($brand->id, self::DATASET, $platform, $cf, $ct, count($rows));
                 }
 
                 // Report the ACTUAL covered span, not the requested one — a

@@ -8,6 +8,7 @@ use App\Models\AdCreativeDaily;
 use App\Models\Brand;
 use App\Platforms\Meta\MetaCreativeFetcher;
 use App\Services\Currency\FxService;
+use App\Support\BackfillCoverage;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Throwable;
@@ -34,11 +35,14 @@ class MetaBackfillCreativesCommand extends Command
         . '{brand? : slug or id; omit for all active brands} '
         . '{--since=2026-05-01 : first day to pull (Y-m-d)} '
         . '{--chunk-days=7 : days per fetch window; lower it if Meta rate-limits} '
-        . '{--missing : only brands that have NO ad_creative_daily rows yet}';
+        . '{--missing : only brands that have NO ad_creative_daily rows yet} '
+        . '{--force : re-pull windows already recorded in backfill_coverage}';
+
+    private const DATASET = 'creatives';
 
     protected $description = 'Backfill ad-level (creative) Meta performance + thumbnails into ad_creative_daily for the Ads hub Creatives view.';
 
-    public function handle(MetaCreativeFetcher $meta, FxService $fx): int
+    public function handle(MetaCreativeFetcher $meta, FxService $fx, BackfillCoverage $coverage): int
     {
         $since = (string) $this->option('since');
         if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) {
@@ -84,12 +88,25 @@ class MetaBackfillCreativesCommand extends Command
 
             $rows   = 0;
             $failed = false;
-            $cursor = $from;
-            while ($cursor->lessThanOrEqualTo($until)) {
-                $chunkEnd = $cursor->addDays($chunkDays - 1);
-                if ($chunkEnd->greaterThan($until)) {
-                    $chunkEnd = $until;
-                }
+
+            // RESUME. Creative-level insights are the heaviest pull we make (ad grain + a
+            // creative-asset lookup per ad), chunked 7 days at a time — an 18-month backfill is
+            // ~78 windows per brand. Re-running one that died near the end used to redo all of it.
+            if ((bool) $this->option('force')) {
+                $coverage->forget($brand->id, self::DATASET, 'meta', $from->toDateString(), $until->toDateString());
+            }
+            $chunks = $coverage->pendingChunks(
+                $brand->id, self::DATASET, 'meta',
+                $from->toDateString(), $until->toDateString(), $chunkDays,
+            );
+            if ($chunks === []) {
+                $this->line("· {$brand->name}: already backfilled — skipped (--force to re-pull).");
+                continue;
+            }
+
+            foreach ($chunks as [$chunkFrom, $chunkTo]) {
+                $cursor   = CarbonImmutable::parse($chunkFrom, $tz);
+                $chunkEnd = CarbonImmutable::parse($chunkTo, $tz);
 
                 try {
                     $fetched = $meta->fetchCreativeRange($conn, $cursor, $chunkEnd);
@@ -99,6 +116,7 @@ class MetaBackfillCreativesCommand extends Command
                     break;
                 }
 
+                $written = 0;
                 if ($fetched !== []) {
                     $records = $this->records($brand, $fetched, $currency, $fxCache, $fx);
                     foreach (array_chunk($records, 500) as $chunk) {
@@ -108,10 +126,15 @@ class MetaBackfillCreativesCommand extends Command
                             ['ad_name', 'body_text', 'campaign_id', 'thumbnail_url', 'media_type', 'spend', 'impressions', 'clicks', 'video_3s', 'thruplays', 'add_to_cart', 'quality_ranking', 'engagement_ranking', 'conversion_ranking', 'conversions', 'conversion_value', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
                         );
                     }
-                    $rows += count($records);
+                    $written = count($records);
+                    $rows   += $written;
                 }
 
-                $cursor = $chunkEnd->addDay();
+                // ⚠️ NOTE: thumbnail_url is a short-lived Meta CDN link, so a window marked done
+                // here has FRESH thumbnails only as of now. If previews go blank later, the fix is
+                // `--force` over the affected window (or wiring creatives into the daily sync).
+                $coverage->mark($brand->id, self::DATASET, 'meta', $chunkFrom, $chunkTo, $written);
+
                 usleep(150_000);
             }
 
