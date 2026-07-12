@@ -158,6 +158,70 @@ final class BackfillCoverageTest extends TestCase
         $this->assertSame(9, (int) DB::table('backfill_coverage')->value('rows_written'));
     }
 
+    public function test_seed_coverage_does_not_bridge_the_hole_left_by_a_dead_backfill(): void
+    {
+        // THE regression. seed-coverage originally marked MIN(date)..MAX(date) as done, reasoning
+        // that a backfill walks ascending so its rows form a contiguous prefix. That ignored the
+        // DAILY SYNC, which writes to the same tables. A brand whose history backfill died in June
+        // 2025 therefore has TWO islands —
+        //
+        //   [ backfilled 2025-01-01..2025-06-30 ]  … 335-day HOLE …  [ daily sync 2026-06-01.. ]
+        //
+        // — and MIN..MAX bridged straight over the hole, marking eleven never-pulled months as
+        // done. Permanently, and invisibly: a missing row and a genuinely-zero day look identical.
+        $brand = $this->brand();
+
+        $insert = function (string $from, string $to) use ($brand): void {
+            $d = \Carbon\CarbonImmutable::parse($from);
+            while ($d->lessThanOrEqualTo(\Carbon\CarbonImmutable::parse($to))) {
+                DB::table('daily_metrics')->insert([
+                    'brand_id' => $brand->id, 'platform' => 'shopify', 'date' => $d->toDateString(),
+                    'total_sales' => 10, 'currency' => 'EUR', 'fx_rate_to_usd' => 1.1,
+                    'is_complete' => true, 'pulled_at' => now(),
+                ]);
+                $d = $d->addDay();
+            }
+        };
+
+        $insert('2025-01-01', '2025-01-20');   // what the dead backfill managed
+        $insert('2026-06-01', '2026-06-10');   // what the daily sync has been depositing since
+
+        $this->artisan('backfill:seed-coverage', ['--dataset' => 'sales'])->assertSuccessful();
+
+        $c = $this->coverage();
+
+        // Both islands are claimed…
+        $this->assertSame([], $c->pendingDays($brand->id, 'sales', '', '2025-01-01', '2025-01-20'));
+        $this->assertSame([], $c->pendingDays($brand->id, 'sales', '', '2026-06-01', '2026-06-10'));
+
+        // …and the hole between them is NOT. The next backfill run fills exactly this window.
+        $hole = $c->pendingDays($brand->id, 'sales', '', '2025-01-21', '2026-05-31');
+        $this->assertNotEmpty($hole, 'the hole must stay pending — claiming it loses the data forever');
+        $this->assertSame('2025-01-21', $hole[0]);
+        $this->assertSame('2026-05-31', $hole[count($hole) - 1]);
+    }
+
+    public function test_seed_coverage_still_bridges_a_short_quiet_gap(): void
+    {
+        // The other half of the trade: a few empty days inside a stretch we clearly pulled are
+        // real (a quiet Sunday, a brief ad pause). Refusing to bridge them would re-fetch every
+        // one of them on every run, forever — which is the waste this whole ledger exists to stop.
+        $brand = $this->brand();
+
+        foreach (['2025-03-01', '2025-03-02', '2025-03-06', '2025-03-07'] as $d) {
+            DB::table('daily_metrics')->insert([
+                'brand_id' => $brand->id, 'platform' => 'shopify', 'date' => $d,
+                'total_sales' => 10, 'currency' => 'EUR', 'fx_rate_to_usd' => 1.1,
+                'is_complete' => true, 'pulled_at' => now(),
+            ]);
+        }
+
+        // 3 missing days (03-03..03-05) ≤ the default --max-gap of 7 → one island.
+        $this->artisan('backfill:seed-coverage', ['--dataset' => 'sales'])->assertSuccessful();
+
+        $this->assertSame([], $this->coverage()->pendingDays($brand->id, 'sales', '', '2025-03-01', '2025-03-07'));
+    }
+
     public function test_the_empty_scope_is_a_real_scope_and_stays_unique(): void
     {
         // `scope` is NOT NULL default '' precisely because MySQL treats NULLs as DISTINCT in a

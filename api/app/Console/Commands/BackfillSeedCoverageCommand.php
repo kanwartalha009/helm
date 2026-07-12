@@ -16,29 +16,39 @@ use Illuminate\Support\Facades\DB;
  * Run this ONCE, before the first resumed backfill. Without it the coverage ledger is empty, the
  * resume logic concludes nothing has been done, and the hours already spent are repeated in full.
  *
- * ══ HOW A COMPLETED DAY IS INFERRED ══
- * Every backfill walks its window in ASCENDING date order and writes as it goes, so for a given
- * (brand, dataset, scope) the rows it managed to write form a PREFIX: everything from the first
- * day it wrote up to the last. Days inside that range with no rows were fetched and legitimately
- * returned nothing (a paused ad account, a quiet Sunday) — they are DONE, not missing. So the
- * whole span MIN(date)..MAX(date) is marked covered.
+ * ══ HOW A COMPLETED DAY IS INFERRED — AND WHY NOT MIN..MAX ══
+ * The obvious approach, marking the whole span MIN(date)..MAX(date), is WRONG here and was fixed
+ * on 2026-07-12 after it shipped. It assumes the rows on file are one contiguous block written by
+ * the backfill. They are not: the DAILY SYNC writes to most of these same tables
+ * (daily_metrics, commerce_daily_metrics, shopify_funnel_daily, ad_set_daily_metrics,
+ * ad_product_daily, session_traffic_daily). So a brand whose history backfill died partway has
+ * TWO islands of rows —
  *
- * The honest caveat: if a single day inside that span failed with a logged error and the command
- * carried on (they all do — a hiccup must never kill an 18-month run), this marks it done and no
- * future run will retry it. That is the price of not re-pulling every genuinely-empty day forever.
- * `--strict` takes the other trade: it marks ONLY days that actually have rows, so nothing is ever
- * wrongly claimed — at the cost of re-fetching every empty day once more.
+ *     [ backfilled prefix 2025-01-01 .. 2025-06-30 ]  … HOLE …  [ daily sync 2026-06-01 .. now ]
  *
- *   php artisan backfill:seed-coverage --dry-run    # show what WOULD be marked, write nothing
- *   php artisan backfill:seed-coverage              # span mode (recommended)
- *   php artisan backfill:seed-coverage --strict     # only days with actual rows
+ * — and MIN..MAX bridges straight over the hole, marking eleven months that were never pulled as
+ * DONE. Permanently, and invisibly, because a missing row and a genuinely-zero day look identical.
+ *
+ * So we mark ISLANDS instead: contiguous runs of days that have rows, merged across gaps of at
+ * most `--max-gap` days. A short gap inside a pulled stretch is a real empty day (a quiet Sunday,
+ * a brief pause) and is bridged. A long gap is treated as NOT PULLED and left pending.
+ *
+ * The trade is deliberately asymmetric: bridging a gap we shouldn't loses data forever; refusing
+ * to bridge one we could costs a single re-fetch. So the default is conservative.
+ *
+ *   php artisan backfill:seed-coverage --dry-run          # show what WOULD be marked
+ *   php artisan backfill:seed-coverage --reset            # wipe a bad ledger and re-seed
+ *   php artisan backfill:seed-coverage --max-gap=14       # bridge longer quiet stretches
+ *   php artisan backfill:seed-coverage --strict           # only days with rows; never bridges
  */
 class BackfillSeedCoverageCommand extends Command
 {
     protected $signature = 'backfill:seed-coverage '
         . '{brand? : slug or id; omit for all brands} '
         . '{--dataset= : limit to one dataset key} '
-        . '{--strict : mark ONLY days that have rows (re-fetches empty days once; never over-claims)} '
+        . '{--max-gap=7 : bridge gaps of at most N missing days inside a pulled stretch; longer gaps stay PENDING} '
+        . '{--strict : mark ONLY days that have rows (never bridges; re-fetches every empty day once)} '
+        . '{--reset : delete the existing coverage ledger first — use after a bad seed} '
         . '{--dry-run : print what would be marked, write nothing}';
 
     protected $description = 'Record already-backfilled days in backfill_coverage so resumed backfills skip them.';
@@ -78,6 +88,8 @@ class BackfillSeedCoverageCommand extends Command
 
         $strict = (bool) $this->option('strict');
         $dry    = (bool) $this->option('dry-run');
+        $reset  = (bool) $this->option('reset');
+        $maxGap = max(0, (int) $this->option('max-gap'));
 
         $brands = $this->resolveBrands();
         if ($brands->isEmpty()) {
@@ -86,11 +98,23 @@ class BackfillSeedCoverageCommand extends Command
             return self::SUCCESS;
         }
 
+        if ($reset && ! $dry) {
+            $deleted = DB::table('backfill_coverage')->delete();
+            $this->warn("Reset: deleted {$deleted} existing coverage row(s).");
+        }
+
         $datasets = $only !== '' ? [$only => self::DATASETS[$only]] : self::DATASETS;
-        $this->line($dry ? 'DRY RUN — nothing will be written.' : ($strict ? 'Strict mode: only days with rows.' : 'Span mode: MIN..MAX per brand/dataset/scope.'));
+
+        $this->line($dry ? 'DRY RUN — nothing will be written.' : '');
+        $this->line($strict
+            ? 'Strict mode: only days that have rows. Nothing is bridged.'
+            : "Island mode: contiguous runs of pulled days, bridging gaps of at most {$maxGap} day(s).");
+        $this->line('A LONGER gap is treated as never-pulled and left PENDING — that is the point.');
         $this->newLine();
 
         $totalDays = 0;
+        /** @var array<int, string> $holes */
+        $holes = [];
 
         foreach ($datasets as $key => $meta) {
             $table       = (string) $meta['table'];
@@ -123,36 +147,47 @@ class BackfillSeedCoverageCommand extends Command
                         $q->where($scopeColumn, $scope);
                     }
 
-                    if ($strict) {
-                        $days = (clone $q)->distinct()->pluck('date')
-                            ->map(static fn ($d): string => CarbonImmutable::parse((string) $d)->toDateString())
-                            ->all();
-                        foreach ($days as $d) {
-                            if (! $dry) {
-                                $coverage->mark($brand->id, $key, $scope, $d, $d, 1);
-                            }
+                    // The days this brand actually HAS rows for.
+                    $days = (clone $q)->distinct()->orderBy('date')->pluck('date')
+                        ->map(static fn ($d): string => CarbonImmutable::parse((string) $d)->toDateString())
+                        ->unique()
+                        ->values()
+                        ->all();
+
+                    if ($days === []) {
+                        continue;   // no rows at all → claim nothing
+                    }
+
+                    // Islands of contiguous coverage. `--strict` bridges nothing (maxGap 0), so
+                    // only days with rows are claimed and every empty day is re-fetched once.
+                    $islands = $this->islands($days, $strict ? 0 : $maxGap);
+
+                    foreach ($islands as [$lo, $hi]) {
+                        $n = (int) CarbonImmutable::parse($lo)->diffInDays(CarbonImmutable::parse($hi)) + 1;
+
+                        if (! $dry) {
+                            $coverage->mark($brand->id, $key, $scope, $lo, $hi, 1);
                         }
-                        $datasetDays += count($days);
-                        continue;
+                        $datasetDays += $n;
                     }
 
-                    $span = (clone $q)->selectRaw('MIN(date) AS lo, MAX(date) AS hi')->first();
-                    if (! $span || ! $span->lo || ! $span->hi) {
-                        continue;   // no rows at all → nothing to claim
+                    // More than one island means a genuine HOLE was found and left pending —
+                    // exactly the months a naive MIN..MAX would have claimed and lost.
+                    if (count($islands) > 1) {
+                        $holes[] = sprintf(
+                            '%s [%s]: %d islands, %s',
+                            $brand->name,
+                            $scope === '' ? $key : "{$key}/{$scope}",
+                            count($islands),
+                            implode(' + ', array_map(static fn (array $i): string => "{$i[0]}..{$i[1]}", $islands)),
+                        );
                     }
-
-                    $lo = CarbonImmutable::parse((string) $span->lo)->toDateString();
-                    $hi = CarbonImmutable::parse((string) $span->hi)->toDateString();
-                    $n  = (int) CarbonImmutable::parse($lo)->diffInDays(CarbonImmutable::parse($hi)) + 1;
-
-                    if (! $dry) {
-                        $coverage->mark($brand->id, $key, $scope, $lo, $hi, 1);
-                    }
-                    $datasetDays += $n;
 
                     if ($this->output->isVerbose()) {
                         $label = $scope === '' ? $key : "{$key}/{$scope}";
-                        $this->line("  · {$brand->name} [{$label}]: {$lo}..{$hi} ({$n} days)");
+                        foreach ($islands as [$lo, $hi]) {
+                            $this->line("  · {$brand->name} [{$label}]: {$lo}..{$hi}");
+                        }
                     }
                 }
             }
@@ -168,11 +203,61 @@ class BackfillSeedCoverageCommand extends Command
 
         $this->newLine();
         $this->info(($dry ? 'Would mark ' : 'Marked ') . number_format($totalDays) . ' brand-days across ' . $brands->count() . ' brand(s).');
+
+        if ($holes !== []) {
+            $this->newLine();
+            $this->warn(count($holes) . ' brand/dataset(s) have a REAL GAP in their history — left pending, so the next');
+            $this->warn('backfill run will fill exactly those windows and nothing else:');
+            foreach (array_slice($holes, 0, 30) as $h) {
+                $this->line("  · {$h}");
+            }
+            if (count($holes) > 30) {
+                $this->line('  … and ' . (count($holes) - 30) . ' more (re-run with -v for the full list).');
+            }
+        }
+
         if (! $dry) {
-            $this->line('Resumed backfills will now skip these days. Re-pull a window with --force.');
+            $this->newLine();
+            $this->line('Resumed backfills will now skip the marked days. Re-pull a window with --force.');
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Group days-with-rows into contiguous islands, bridging gaps of at most $maxGap MISSING days.
+     *
+     * A short gap inside a stretch we clearly pulled is a genuinely empty day — a quiet Sunday, a
+     * brief ad pause — and re-fetching it forever is pure waste. A long gap is the signature of a
+     * backfill that DIED, with the daily sync later depositing a second island of recent rows far
+     * to the right of it. Bridging that would mark months we never pulled as done, permanently.
+     *
+     * @param array<int, string> $days ascending, unique, Y-m-d
+     * @return array<int, array{0: string, 1: string}>
+     */
+    private function islands(array $days, int $maxGap): array
+    {
+        $islands = [];
+        $start   = $days[0];
+        $prev    = $days[0];
+
+        for ($i = 1, $n = count($days); $i < $n; $i++) {
+            $cur     = $days[$i];
+            $missing = (int) CarbonImmutable::parse($prev)->diffInDays(CarbonImmutable::parse($cur)) - 1;
+
+            if ($missing <= $maxGap) {
+                $prev = $cur;   // close enough — same island
+                continue;
+            }
+
+            $islands[] = [$start, $prev];   // the gap is too big to vouch for
+            $start     = $cur;
+            $prev      = $cur;
+        }
+
+        $islands[] = [$start, $prev];
+
+        return $islands;
     }
 
     /** @return \Illuminate\Support\Collection<int, Brand> */
