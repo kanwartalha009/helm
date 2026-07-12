@@ -6,7 +6,8 @@ import { AnomalyStrip } from '@/components/brands/AnomalyStrip';
 import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { DataQualityCard } from '@/components/brands/DataQualityCard';
 import { KlaviyoKeyCard } from '@/components/brands/KlaviyoKeyCard';
-import { TargetsCard } from '@/components/brands/TargetsCard';
+import { GoalsSection } from '@/components/brands/GoalsSection';
+import { PacingCards } from '@/components/brands/PacingCards';
 import { TruthPanel } from '@/components/brands/TruthPanel';
 import {
   Avatar,
@@ -199,9 +200,11 @@ export function BrandDetailPage() {
       {/* GO-1.3 — the score that gates recommendations. Sits under coverage because
           its "fix" actions point straight at the backfill buttons above. */}
       <DataQualityCard slug={brand.slug} />
-      {/* GO-2.1 — monthly targets + pacing. Counts only complete days, so a brand is
-          never called "behind" merely because today hasn't finished. */}
-      <TargetsCard slug={brand.slug} canEdit={currentUser?.role === 'master_admin' || currentUser?.role === 'manager'} />
+      {/* Bosco §A.3 — goal pacing cards. Absent entirely when no goals are set (a 0% bar
+          would read as failure, not absence). Counts only COMPLETE days, so a brand is
+          never called "behind" merely because today hasn't finished. Goals are edited in
+          the Settings tab, where Bosco asked for them. */}
+      <PacingCards slug={brand.slug} />
       {/* GO-1.4 — MER (store truth) as the spine, platform-reported ROAS beside it
           with each platform's documented bias direction. Never summed. */}
       <TruthPanel slug={brand.slug} />
@@ -1613,6 +1616,8 @@ function SettingsTab({ brand }: { brand: Brand }) {
   }, [brand.id, brand.name, brand.timezone, brand.baseCurrency, brand.groupTag, brand.status, brand.grossMarginPct, brand.targetCpa, brand.niche]);
 
   const updateBrand = useUpdateBrand();
+  const { data: settingsUser } = useCurrentUser();
+  const canEditGoals = settingsUser?.role === 'master_admin' || settingsUser?.role === 'manager';
 
   const dirty =
     name !== brand.name ||
@@ -1650,9 +1655,9 @@ function SettingsTab({ brand }: { brand: Brand }) {
   };
 
   return (
+    <div style={{ maxWidth: 520 }}>
     <form
       className="form-grid"
-      style={{ maxWidth: 520 }}
       onSubmit={(e) => {
         e.preventDefault();
         onSave();
@@ -1779,5 +1784,13 @@ function SettingsTab({ brand }: { brand: Brand }) {
         </Button>
       </div>
     </form>
+
+    {/* Bosco §A.2 — goals. Deliberately OUTSIDE the brand form: it saves to its own
+        endpoint, and the ui Button has no default type, so a nested save button would
+        submit the brand form instead. Admin/manager only, matching BrandPolicy::update. */}
+    <div className="form-grid" style={{ marginTop: 24 }}>
+      <GoalsSection slug={brand.slug} canEdit={canEditGoals} />
+    </div>
+    </div>
   );
 }

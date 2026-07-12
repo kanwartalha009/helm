@@ -19,14 +19,20 @@ export interface PacingMetric {
 
 export interface Pacing {
   month: string;
+  /** A standing goal applies to every month with no explicit override. */
+  isStandingDefault: boolean;
   currency: string;
   daysInMonth: number;
   completeDays: number;
+  remainingDays: number;
+  /** What the brand must average per remaining day to still hit the goal. */
+  neededPerDay: number | null;
   elapsedPct: number;
   dataThrough: string | null;
   monthEnded: boolean;
   revenue: PacingMetric | null;
   spend: PacingMetric | null;
+  /** `actual` is null (never 0) when there is no ad spend — no ratio exists. USD-correct. */
   roas: { actual: number | null; target: number; status: string } | null;
   targets: { revenue: number | null; spendCap: number | null; roas: number | null; mer: number | null };
 }
@@ -38,6 +44,7 @@ export interface TargetsResponse {
     spendCap: number | null;
     roasTarget: number | null;
     merTarget: number | null;
+    isStandingDefault: boolean;
   } | null;
   pacing: Pacing | null;
 }
@@ -59,7 +66,8 @@ export function useSaveBrandTargets(slug: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (body: {
-      month: string;
+      /** Omit for the STANDING DEFAULT goal (applies to every un-overridden month). */
+      month?: string;
       revenue_target?: number | null;
       spend_cap?: number | null;
       roas_target?: number | null;

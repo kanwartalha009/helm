@@ -36,7 +36,11 @@ class BrandTargetController extends Controller
         $data  = $request->validate(['month' => ['nullable', 'date_format:Y-m']]);
         $month = $data['month'] ?? CarbonImmutable::now($brand->timezone ?: 'UTC')->format('Y-m');
 
-        $target = BrandTarget::query()->where('brand_id', $brand->id)->where('month', $month)->first();
+        // The goal in force: an override for this month, else the STANDING DEFAULT
+        // (month = null) — the same resolution Pacing uses, so the editor and the cards
+        // can never disagree about which number the brand is being graded against.
+        $target = BrandTarget::query()->where('brand_id', $brand->id)->where('month', $month)->first()
+            ?? BrandTarget::query()->where('brand_id', $brand->id)->whereNull('month')->first();
 
         return response()->json([
             'month'  => $month,
@@ -45,8 +49,9 @@ class BrandTargetController extends Controller
                 'spendCap'      => $target->spend_cap,
                 'roasTarget'    => $target->roas_target,
                 'merTarget'     => $target->mer_target,
+                'isStandingDefault' => $target->month === null,
             ],
-            // null when no target is set — pacing against an invented goal is worse
+            // null when no goal is set — pacing against an invented goal is worse
             // than showing nothing.
             'pacing' => $pacing->forBrand($brand, $month),
         ]);
@@ -54,19 +59,24 @@ class BrandTargetController extends Controller
 
     public function store(Request $request, Brand $brand): JsonResponse
     {
-        $this->authorize('view', $brand);
+        // 'update', NOT 'view': a goal is the bar a brand is graded against, so the person
+        // being graded must not be able to move it. BrandPolicy::update = master_admin|manager.
+        $this->authorize('update', $brand);
 
         $data = $request->validate([
-            'month'          => ['required', 'date_format:Y-m'],
+            // NULL month = the brand's STANDING DEFAULT goal, which applies to every
+            // month without an explicit override. The v1 Settings UI only writes this.
+            'month'          => ['nullable', 'date_format:Y-m'],
             // Every target is independently optional; null explicitly CLEARS it.
             'revenue_target' => ['nullable', 'numeric', 'min:0'],
             'spend_cap'      => ['nullable', 'numeric', 'min:0'],
-            'roas_target'    => ['nullable', 'numeric', 'min:0'],
-            'mer_target'     => ['nullable', 'numeric', 'min:0'],
+            // Sanity ceiling per spec §A.2 — a 500× ROAS goal is a typo, not a target.
+            'roas_target'    => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'mer_target'     => ['nullable', 'numeric', 'min:0', 'max:100'],
         ]);
 
         $target = BrandTarget::updateOrCreate(
-            ['brand_id' => $brand->id, 'month' => $data['month']],
+            ['brand_id' => $brand->id, 'month' => $data['month'] ?? null],
             [
                 'revenue_target' => $data['revenue_target'] ?? null,
                 'spend_cap'      => $data['spend_cap'] ?? null,
@@ -81,9 +91,13 @@ class BrandTargetController extends Controller
 
     public function destroy(Brand $brand, string $month): JsonResponse
     {
-        $this->authorize('view', $brand);
+        $this->authorize('update', $brand);
 
-        BrandTarget::query()->where('brand_id', $brand->id)->where('month', $month)->delete();
+        // '__default' clears the STANDING goal (month = null); anything else clears that
+        // month's override only.
+        $q = BrandTarget::query()->where('brand_id', $brand->id);
+        $month === '__default' ? $q->whereNull('month') : $q->where('month', $month);
+        $q->delete();
 
         return response()->json(['ok' => true]);
     }

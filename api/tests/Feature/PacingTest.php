@@ -169,4 +169,171 @@ final class PacingTest extends TestCase
         $this->putJson("/api/brands/{$brand->slug}/targets", ['month' => '2026-06', 'revenue_target' => 40000])->assertCreated();
         $this->assertSame(1, BrandTarget::where('brand_id', $brand->id)->count());
     }
+
+    // ---------------------------------------------------------------------
+    // Bosco spec 2026-07-12 §A — standing goals, USD-correct ROAS, "needs €X/day"
+    // ---------------------------------------------------------------------
+
+    public function test_standing_goal_applies_to_a_month_with_no_override(): void
+    {
+        $this->freezeMidJune();
+        $brand = $this->brand();
+
+        // month = null → the STANDING DEFAULT. This is what the Settings UI writes.
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => null, 'revenue_target' => 30000]);
+
+        for ($d = 1; $d <= 10; $d++) {
+            $this->day($brand, sprintf('2026-06-%02d', $d), 100);
+        }
+
+        $p = app(Pacing::class)->forBrand($brand->fresh());
+
+        $this->assertTrue($p['isStandingDefault']);
+        $this->assertEqualsWithDelta(30000.0, $p['revenue']['target'], 0.001);
+        // And it applies to ANY month, not just the current one.
+        $this->assertTrue(app(Pacing::class)->forBrand($brand->fresh(), '2026-09')['isStandingDefault']);
+    }
+
+    public function test_a_month_override_beats_the_standing_goal(): void
+    {
+        $this->freezeMidJune();
+        $brand = $this->brand();
+
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => null,      'revenue_target' => 30000]);
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => '2026-06', 'revenue_target' => 60000]);
+
+        $p = app(Pacing::class)->forBrand($brand->fresh());
+        $this->assertFalse($p['isStandingDefault']);
+        $this->assertEqualsWithDelta(60000.0, $p['revenue']['target'], 0.001);   // June's own number
+
+        // July has no override → it falls back to the standing goal.
+        $july = app(Pacing::class)->forBrand($brand->fresh(), '2026-07');
+        $this->assertTrue($july['isStandingDefault']);
+        $this->assertEqualsWithDelta(30000.0, $july['revenue']['target'], 0.001);
+    }
+
+    public function test_a_brand_can_only_ever_hold_one_standing_goal(): void
+    {
+        // Spec §A.1 says `unique (brand_id, month)`, but on MySQL NULLs are DISTINCT in a
+        // unique index — that constraint would happily admit fifty standing goals and
+        // pacing would pick one at random. The month_key generated column (D-025) is what
+        // actually enforces this. Saving twice must UPDATE, never duplicate.
+        $this->freezeMidJune();
+        $brand = $this->brand();
+        Sanctum::actingAs(User::factory()->create(['role' => 'master_admin']));
+
+        $this->putJson("/api/brands/{$brand->slug}/targets", ['revenue_target' => 30000])->assertCreated();
+        $this->putJson("/api/brands/{$brand->slug}/targets", ['revenue_target' => 45000])->assertCreated();
+
+        $standing = BrandTarget::where('brand_id', $brand->id)->whereNull('month')->get();
+        $this->assertCount(1, $standing);
+        $this->assertEqualsWithDelta(45000.0, (float) $standing->first()->revenue_target, 0.001);
+    }
+
+    public function test_roas_is_computed_in_usd_not_native_over_native(): void
+    {
+        // A brand booking revenue and spend in different currencies must not get a
+        // ratio of two incomparable numbers. Same fx-snapshot math as the dashboard.
+        $this->freezeMidJune();
+        $brand = Brand::factory()->create(['base_currency' => 'EUR', 'timezone' => 'UTC', 'status' => 'active']);
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => null, 'roas_target' => 4.0]);
+
+        // Revenue: 10 × 100 native, fx 1.1 → 1000 native / 1100 USD.
+        for ($d = 1; $d <= 10; $d++) {
+            DB::table('daily_metrics')->insert([
+                'brand_id' => $brand->id, 'platform' => 'shopify', 'date' => sprintf('2026-06-%02d', $d),
+                'total_sales' => 100, 'refunds_amount' => 0, 'orders' => 1,
+                'currency' => 'EUR', 'fx_rate_to_usd' => 1.1, 'is_complete' => true, 'pulled_at' => now(),
+            ]);
+        }
+        // Spend: 100 native, fx 2.0 → 200 USD.
+        DB::table('daily_metrics')->insert([
+            'brand_id' => $brand->id, 'platform' => 'meta', 'date' => '2026-06-05',
+            'spend' => 100, 'currency' => 'EUR', 'fx_rate_to_usd' => 2.0,
+            'is_complete' => true, 'pulled_at' => now(),
+        ]);
+
+        $p = app(Pacing::class)->forBrand($brand->fresh());
+
+        // native ÷ native would read 10.0× — a fiction. USD-correct is 1100 ÷ 200 = 5.5×.
+        $this->assertEqualsWithDelta(5.5, $p['roas']['actual'], 0.001);
+        $this->assertSame('on_pace', $p['roas']['status']);   // 5.5 ≥ 4.0
+    }
+
+    public function test_roas_with_no_ad_spend_is_null_never_zero(): void
+    {
+        $this->freezeMidJune();
+        $brand = $this->brand();
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => null, 'roas_target' => 3.0]);
+        $this->day($brand, '2026-06-01', 500);
+
+        $p = app(Pacing::class)->forBrand($brand->fresh());
+
+        // No spend → no ratio EXISTS. Rendering 0× would say "you failed"; the truth is
+        // "you didn't run ads". The card shows "—".
+        $this->assertNull($p['roas']['actual']);
+        $this->assertSame('unknown', $p['roas']['status']);
+    }
+
+    public function test_needed_per_day_closes_the_gap_over_the_remaining_days(): void
+    {
+        $this->freezeMidJune();
+        $brand = $this->brand();
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => null, 'revenue_target' => 30000]);
+
+        for ($d = 1; $d <= 10; $d++) {
+            $this->day($brand, sprintf('2026-06-%02d', $d), 100);   // 1000 booked
+        }
+
+        $p = app(Pacing::class)->forBrand($brand->fresh());
+
+        $this->assertSame(20, $p['remainingDays']);                          // 30 − 10
+        $this->assertEqualsWithDelta(1450.0, $p['neededPerDay'], 0.001);     // (30000 − 1000) ÷ 20
+    }
+
+    public function test_needed_per_day_is_null_once_the_goal_is_already_hit(): void
+    {
+        $this->freezeMidJune();
+        $brand = $this->brand();
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => null, 'revenue_target' => 5000]);
+
+        for ($d = 1; $d <= 10; $d++) {
+            $this->day($brand, sprintf('2026-06-%02d', $d), 1000);   // 10000 > 5000
+        }
+
+        $p = app(Pacing::class)->forBrand($brand->fresh());
+
+        // Goal beaten — the gap is 0, not negative. "Needs −250/day" is nonsense.
+        $this->assertEqualsWithDelta(0.0, $p['neededPerDay'], 0.001);
+        $this->assertSame('on_pace', $p['revenue']['status']);
+    }
+
+    public function test_an_absurd_roas_target_is_rejected_as_a_typo(): void
+    {
+        $this->freezeMidJune();
+        $brand = $this->brand();
+        Sanctum::actingAs(User::factory()->create(['role' => 'master_admin']));
+
+        $this->putJson("/api/brands/{$brand->slug}/targets", ['roas_target' => 300])
+            ->assertStatus(422);   // 300× is a decimal slip, not a goal (§A.2 ceiling)
+
+        $this->putJson("/api/brands/{$brand->slug}/targets", ['roas_target' => 3.5])->assertCreated();
+    }
+
+    public function test_clearing_the_standing_goal_removes_the_cards(): void
+    {
+        $this->freezeMidJune();
+        $brand = $this->brand();
+        Sanctum::actingAs(User::factory()->create(['role' => 'master_admin']));
+
+        $this->putJson("/api/brands/{$brand->slug}/targets", ['revenue_target' => 30000])->assertCreated();
+        $this->assertNotNull($this->getJson("/api/brands/{$brand->slug}/targets")->json('pacing'));
+
+        $this->deleteJson("/api/brands/{$brand->slug}/targets/__default")->assertOk();
+
+        // Goal gone → pacing null → the Overview cards render nothing at all. Not a 0% bar:
+        // a brand with no goal is not a brand failing its goal.
+        $this->assertNull($this->getJson("/api/brands/{$brand->slug}/targets")->json('pacing'));
+        $this->assertNull($this->getJson("/api/brands/{$brand->slug}/targets")->json('target'));
+    }
 }
