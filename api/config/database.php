@@ -92,22 +92,38 @@ return [
             'prefix'  => env('REDIS_PREFIX', Str::slug(env('APP_NAME', 'laravel'), '_') . '_database_'),
         ],
 
+        /*
+         * `timeout` / `read_timeout` are set EXPLICITLY (2026-07-13). Without them phpredis
+         * inherits its defaults and a dropped or idle connection surfaces as:
+         *
+         *     PhpRedisConnector.php line 115: read error on connection to 127.0.0.1:6379
+         *
+         * — which is what killed a `sync:daily` mid-dispatch. `block_for` is null in
+         * config/queue.php, so workers POLL rather than issue long blocking pops; a 60s read
+         * timeout therefore cannot cut a legitimate BLPOP short. It only bounds a connection
+         * that has actually gone away, so the client fails fast and reconnects instead of
+         * hanging on a dead socket.
+         */
         'default' => [
-            'url'      => env('REDIS_URL'),
-            'host'     => env('REDIS_HOST', '127.0.0.1'),
-            'username' => env('REDIS_USERNAME'),
-            'password' => env('REDIS_PASSWORD'),
-            'port'     => env('REDIS_PORT', '6379'),
-            'database' => env('REDIS_DB', '0'),
+            'url'          => env('REDIS_URL'),
+            'host'         => env('REDIS_HOST', '127.0.0.1'),
+            'username'     => env('REDIS_USERNAME'),
+            'password'     => env('REDIS_PASSWORD'),
+            'port'         => env('REDIS_PORT', '6379'),
+            'database'     => env('REDIS_DB', '0'),
+            'timeout'      => (float) env('REDIS_TIMEOUT', 5),
+            'read_timeout' => (float) env('REDIS_READ_TIMEOUT', 60),
         ],
 
         'cache' => [
-            'url'      => env('REDIS_URL'),
-            'host'     => env('REDIS_HOST', '127.0.0.1'),
-            'username' => env('REDIS_USERNAME'),
-            'password' => env('REDIS_PASSWORD'),
-            'port'     => env('REDIS_PORT', '6379'),
-            'database' => env('REDIS_CACHE_DB', '1'),
+            'url'          => env('REDIS_URL'),
+            'host'         => env('REDIS_HOST', '127.0.0.1'),
+            'username'     => env('REDIS_USERNAME'),
+            'password'     => env('REDIS_PASSWORD'),
+            'port'         => env('REDIS_PORT', '6379'),
+            'database'     => env('REDIS_CACHE_DB', '1'),
+            'timeout'      => (float) env('REDIS_TIMEOUT', 5),
+            'read_timeout' => (float) env('REDIS_READ_TIMEOUT', 60),
         ],
 
     ],
