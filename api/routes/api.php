@@ -228,6 +228,12 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
             ->middleware('throttle:6,1');
         Route::get('brands/{brand}/inventory/sync',  [InventoryController::class, 'syncStatus']);
 
+        // "Fill missing days" on the sessions strip. Re-pulls ONLY the days in the CURRENT window
+        // that are missing or did not reconcile — which may be far outside the 7-day refresh above.
+        Route::post('brands/{brand}/inventory/sessions/repair', [InventoryController::class, 'repairSessions'])
+            ->middleware('throttle:6,1');
+        Route::get('brands/{brand}/inventory/sessions/repair', [InventoryController::class, 'repairSessionsStatus']);
+
         // Ads hub — per-brand ad-platform Overview (Meta today; platform-agnostic).
         Route::get('brands/{brand}/ads', [AdsController::class, 'show']);
         Route::get('brands/{brand}/ads/campaigns/{campaign}', [AdsController::class, 'campaign']);

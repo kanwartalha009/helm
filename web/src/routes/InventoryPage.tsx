@@ -322,7 +322,14 @@ export function InventoryPage() {
       {/* Sessions by traffic type (Bosco item B) — the store-level split, plus the honest
           share that never touched a product page. Absent entirely for a brand with no
           session sync; an unreconciled window renders the amber note, never a number. */}
-      {data?.sessions && <SessionTrafficStrip s={data.sessions} windowTo={data.to} />}
+      {data?.sessions && selectedSlug && (
+        <SessionTrafficStrip
+          s={data.sessions}
+          windowFrom={data.from}
+          windowTo={data.to}
+          slug={selectedSlug}
+        />
+      )}
 
       {/* View toggle + sort + status — segmented button groups (matches Ads). */}
       <div className="filter-bar mb-12">

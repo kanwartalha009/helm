@@ -48,7 +48,12 @@ class ShopifyBackfillSessionTrafficCommand extends Command
     /** Politeness pause between days — ShopifyQL is cost-throttled. */
     private const SLEEP_MICROSECONDS = 200_000;
 
-    private const DATASET = 'session_traffic';
+    /**
+     * PUBLIC because RepairBrandSessionsJob marks coverage against the same key. Two copies of the
+     * string 'session_traffic' is how the resume index silently stops matching the thing it
+     * indexes: rename one, and the backfill starts re-pulling days the button already filled.
+     */
+    public const DATASET = 'session_traffic';
 
     public function handle(SessionTrafficSync $sync, BackfillCoverage $coverage): int
     {

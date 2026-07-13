@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\RefreshBrandInventoryJob;
+use App\Jobs\RepairBrandSessionsJob;
 use App\Models\BackfillRun;
 use App\Models\Brand;
 use App\Services\Aggregation\InventoryQuery;
@@ -87,6 +88,62 @@ class InventoryController extends Controller
         $run = BackfillRun::query()
             ->where('brand_id', $brand->id)
             ->where('dataset', RefreshBrandInventoryJob::DATASET)
+            ->latest('id')
+            ->first();
+
+        return response()->json($run === null ? ['run' => null] : $this->payload($run));
+    }
+
+    /**
+     * Fill the days that are blanking the sessions strip, for the window the user is looking at.
+     *
+     * Distinct from `sync()` on purpose. `sync()` re-pulls the last 7 days of FOUR datasets; this
+     * re-pulls ONLY the specific days in THIS window that are missing or did not reconcile — which
+     * may be a day eight months ago that a 7-day refresh could never reach. They also poll
+     * independently, so a running inventory refresh doesn't make this button look busy.
+     */
+    public function repairSessions(Request $request, Brand $brand): JsonResponse
+    {
+        $this->authorize('view', $brand);
+
+        $params = $request->validate([
+            'from' => ['required', 'date_format:Y-m-d'],
+            'to'   => ['required', 'date_format:Y-m-d', 'after_or_equal:from'],
+        ]);
+
+        $active = BackfillRun::query()
+            ->where('brand_id', $brand->id)
+            ->where('dataset', RepairBrandSessionsJob::DATASET)
+            ->whereIn('status', ['queued', 'running'])
+            ->latest('id')
+            ->first();
+
+        if ($active !== null) {
+            return response()->json($this->payload($active), 202);
+        }
+
+        $run = BackfillRun::create([
+            'brand_id'             => $brand->id,
+            'dataset'              => RepairBrandSessionsJob::DATASET,
+            'status'               => 'queued',
+            'window_start'         => $params['from'],
+            'triggered_by_user_id' => Auth::id(),
+            'message'              => 'Queued…',
+        ]);
+
+        RepairBrandSessionsJob::dispatch($brand, (int) $run->id, $params['from'], $params['to']);
+
+        return response()->json($this->payload($run->fresh()), 202);
+    }
+
+    /** Poll the most recent session repair for this brand. */
+    public function repairSessionsStatus(Brand $brand): JsonResponse
+    {
+        $this->authorize('view', $brand);
+
+        $run = BackfillRun::query()
+            ->where('brand_id', $brand->id)
+            ->where('dataset', RepairBrandSessionsJob::DATASET)
             ->latest('id')
             ->first();
 

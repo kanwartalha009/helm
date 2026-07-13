@@ -1,3 +1,5 @@
+import { useQueryClient } from '@tanstack/react-query';
+import { useRepairFinished, useSessionRepairStatus, useStartSessionRepair } from '@/hooks/useSessionRepair';
 import type { InventorySessions, SessionSplit, TrafficType } from '@/types/inventory';
 
 /**
@@ -51,28 +53,23 @@ const COLOR: Record<TrafficType, string> = {
 const fmt = (n: number) => n.toLocaleString();
 
 /** The store-level strip Bosco screenshotted: the four types + the store-wide honesty row. */
-export function SessionTrafficStrip({ s, windowTo }: { s: InventorySessions; windowTo: string }) {
+export function SessionTrafficStrip({
+  s,
+  windowFrom,
+  windowTo,
+  slug,
+}: {
+  s: InventorySessions;
+  windowFrom: string;
+  windowTo: string;
+  slug: string;
+}) {
   if (!s.complete || !s.byType || s.total === null) {
-    // Not reconciled → say what's missing and how to fix it. Never a number.
-    const missing = s.windowDays - s.completeDays;
-    return (
-      <div
-        className="mb-12"
-        style={{
-          fontSize: 12,
-          color: 'var(--warning)',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
-          padding: '10px 12px',
-        }}
-      >
-        Sessions by traffic type — <strong>not shown for this window</strong>. {missing} of {s.windowDays} day
-        {s.windowDays === 1 ? '' : 's'} {missing === 1 ? 'is' : 'are'} missing or did not reconcile against Shopify’s
-        own store total{s.through ? `; sessions are synced through ${s.through}` : ' and nothing is synced yet'}.
-        Showing a partial sum here would under-report every product while looking exact — so it shows nothing.
-        Run <code>php artisan shopify:backfill-session-traffic</code> to fill the gap.
-      </div>
-    );
+    // Not reconciled → say what's missing, and give them the BUTTON that fixes it. The previous
+    // version of this told the operator to run `php artisan shopify:backfill-session-traffic`,
+    // which is not something a customer can do — an instruction the reader cannot act on is the
+    // same as no instruction at all.
+    return <SessionsMissing s={s} windowFrom={windowFrom} windowTo={windowTo} slug={slug} />;
   }
 
   const total = s.total;
@@ -118,6 +115,112 @@ export function SessionTrafficStrip({ s, windowTo }: { s: InventorySessions; win
         product. Sessions are attributed by <strong>landing page</strong>: someone who arrives on the homepage and
         then views a product is not counted for that product.
       </div>
+    </div>
+  );
+}
+
+/* ---- The gap state, with the button that closes it ----------------------- */
+
+/**
+ * What the operator sees when the window can't be trusted: how many days are missing, and one
+ * button that pulls exactly those days.
+ *
+ * The fill re-pulls ONLY the broken days — not the window — because session traffic costs ~5
+ * throttled ShopifyQL calls per day, and re-pulling 28 good days to fix 2 is ten minutes of API
+ * budget spent to change nothing.
+ */
+function SessionsMissing({
+  s,
+  windowFrom,
+  windowTo,
+  slug,
+}: {
+  s: InventorySessions;
+  windowFrom: string;
+  windowTo: string;
+  slug: string;
+}) {
+  const qc = useQueryClient();
+  const missing = s.windowDays - s.completeDays;
+
+  const start = useStartSessionRepair(slug);
+  const { data } = useSessionRepairStatus(slug, true);
+  const run = data?.run ?? null;
+
+  const active = run?.status === 'queued' || run?.status === 'running';
+  // `isPending` covers the gap between the click and the first poll, so the button never sits
+  // there looking unclicked while the POST is still in flight.
+  const busy = active || start.isPending;
+
+  // When the fill lands, the inventory query must refetch or the page keeps showing this very
+  // component — the server changed, the cache didn't.
+  useRepairFinished(run, () => {
+    qc.invalidateQueries({ queryKey: ['inventory'] });
+    qc.invalidateQueries({ queryKey: ['session-repair', slug] });
+  });
+
+  return (
+    <div
+      className="mb-12"
+      style={{
+        fontSize: 12,
+        border: '1px solid var(--border)',
+        borderRadius: 8,
+        padding: '12px 14px',
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 16,
+      }}
+    >
+      <div style={{ color: 'var(--warning)', lineHeight: 1.55, maxWidth: 720 }}>
+        Sessions by traffic type — <strong>not shown for this window</strong>. {missing} of {s.windowDays} day
+        {s.windowDays === 1 ? '' : 's'} {missing === 1 ? 'is' : 'are'} missing or did not reconcile against Shopify’s
+        own store total{s.through ? `; sessions are synced through ${s.through}` : ' and nothing is synced yet'}.
+        Showing a partial sum here would under-report every product while looking exact — so it shows nothing.
+
+        {/* The job's own step line ("3/12 · 2026-07-04"), so the wait names the day being pulled
+            rather than spinning anonymously. A 12-day fill is a minute or two; silence for that
+            long reads as a hang. */}
+        {busy && (
+          <div className="muted" style={{ marginTop: 8, color: 'var(--text-muted)' }}>
+            {run?.message ?? 'Queueing…'}
+          </div>
+        )}
+
+        {/* A failed run must SAY it failed. Flipping the button back to its resting state and
+            saying nothing is how an operator clicks four times and never learns why. */}
+        {!busy && run?.status === 'failed' && (
+          <div style={{ marginTop: 8, color: 'var(--danger, #b42318)' }}>
+            The last fill failed: {run.message ?? 'unknown error'}
+          </div>
+        )}
+        {!busy && run?.status === 'done' && run.message && (
+          <div className="muted" style={{ marginTop: 8, color: 'var(--text-muted)' }}>
+            {run.message}
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => start.mutate({ from: windowFrom, to: windowTo })}
+        style={{
+          flexShrink: 0,
+          fontSize: 12,
+          fontWeight: 600,
+          padding: '7px 12px',
+          borderRadius: 6,
+          border: '1px solid var(--border-strong, #cbd5e1)',
+          background: busy ? 'var(--surface-subtle)' : 'var(--surface)',
+          color: busy ? 'var(--text-muted)' : 'var(--text)',
+          cursor: busy ? 'default' : 'pointer',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {busy ? 'Filling…' : `Fill ${missing} missing day${missing === 1 ? '' : 's'}`}
+      </button>
     </div>
   );
 }
