@@ -62,12 +62,27 @@ php artisan view:cache
 # The keep-alive cron (see docs/runbooks/server-cron.md) brings it back within a minute. We verify
 # that here rather than trusting it: a deploy that silently leaves the queue dead is worse than a
 # deploy that fails loudly.
-# queue:restart signals ALL workers (Horizon's and any plain queue:work) to finish their current
-# job and exit, so the keep-alive brings them back running the NEW code. Without it, workers keep
-# the old code in memory indefinitely — a deploy that appears to succeed while the queue silently
-# runs yesterday's logic. horizon:terminate alone only covers Horizon.
+# ══ HOW WORKERS PICK UP NEW CODE ══
+# queue:restart broadcasts a restart signal through the CACHE. Every worker checks it between
+# jobs, finishes what it's holding, and exits; Horizon immediately respawns it as a fresh PHP
+# process — which boots the new code. This is what actually deploys code to the queue.
+#
+# It works regardless of which user owns Horizon, because it's a cache flag, not a signal.
 php artisan queue:restart || true
-php artisan horizon:terminate || true
+
+# horizon:terminate sends a UNIX TERM signal to the Horizon MASTER process. On Cloudways that
+# master is owned by the APPLICATION user (tdtaputtdu — it's started by the app-user crontab),
+# while deploys run as the master SSH user. So this ALWAYS prints:
+#
+#     ERROR  Failed to kill process: <pid> (Operation not permitted).
+#
+# That is EXPECTED and harmless — queue:restart above already cycled the workers, which is where
+# our code lives. The master is only a supervisor; its own code doesn't change.
+#
+# The one case it matters: a change to config/horizon.php (new queue, new supervisor) needs the
+# MASTER restarted. To do that, SSH as the application user (Cloudways → Access Details → SSH)
+# and run `php artisan horizon:terminate` there; the flock cron restarts it within a minute.
+php artisan horizon:terminate 2>/dev/null || echo "   (horizon master owned by the app user — expected; queue:restart already reloaded the workers)"
 
 echo "==> [6/6] verify the bundle is in place"
 test -f "$ROOT/api/public/app/index.html" || { echo "FATAL: index.html missing after copy — app would 404"; exit 1; }
