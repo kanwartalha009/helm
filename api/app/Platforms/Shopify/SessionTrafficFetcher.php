@@ -250,8 +250,34 @@ class SessionTrafficFetcher
         $ql = 'FROM sessions SHOW sessions GROUP BY traffic_type '
             . "SINCE {$day} UNTIL {$day} LIMIT 50";
 
-        $table = $this->runQuery($client, $ql);
+        // ══ RETRY, BECAUSE THIS CALL FAILING THROWS AWAY A GOOD DAY ══
+        // Observed in production: brand 76 / 2026-03-07 paged 49,274 sessions perfectly, then this
+        // four-row query returned null — and the whole day was discarded on the strength of the
+        // CHEAP call failing while the EXPENSIVE one succeeded. ShopifyQL is cost-throttled, and
+        // this call fires immediately after (or before) a 25-page burst, so it is the most likely
+        // thing in the sequence to get rate-limited.
+        //
+        // Three attempts with a widening backoff. Still failing after that is a real failure and
+        // still returns null — we do NOT invent a total, because the total is the thing every other
+        // number in this class is checked against.
+        $table = null;
+        foreach ([0, 1_000_000, 3_000_000] as $waitMicros) {
+            if ($waitMicros > 0) {
+                usleep($waitMicros);
+            }
+
+            $table = $this->runQuery($client, $ql);
+            if ($table !== null) {
+                break;
+            }
+        }
+
         if ($table === null) {
+            Log::warning('shopify.session_traffic.store_total_unavailable', [
+                'date' => $day,
+                'note' => 'reconciliation truth could not be fetched after 3 attempts; day failed closed',
+            ]);
+
             return null;
         }
 
