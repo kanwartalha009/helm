@@ -188,15 +188,31 @@ function SessionsMissing({
           </div>
         )}
 
-        {/* A failed run must SAY it failed. Flipping the button back to its resting state and
-            saying nothing is how an operator clicks four times and never learns why. */}
+        {/* ══ A RUN THAT FIXED NOTHING MUST NOT LOOK LIKE A SUCCESS ══
+            The first cut of this rendered every finished run the same muted grey, so a fill that
+            closed ZERO days looked identical to one that closed all of them — the button flipped
+            back to its resting state, the operator saw no red, and clicked again. And again.
+            The job now marks a zero-progress run as `failed`, and this renders it in red, with the
+            per-day reason ("Shopify reports 5,709 sessions but its landing-page breakdown only adds
+            up to 5,208") instead of a shrug. `white-space: pre-line` keeps the job's one-day-per-line
+            layout. */}
         {!busy && run?.status === 'failed' && (
-          <div style={{ marginTop: 8, color: 'var(--danger, #b42318)' }}>
-            The last fill failed: {run.message ?? 'unknown error'}
+          <div
+            style={{
+              marginTop: 8,
+              color: 'var(--danger)',
+              whiteSpace: 'pre-line',
+              lineHeight: 1.5,
+            }}
+          >
+            {run.message ?? 'The last fill failed.'}
           </div>
         )}
         {!busy && run?.status === 'done' && run.message && (
-          <div className="muted" style={{ marginTop: 8, color: 'var(--text-muted)' }}>
+          <div
+            className="muted"
+            style={{ marginTop: 8, color: 'var(--text-muted)', whiteSpace: 'pre-line', lineHeight: 1.5 }}
+          >
             {run.message}
           </div>
         )}

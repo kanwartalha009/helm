@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use App\Models\Brand;
 use App\Models\PlatformConnection;
 use App\Models\SessionTrafficDaily;
+use App\Models\SessionTrafficDay;
 use App\Platforms\Shopify\SessionTrafficFetcher;
 use App\Services\Sync\SessionTrafficSync;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -465,5 +466,93 @@ final class SessionTrafficFetcherTest extends TestCase
 
         $this->assertSame(0, SessionTrafficDaily::where('entity_key', 'jay')->count(), 'the stale row must go');
         $this->assertSame(1, SessionTrafficDaily::where('entity_key', 'store-wide')->count());
+    }
+
+    // ── The two bugs that made "Fill missing days" report success and change nothing ──────────
+
+    public function test_a_day_that_writes_rows_but_does_not_reconcile_is_NOT_reported_as_success(): void
+    {
+        // THE BUG: syncDay used to return a ROW COUNT. A day that fails reconciliation still writes
+        // rows — hundreds of them — so callers read "1,847 rows written" as success. The backfill
+        // logged the day as filled, the repair button reported success, and the window stayed blank
+        // click after click. A row count says NOTHING about whether the rows can be trusted.
+        $this->fakeShopify(
+            $this->totalsResponse(paid: 500, direct: 0, organic: 0, unknown: 0),
+            [[['/products/jay', 'paid', '10']]],   // Shopify says 500; the breakdown adds to 10
+        );
+
+        $result = app(SessionTrafficSync::class)->syncDay($this->conn(), self::DAY);
+
+        // Rows WERE written…
+        $this->assertSame(1, $result->rowsWritten);
+        $this->assertSame(1, SessionTrafficDaily::count());
+
+        // …and the day is still UNUSABLE. This is the assertion that would have caught it.
+        $this->assertTrue($result->established, 'we did get an answer out of Shopify');
+        $this->assertFalse($result->complete, 'a day that does not reconcile is NOT a success');
+        $this->assertSame(490, $result->shortfall());
+
+        // The verdict is recorded, and it says the day cannot be used.
+        $day = SessionTrafficDay::where('date', self::DAY)->firstOrFail();
+        $this->assertFalse((bool) $day->is_complete);
+        $this->assertSame(500, $day->store_total);
+        $this->assertSame(10, $day->paged_total);
+
+        // And it explains ITSELF — "Shopify reports 500 sessions … breakdown only adds up to 10
+        // (490 missing)" — so the operator gets a fact they can act on, not an amber shrug.
+        $reason = $result->reason();
+        $this->assertStringContainsString('500', $reason);
+        $this->assertStringContainsString('10', $reason);
+        $this->assertStringContainsString('490 missing', $reason);
+    }
+
+    public function test_a_genuinely_quiet_day_is_recorded_as_complete_even_though_it_has_no_rows(): void
+    {
+        // THE OTHER BUG: completeness was inferred from the existence of breakdown rows. A day with
+        // ZERO sessions writes no rows — so it could never be counted as complete, and any window
+        // containing one quiet day was blanked FOREVER. No backfill could fix it, because the
+        // backfill was correct: the day was done, and it was empty. Unfixable by construction.
+        $this->fakeShopify(
+            $this->totalsResponse(paid: 0, direct: 0, organic: 0, unknown: 0),
+            [[]],   // no landing-page rows at all
+        );
+
+        $result = app(SessionTrafficSync::class)->syncDay($this->conn(), self::DAY);
+
+        $this->assertTrue($result->established);
+        $this->assertTrue($result->complete, '0 === 0 reconciles: this day is DONE, not missing');
+        $this->assertSame(0, $result->rowsWritten);
+        $this->assertSame(0, SessionTrafficDaily::count(), 'no traffic means no breakdown rows — correct');
+
+        // The day is nonetheless RECORDED as complete, which is the whole point: the read gate
+        // counts this, so a window containing a quiet day is no longer blank forever.
+        $day = SessionTrafficDay::where('date', self::DAY)->firstOrFail();
+        $this->assertTrue((bool) $day->is_complete);
+        $this->assertSame(0, $day->paged_total);
+    }
+
+    public function test_a_failed_fetch_does_not_overwrite_a_previously_good_day(): void
+    {
+        // A transient timeout must not destroy data we already have. "We could not reach Shopify"
+        // and "Shopify says this day is empty" are different facts, and only one of them is a
+        // reason to change what is stored.
+        $this->fakeShopify(
+            $this->totalsResponse(paid: 11, direct: 0, organic: 0, unknown: 0),
+            [[['/products/jay', 'paid', '11']]],
+        );
+        $good = app(SessionTrafficSync::class)->syncDay($this->conn(), self::DAY);
+        $this->assertTrue($good->complete);
+
+        // Now the endpoint falls over.
+        Http::fake(['*' => Http::response([], 500)]);
+
+        $result = app(SessionTrafficSync::class)->syncDay($this->conn(), self::DAY);
+
+        $this->assertFalse($result->established, 'we learned nothing');
+        $this->assertFalse($result->complete);
+
+        // The good day survives untouched.
+        $this->assertSame(1, SessionTrafficDaily::where('entity_key', 'jay')->count());
+        $this->assertTrue((bool) SessionTrafficDay::where('date', self::DAY)->firstOrFail()->is_complete);
     }
 }

@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Models\Brand;
 use App\Models\SessionTrafficDaily;
+use App\Models\SessionTrafficDay;
 use App\Services\Sync\SessionTrafficSync;
 use App\Support\BackfillCoverage;
 use Carbon\CarbonImmutable;
@@ -127,7 +128,9 @@ class ShopifyBackfillSessionTrafficCommand extends Command
              * naturally returns exactly them plus any day never pulled at all.
              */
             if ((bool) $this->option('repair')) {
-                $bad = SessionTrafficDaily::query()
+                // The VERDICT table. Asking the breakdown table would miss a day that failed so hard
+                // it wrote no rows at all, and would wrongly condemn a genuinely zero-session day.
+                $bad = SessionTrafficDay::query()
                     ->where('brand_id', $brand->id)
                     ->whereBetween('date', [$since->toDateString(), $until->toDateString()])
                     ->where('is_complete', false)
@@ -163,28 +166,33 @@ class ShopifyBackfillSessionTrafficCommand extends Command
             $failedDays = 0;
 
             foreach ($pending as $dayStr) {
-                $written = $sync->syncDay($conn, $dayStr);
+                $result = $sync->syncDay($conn, $dayStr);
 
                 $brandDays++;
 
-                // null = we learned NOTHING (parse/transport error, or the day didn't reconcile).
-                // It must NOT be marked covered — doing so is how a broken query silently becomes
-                // "90 days, done, no data" and the gap turns permanent.
-                if ($written === null) {
+                // `established = false` → we learned NOTHING (parse/transport error). It must NOT be
+                // marked covered: doing so is how a broken query silently becomes "90 days, done,
+                // no data" and the gap turns permanent.
+                if (! $result->established) {
                     $failedDays++;
                     usleep(self::SLEEP_MICROSECONDS);
                     continue;
                 }
 
-                $brandRows += $written;
-                if ($written === 0) {
-                    $incompleteDays++;   // a real zero-session day
+                $brandRows += $result->rowsWritten;
+
+                // A day that was pulled but did NOT reconcile is NOT progress. It used to be counted
+                // as a success here purely because it wrote rows — which is how the repair button
+                // ended up reporting "filled" on days the read gate still rejects.
+                if (! $result->complete) {
+                    $incompleteDays++;
                 }
 
                 // Mark AFTER the write. A day marked done but not written is a hole no future run
-                // will ever fill. `$written = 0` is still DONE — the store genuinely had no
-                // sessions, and asking again tomorrow will not change that.
-                $coverage->mark($brand->id, self::DATASET, '', $dayStr, $dayStr, $written);
+                // will ever fill. An UNRECONCILED day is still marked — it is not going to get
+                // better by asking again in the same run — and `--repair` is the tool that revisits
+                // exactly those.
+                $coverage->mark($brand->id, self::DATASET, '', $dayStr, $dayStr, $result->rowsWritten);
 
                 usleep(self::SLEEP_MICROSECONDS);
             }
@@ -196,9 +204,10 @@ class ShopifyBackfillSessionTrafficCommand extends Command
                 );
             }
 
-            // Count the days we stored but could NOT reconcile — these render "—", and the
-            // operator deserves to know how many there are rather than discovering it in the UI.
-            $unreconciled = SessionTrafficDaily::query()
+            // Count the days we stored but could NOT reconcile — these render "—", and the operator
+            // deserves to know how many there are rather than discovering it in the UI. Read from
+            // the VERDICT table: a zero-session day has no breakdown rows but is perfectly complete.
+            $unreconciled = SessionTrafficDay::query()
                 ->where('brand_id', $brand->id)
                 ->whereBetween('date', [$since->toDateString(), $until->toDateString()])
                 ->where('is_complete', false)
@@ -207,7 +216,8 @@ class ShopifyBackfillSessionTrafficCommand extends Command
 
             $notes = [];
             if ($incompleteDays > 0) {
-                $notes[] = "{$incompleteDays} day(s) returned nothing (re-run to fill; idempotent)";
+                $notes[] = "{$incompleteDays} day(s) did NOT reconcile (pulled, but the landing-page "
+                    . 'breakdown is short of Shopify’s own total — these render "—"; retry with --repair)';
             }
             if ($unreconciled > 0) {
                 $notes[] = "{$unreconciled} day(s) did NOT reconcile to Shopify's store total and will render '—'";

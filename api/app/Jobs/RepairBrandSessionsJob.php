@@ -7,7 +7,7 @@ namespace App\Jobs;
 use App\Console\Commands\ShopifyBackfillSessionTrafficCommand;
 use App\Models\BackfillRun;
 use App\Models\Brand;
-use App\Models\SessionTrafficDaily;
+use App\Models\SessionTrafficDay;
 use App\Services\Sync\SessionTrafficSync;
 use App\Support\BackfillCoverage;
 use Carbon\CarbonImmutable;
@@ -101,7 +101,7 @@ class RepairBrandSessionsJob implements ShouldQueue
 
         $total  = count($broken);
         $filled = 0;
-        $failed = [];
+        $failed = [];   // day => the reason it is STILL unusable
 
         try {
             foreach ($broken as $i => $day) {
@@ -109,13 +109,17 @@ class RepairBrandSessionsJob implements ShouldQueue
                 // now rather than the one that just finished.
                 $run->update(['message' => sprintf('%d/%d · %s', $i + 1, $total, $day)]);
 
-                // null = we learned NOTHING (transport error, or the day would not reconcile).
-                // It must NOT be marked covered — marking a day we failed to establish is how a
-                // gap becomes permanent and invisible.
-                $written = $sync->syncDay($conn, $day);
+                $result = $sync->syncDay($conn, $day);
 
-                if ($written === null) {
-                    $failed[] = $day;
+                // ══ BRANCH ON THE VERDICT, NOT ON A ROW COUNT ══
+                // This is the bug that made the button lie. `syncDay` used to return the number of
+                // rows written, and a day that FAILED reconciliation still writes rows — hundreds
+                // of them. So "1,847 rows written" was read as success, the day was reported as
+                // filled, and the window stayed blank. Row count says nothing about whether the
+                // rows can be TRUSTED. `complete` is the only thing that answers the question the
+                // operator is actually asking.
+                if (! $result->complete) {
+                    $failed[$day] = $result->reason();
                     continue;
                 }
 
@@ -128,13 +132,17 @@ class RepairBrandSessionsJob implements ShouldQueue
                     '',
                     $day,
                     $day,
-                    $written,
+                    $result->rowsWritten,
                 );
                 $filled++;
             }
 
+            // A run that fixed NOTHING is not a success, and must not render like one. The old code
+            // finished 'done' regardless, so the button flipped back to its resting state, the
+            // operator saw a green path, and the window was still blank. If we could not close a
+            // single day, that is a FAILURE and it says so in red.
             $run->update([
-                'status'      => 'done',
+                'status'      => $filled === 0 ? 'failed' : 'done',
                 'finished_at' => now(),
                 'message'     => $this->summary($total, $filled, $failed),
             ]);
@@ -166,9 +174,13 @@ class RepairBrandSessionsJob implements ShouldQueue
             return [];
         }
 
-        // Every day that currently reconciles. Anything in the window NOT in this set is broken —
-        // whether it has no rows at all or has rows flagged is_complete = false.
-        $good = SessionTrafficDaily::query()
+        // Every day that currently RECONCILES, read from the verdict table. Anything in the window
+        // not in this set is broken — never pulled, pulled and failed, or pulled and short.
+        //
+        // Read from session_traffic_days, NOT from the breakdown rows: a genuinely zero-session day
+        // has no rows but IS complete, and asking the breakdown table would call it broken and
+        // re-pull it on every single click, forever, for nothing.
+        $good = SessionTrafficDay::query()
             ->where('brand_id', $this->brand->id)
             ->where('is_complete', true)
             ->whereBetween('date', [$from->toDateString(), $to->toDateString()])
@@ -191,20 +203,38 @@ class RepairBrandSessionsJob implements ShouldQueue
         return $out;
     }
 
-    /** @param list<string> $failed */
+    /**
+     * What actually happened, in words an operator can act on.
+     *
+     * A failing day names ITSELF and its reason ("Shopify reports 5,709 sessions but its
+     * landing-page breakdown only adds up to 5,208"). "Some days did not reconcile" is not a
+     * message, it is a shrug — it tells the reader nothing they can do anything with, and it is
+     * what sent us round the loop of clicking the button and re-reading the same amber warning.
+     *
+     * @param  array<string, string>  $failed  day => reason
+     */
     private function summary(int $total, int $filled, array $failed): string
     {
         if ($failed === []) {
             return "Filled {$filled} of {$total} day(s). This window should now show sessions.";
         }
 
-        // Days that still won't reconcile are NOT hidden behind a green tick. If Shopify keeps
-        // refusing to make a day add up, the operator has to know which day and that it persists.
-        $list = implode(', ', array_slice($failed, 0, 8)) . (count($failed) > 8 ? ' …' : '');
+        $lines = [];
+        foreach (array_slice($failed, 0, 6, true) as $day => $reason) {
+            $lines[] = "· {$day} — {$reason}";
+        }
+        if (count($failed) > 6) {
+            $lines[] = '· …and ' . (count($failed) - 6) . ' more.';
+        }
 
-        return "Filled {$filled} of {$total} day(s). " . count($failed) . ' day(s) still would not reconcile '
-            . "against Shopify's own total and remain excluded: {$list}. Re-run to retry — if a day fails "
-            . 'repeatedly, Shopify cannot break that day down by landing page.';
+        $head = $filled === 0
+            ? "Could not fill any of the {$total} missing day(s)."
+            : "Filled {$filled} of {$total} day(s); " . count($failed) . ' still cannot be used.';
+
+        return $head . "\n" . implode("\n", $lines) . "\n"
+            . 'A day that keeps failing is one Shopify will not break down by landing page — its '
+            . 'sessions exist, but they cannot be attributed to products, so the window stays blank '
+            . 'rather than showing a short total.';
     }
 
     /** Worker killed on timeout — the catch above never ran, so the row would hang on 'running'. */

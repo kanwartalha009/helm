@@ -9,6 +9,7 @@ use App\Models\Brand;
 use App\Models\CommerceDailyMetric;
 use App\Models\ProductCatalog;
 use App\Models\SessionTrafficDaily;
+use App\Models\SessionTrafficDay;
 use App\Support\LandingPathMapper;
 use Carbon\CarbonImmutable;
 
@@ -353,7 +354,19 @@ final class InventoryQuery
     {
         $windowDays = CarbonImmutable::parse($from)->diffInDays(CarbonImmutable::parse($to)) + 1;
 
-        $completeDays = (int) SessionTrafficDaily::query()
+        // ══ COUNT THE VERDICT, NOT THE ROWS ══
+        // This used to count distinct dates in session_traffic_daily (the BREAKDOWN table). That
+        // makes a day's completeness a function of whether it happens to have rows — which breaks
+        // in both directions:
+        //
+        //   · a genuinely ZERO-SESSION day writes no rows, so it could never be counted, and any
+        //     window containing one quiet day was blanked FOREVER. No backfill could fix it,
+        //     because the backfill was correct: the day was done, and empty.
+        //   · a day that FAILED reconciliation still writes rows, so "has rows" told us nothing
+        //     about whether those rows could be trusted.
+        //
+        // session_traffic_days records the verdict for the day itself. That is the thing to count.
+        $completeDays = (int) SessionTrafficDay::query()
             ->where('brand_id', $bid)
             ->where('is_complete', true)
             ->whereBetween('date', [$from, $to])
@@ -362,7 +375,7 @@ final class InventoryQuery
 
         // How far the source reaches at all — unbounded, like commerce/adSpend above, so the
         // FE can say "sessions synced through <date>" even when the window isn't covered.
-        $throughRaw = SessionTrafficDaily::query()
+        $throughRaw = SessionTrafficDay::query()
             ->where('brand_id', $bid)->where('is_complete', true)->max('date');
         $through = $throughRaw ? CarbonImmutable::parse((string) $throughRaw)->toDateString() : null;
 
