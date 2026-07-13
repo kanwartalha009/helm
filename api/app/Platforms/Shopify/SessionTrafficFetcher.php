@@ -46,11 +46,29 @@ class SessionTrafficFetcher
     private const PAGE_SIZE = 1000;
 
     /**
-     * Hard stop so a pathological store cannot spin forever. 25 pages × 1000 = 25,000 rows/day;
-     * the busiest brand measured produced under 5,000. Hitting this ceiling is NOT treated as
-     * success — the day fails reconciliation and is stored incomplete.
+     * ══ THE CEILING THAT WAS SILENTLY EATING BIG DAYS ══
+     * This was 25 (= 25,000 rows/day), sized from a brand that produced "under 5,000". On a real
+     * high-traffic day that is nowhere near enough, and the shortfall it caused looked like a
+     * mysterious reconciliation bug:
+     *
+     *     2026-06-28   Shopify: 152,621 sessions   our breakdown: 151,485   short 1,136
+     *     2026-07-01   Shopify: 124,167 sessions   our breakdown: 122,652   short 1,515
+     *     2026-07-02   Shopify: 118,841 sessions   our breakdown: 118,790   short 51
+     *
+     * Every checkout mints a UNIQUE one-session landing URL, so distinct-landing-path cardinality
+     * scales with traffic without limit. A 150k-session day blows straight past 25,000 rows, we
+     * stopped at the ceiling, and the missing rows were the one-session tail — hence a shortfall
+     * of roughly "however many rows we didn't get to".
+     *
+     * The fix is NOT to raise the ceiling and download 40,000 junk URLs. See fetchDay(): we now
+     * enumerate only products and collections, and DERIVE store-wide by subtraction. This ceiling
+     * survives only to bound the legacy fallback path.
      */
-    private const MAX_PAGES = 25;
+    private const MAX_PAGES = 200;
+
+    /** ShopifyQL substring predicate. Unverified against this endpoint, so its use is guarded. */
+    private const PRODUCT_MATCH    = '/products/';
+    private const COLLECTION_MATCH = '/collections/';
 
     /**
      * Shopify's traffic types, verified against a full YEAR of a real store (2026-07-12):
@@ -65,16 +83,71 @@ class SessionTrafficFetcher
     /**
      * One day of session/traffic-type rows for a brand, aggregated by landing entity.
      *
+     * ══ WHY WE NO LONGER ENUMERATE EVERY LANDING PATH ══
+     * The original design paged the full `GROUP BY landing_page_path, traffic_type` result and
+     * required Σ(all rows) === the store's own total. That is unachievable on a busy store: every
+     * checkout mints a UNIQUE one-session landing URL, so a 150k-session day has tens of thousands
+     * of distinct paths. We hit the page ceiling, stopped, and came up short by however many rows
+     * were left — which is exactly the 1,136 / 1,515 / 51 shortfalls seen in production.
+     *
+     * But we never WANTED those rows. Every one of them collapses into a single 'store-wide'
+     * bucket. We were downloading 25,000 junk URLs in order to add them up and throw the detail
+     * away — and still missing the tail.
+     *
+     * So: enumerate ONLY the two things we actually attribute (products and collections), which are
+     * naturally bounded by the size of the catalogue, and DERIVE store-wide by subtraction:
+     *
+     *     store-wide[type] = storeTotal[type] − Σ(product rows)[type] − Σ(collection rows)[type]
+     *
+     * Nothing is lost and nothing is invented — the parts still sum to the store's own total, by
+     * construction rather than by luck. It is also far CHEAPER: a handful of pages instead of 25+.
+     *
+     * The completeness check does not weaken. We verify, with two cheap grouped calls, that the
+     * product and collection subsets were paged to the END (Σ paged product rows === Shopify's own
+     * product-landing total, ditto collections). Those are the numbers we actually display; the
+     * remainder is store-wide by definition. A negative remainder means the arithmetic disagrees
+     * with Shopify, and fails the day.
+     *
+     * If ShopifyQL rejects the CONTAINS predicate (unverified against this endpoint), every bounded
+     * query returns null and we fall back to the legacy full scan. Fail-safe, not fail-broken.
+     *
      * @return array{rows: array<int, array<string, mixed>>, isComplete: bool, storeTotal: int|null, pagedTotal: int}
      */
     public function fetchDay(PlatformConnection $conn, string $day): array
     {
         $client = $this->makeClient($conn);
 
-        // The truth we reconcile against: Shopify's own store-level split for the day.
-        // Four rows, one cheap call. Null = we could not establish a truth → fail closed.
-        $storeTotal = $this->storeTotalForDay($client, $day);
+        // The truth everything is checked against: Shopify's own per-type split for the day.
+        // Five rows, one cheap call. Null = we could not establish a truth → fail closed.
+        $storeByType = $this->storeTotalsByType($client, $day);
+        $storeTotal  = $storeByType === null ? null : array_sum($storeByType);
 
+        if ($storeByType !== null) {
+            $bounded = $this->fetchBounded($conn, $client, $day, $storeByType);
+            if ($bounded !== null) {
+                return $bounded;
+            }
+
+            Log::warning('shopify.session_traffic.bounded_unavailable', [
+                'brand_id' => $conn->brand_id,
+                'date'     => $day,
+                'note'     => 'CONTAINS-filtered queries failed; falling back to the full landing-path scan',
+            ]);
+        }
+
+        return $this->fetchLegacyFullScan($conn, $client, $day, $storeTotal);
+    }
+
+    /**
+     * The legacy path: page the ENTIRE landing-path breakdown and require it to sum to the store
+     * total. Retained only as a fallback for the case where ShopifyQL will not accept a CONTAINS
+     * filter. It is correct but expensive, and on a very large day it can still hit the ceiling —
+     * in which case it fails the day loudly rather than storing a short number.
+     *
+     * @return array{rows: array<int, array<string, mixed>>, isComplete: bool, storeTotal: int|null, pagedTotal: int}
+     */
+    private function fetchLegacyFullScan(PlatformConnection $conn, ShopifyClient $client, string $day, ?int $storeTotal): array
+    {
         $raw        = [];
         $pagedTotal = 0;
         $offset     = 0;
@@ -163,6 +236,240 @@ class SessionTrafficFetcher
     }
 
     /**
+     * Enumerate ONLY products and collections; derive store-wide by subtraction.
+     *
+     * Returns null when the CONTAINS predicate isn't usable, so the caller can fall back.
+     *
+     * @param  array<string, int>  $storeByType  Shopify's own per-type totals for the day
+     * @return array{rows: array<int, array<string, mixed>>, isComplete: bool, storeTotal: int|null, pagedTotal: int}|null
+     */
+    private function fetchBounded(PlatformConnection $conn, ShopifyClient $client, string $day, array $storeByType): ?array
+    {
+        // The two subsets we actually attribute. Bounded by the catalogue, not by traffic.
+        $productRows = $this->pageFiltered($client, $day, self::PRODUCT_MATCH);
+        if ($productRows === null) {
+            return null;
+        }
+
+        $collectionRows = $this->pageFiltered($client, $day, self::COLLECTION_MATCH);
+        if ($collectionRows === null) {
+            return null;
+        }
+
+        // ══ THE COMPLETENESS CHECK ══
+        // Two cheap grouped calls (5 rows each) give Shopify's OWN total for each subset. If our
+        // paged rows sum to exactly that, we reached the end of each subset — which is the only
+        // thing that could have gone wrong now that we no longer chase the unbounded tail.
+        $checkProducts = $this->groupedTotalsByType($client, $day, self::PRODUCT_MATCH);
+        if ($checkProducts === null) {
+            return null;
+        }
+
+        $checkCollections = $this->groupedTotalsByType($client, $day, self::COLLECTION_MATCH);
+        if ($checkCollections === null) {
+            return null;
+        }
+
+        $pagedProducts    = $this->sumByType($productRows);
+        $pagedCollections = $this->sumByType($collectionRows);
+
+        $isComplete = true;
+
+        // ══ A SIXTH TRAFFIC TYPE MUST FAIL THE DAY, LOUDLY ══
+        // Store-wide is derived by subtracting attributed sessions from `storeByType`, and that
+        // subtraction only walks TRAFFIC_TYPES. A type Shopify invented under us would therefore be
+        // counted in the store total and then silently never subtracted OR emitted — its sessions
+        // would simply evaporate, with the day looking green. `unattributed` was exactly this bug
+        // once already (7 sessions a year, invisible in a 30-day probe). Once was enough.
+        foreach (array_keys($storeByType) as $type) {
+            if (! in_array($type, self::TRAFFIC_TYPES, true)) {
+                Log::warning('shopify.session_traffic.unknown_traffic_type', [
+                    'brand_id' => $conn->brand_id,
+                    'date'     => $day,
+                    'type'     => $type,
+                ]);
+                $isComplete = false;
+            }
+        }
+
+        foreach ([[$pagedProducts, $checkProducts, 'product'], [$pagedCollections, $checkCollections, 'collection']] as [$paged, $truth, $label]) {
+            foreach (self::TRAFFIC_TYPES as $type) {
+                $got  = $paged[$type] ?? 0;
+                $want = $truth[$type] ?? 0;
+
+                if ($got !== $want) {
+                    Log::warning('shopify.session_traffic.subset_incomplete', [
+                        'brand_id' => $conn->brand_id,
+                        'date'     => $day,
+                        'subset'   => $label,
+                        'type'     => $type,
+                        'paged'    => $got,
+                        'shopify'  => $want,
+                    ]);
+                    $isComplete = false;
+                }
+            }
+        }
+
+        /*
+         * ══ STORE-WIDE BY SUBTRACTION ══
+         * Everything that did not land on a product or a collection page: the homepage, /pages,
+         * search, blogs, and the tens of thousands of one-off checkout URLs. We do not enumerate
+         * them; we compute them. The parts therefore sum to Shopify's own total BY CONSTRUCTION.
+         *
+         * A collection-nested product URL (/collections/x/products/y) is matched by BOTH filters,
+         * so it appears in both row sets. It is a PRODUCT landing (the visitor landed on a product
+         * page), and `LandingPathMapper::resolve` says so. Counting it once here — and only once —
+         * is what `attributedByType` guarantees: it sums the RESOLVED buckets, so a nested path is
+         * counted as its product and never as its collection.
+         */
+        $merged     = $this->mergeDistinctPaths($productRows, $collectionRows);
+        $buckets    = $this->aggregate($merged, $isComplete);
+        $attributed = $this->attributedByType($buckets);
+
+        $storeWide = [];
+        foreach (self::TRAFFIC_TYPES as $type) {
+            $remainder = ($storeByType[$type] ?? 0) - ($attributed[$type] ?? 0);
+
+            if ($remainder < 0) {
+                // We attributed MORE sessions to products+collections than Shopify says the store
+                // had of that type. The arithmetic disagrees with the source, so the day is not
+                // trustworthy — clamp to zero so we never store a negative, and fail it.
+                Log::warning('shopify.session_traffic.negative_store_wide', [
+                    'brand_id'    => $conn->brand_id,
+                    'date'        => $day,
+                    'type'        => $type,
+                    'store_total' => $storeByType[$type] ?? 0,
+                    'attributed'  => $attributed[$type] ?? 0,
+                ]);
+                $isComplete = false;
+                $remainder  = 0;
+            }
+
+            $storeWide[$type] = $remainder;
+        }
+
+        // Re-stamp: `aggregate()` baked the completeness flag into every row before the
+        // subtraction ran, so a failure discovered HERE has to be pushed back onto those rows.
+        // Otherwise the day would be flagged incomplete while its rows claimed to be fine — and
+        // the read layer trusts the rows.
+        $rows = [];
+        foreach ($buckets as $b) {
+            $b['is_complete'] = $isComplete;
+            $rows[] = $b;
+        }
+
+        foreach ($storeWide as $type => $sessions) {
+            if ($sessions <= 0) {
+                continue;   // a type with no store-wide traffic needs no row
+            }
+
+            $rows[] = [
+                'entity_type'  => LandingPathMapper::TYPE_OTHER,
+                'entity_key'   => LandingPathMapper::OTHER_KEY,
+                'traffic_type' => $type,
+                'sessions'     => $sessions,
+                'is_complete'  => $isComplete,
+            ];
+        }
+
+        $pagedTotal = array_sum($attributed) + array_sum($storeWide);
+
+        if (! $isComplete) {
+            Log::warning('shopify.session_traffic.reconcile_failed', [
+                'brand_id'    => $conn->brand_id,
+                'date'        => $day,
+                'store_total' => array_sum($storeByType),
+                'paged_total' => $pagedTotal,
+                'mode'        => 'bounded',
+            ]);
+        }
+
+        return [
+            'rows'       => $rows,
+            'isComplete' => $isComplete,
+            'storeTotal' => array_sum($storeByType),
+            'pagedTotal' => $pagedTotal,
+        ];
+    }
+
+    /**
+     * Merge the product and collection row sets, keeping each (path, traffic_type) ONCE.
+     *
+     * ══ WHY THIS IS NOT array_merge ══
+     * `/collections/best-sellers/products/lucrecia` contains BOTH '/products/' and '/collections/',
+     * so it comes back from BOTH filtered queries — the same row, twice, with the same session
+     * count. `aggregate()` buckets by resolved entity and SUMS, so a plain merge would count that
+     * product's sessions twice: its numbers would be inflated, and `attributedByType` would then
+     * subtract too much from the store total and drive store-wide negative.
+     *
+     * Collection-nested product URLs are common (they are what a collection page links to), so this
+     * is not an edge case — it would have corrupted the busiest products on every store.
+     *
+     * @param  array<int, array{path: string, traffic_type: string, sessions: int}>  $a
+     * @param  array<int, array{path: string, traffic_type: string, sessions: int}>  $b
+     * @return array<int, array{path: string, traffic_type: string, sessions: int}>
+     */
+    private function mergeDistinctPaths(array $a, array $b): array
+    {
+        $seen = [];
+
+        foreach (array_merge($a, $b) as $r) {
+            // Shopify returns one row per (landing_page_path, traffic_type), so the pair is the
+            // natural identity. Same key from both queries = the same row, not two rows to add.
+            $key = (string) $r['path'] . "\0" . strtolower(trim((string) $r['traffic_type']));
+            $seen[$key] ??= $r;
+        }
+
+        return array_values($seen);
+    }
+
+    /**
+     * Sessions per traffic type across a raw row set (before entity resolution). Used to check that
+     * a paged subset reached its end.
+     *
+     * @param  array<int, array{path: string, traffic_type: string, sessions: int}>  $rows
+     * @return array<string, int>
+     */
+    private function sumByType(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $r) {
+            $t = strtolower(trim((string) $r['traffic_type']));
+            if ($t === '') {
+                continue;
+            }
+            $out[$t] = ($out[$t] ?? 0) + (int) $r['sessions'];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Sessions per traffic type that were ATTRIBUTED to a product or a collection — i.e. everything
+     * except the store-wide bucket. This is what gets subtracted from the store total.
+     *
+     * Reads the RESOLVED buckets, not the raw rows, so a collection-nested product path counts once
+     * (as its product) rather than twice.
+     *
+     * @param  array<int, array<string, mixed>>  $buckets
+     * @return array<string, int>
+     */
+    private function attributedByType(array $buckets): array
+    {
+        $out = [];
+        foreach ($buckets as $b) {
+            if ((string) $b['entity_type'] === LandingPathMapper::TYPE_OTHER) {
+                continue;
+            }
+            $t = (string) $b['traffic_type'];
+            $out[$t] = ($out[$t] ?? 0) + (int) $b['sessions'];
+        }
+
+        return $out;
+    }
+
+    /**
      * @param array<int, array<string, mixed>> $raw
      * @return array{rows: array<int, array<string, mixed>>, isComplete: bool, storeTotal: int|null, pagedTotal: int}
      */
@@ -241,25 +548,54 @@ class SessionTrafficFetcher
     }
 
     /**
-     * The store's own session total for the day, from the 4-row traffic-type split. This is
-     * the number the paged rows must add up to. Null on any failure — a reconciliation we
-     * cannot perform is a reconciliation that FAILED.
+     * The store's own per-traffic-type session split for the day. This is the truth every other
+     * number in this class is checked against, and the base for the store-wide subtraction.
+     *
+     * Null on any failure — a reconciliation we cannot perform is a reconciliation that FAILED.
+     *
+     * @return array<string, int>|null
      */
-    private function storeTotalForDay(ShopifyClient $client, string $day): ?int
+    private function storeTotalsByType(ShopifyClient $client, string $day): ?array
     {
+        return $this->groupedTotalsByType($client, $day, null);
+    }
+
+    /**
+     * Sessions per traffic type for the day, optionally restricted to landing paths containing a
+     * substring ('/products/', '/collections/').
+     *
+     * Five rows, one cheap call. With a filter, this is Shopify's OWN total for that subset — the
+     * number our paged rows for that subset must match exactly, which is how we know we paged to
+     * the end without having to enumerate the unbounded junk tail.
+     *
+     * @return array<string, int>|null
+     */
+    private function groupedTotalsByType(ShopifyClient $client, string $day, ?string $contains): ?array
+    {
+        // The filter value is a hard-coded class constant, never user input — but quote-strip it
+        // anyway so it can't break out of the literal if that ever changes.
+        $where = $contains === null
+            ? ''
+            : "WHERE landing_page_path CONTAINS '" . str_replace(["'", '"'], '', $contains) . "' ";
+
+        // CLAUSE ORDER copied from RevenueFetcher::runGroupedSalesQuery, which has run against this
+        // same endpoint in production for months: GROUP BY … SINCE … UNTIL … WHERE … LIMIT.
+        // `WHERE` goes AFTER the date range, not before it. Inventing an order here would risk a
+        // parse error — which ShopifyQL reports as an EMPTY TABLE, not an exception.
         $ql = 'FROM sessions SHOW sessions GROUP BY traffic_type '
-            . "SINCE {$day} UNTIL {$day} LIMIT 50";
+            . "SINCE {$day} UNTIL {$day} "
+            . $where
+            . 'LIMIT 50';
 
         // ══ RETRY, BECAUSE THIS CALL FAILING THROWS AWAY A GOOD DAY ══
         // Observed in production: brand 76 / 2026-03-07 paged 49,274 sessions perfectly, then this
-        // four-row query returned null — and the whole day was discarded on the strength of the
-        // CHEAP call failing while the EXPENSIVE one succeeded. ShopifyQL is cost-throttled, and
-        // this call fires immediately after (or before) a 25-page burst, so it is the most likely
-        // thing in the sequence to get rate-limited.
+        // small query returned null — and the whole day was discarded because the CHEAP call failed
+        // while the EXPENSIVE one succeeded. ShopifyQL is cost-throttled, and this fires alongside a
+        // burst of paged calls, so it is the most likely thing in the sequence to get rate-limited.
         //
-        // Three attempts with a widening backoff. Still failing after that is a real failure and
-        // still returns null — we do NOT invent a total, because the total is the thing every other
-        // number in this class is checked against.
+        // NOTE: a retry cannot rescue an UNSUPPORTED predicate — a parse error fails all three
+        // attempts identically, returns null, and the caller falls back to the full scan. That is
+        // the intended behaviour, not a wasted 4 seconds we care about.
         $table = null;
         foreach ([0, 1_000_000, 3_000_000] as $waitMicros) {
             if ($waitMicros > 0) {
@@ -273,9 +609,9 @@ class SessionTrafficFetcher
         }
 
         if ($table === null) {
-            Log::warning('shopify.session_traffic.store_total_unavailable', [
-                'date' => $day,
-                'note' => 'reconciliation truth could not be fetched after 3 attempts; day failed closed',
+            Log::warning('shopify.session_traffic.grouped_total_unavailable', [
+                'date'     => $day,
+                'contains' => $contains,
             ]);
 
             return null;
@@ -283,17 +619,77 @@ class SessionTrafficFetcher
 
         [, $rows] = $table;
 
-        $total = 0;
+        $out = [];
         foreach ($rows as $row) {
-            if (! is_array($row) || ! array_key_exists('sessions', $row)) {
-                // A row we cannot read is NOT a row worth zero. Fail the day rather than
-                // silently under-count the number everything else reconciles against.
+            if (! is_array($row) || ! array_key_exists('sessions', $row) || ! array_key_exists('traffic_type', $row)) {
+                // A row we cannot read is NOT a row worth zero. Fail rather than silently
+                // under-count the number everything else is checked against.
                 return null;
             }
-            $total += (int) round((float) $row['sessions']);
+
+            $type = strtolower(trim((string) $row['traffic_type']));
+            if ($type === '') {
+                continue;
+            }
+
+            $out[$type] = ($out[$type] ?? 0) + (int) round((float) $row['sessions']);
         }
 
-        return $total;
+        return $out;
+    }
+
+    /**
+     * Page the landing-path breakdown for ONE subset of paths (products or collections).
+     *
+     * Bounded by the catalogue rather than by traffic: a store has thousands of products, not tens
+     * of thousands of one-off checkout URLs. This is what makes the page ceiling irrelevant.
+     *
+     * NULL on any failure — including a rejected CONTAINS predicate, which is how the caller learns
+     * to fall back to the legacy full scan.
+     *
+     * @return array<int, array{path: string, traffic_type: string, sessions: int}>|null
+     */
+    private function pageFiltered(ShopifyClient $client, string $day, string $contains): ?array
+    {
+        $filter = str_replace(["'", '"'], '', $contains);
+        $out    = [];
+        $offset = 0;
+
+        for ($page = 0; $page < self::MAX_PAGES; $page++) {
+            // Same proven clause order as RevenueFetcher: GROUP BY … SINCE … UNTIL … WHERE … ORDER
+            // BY … LIMIT … OFFSET.
+            $ql = 'FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type '
+                . "SINCE {$day} UNTIL {$day} "
+                . "WHERE landing_page_path CONTAINS '{$filter}' "
+                . 'ORDER BY sessions DESC '
+                . 'LIMIT ' . self::PAGE_SIZE . ' OFFSET ' . $offset;
+
+            $rows = $this->parseRows($this->runQuery($client, $ql), $day);
+            if ($rows === null) {
+                return null;
+            }
+
+            foreach ($rows as $r) {
+                $out[] = $r;
+            }
+
+            if (count($rows) < self::PAGE_SIZE) {
+                return $out;   // short page = the end of this subset
+            }
+
+            $offset += self::PAGE_SIZE;
+        }
+
+        // Ran out of pages even on a BOUNDED subset. That means a store with >200,000 distinct
+        // product landing paths in one day, which is not a thing — so treat it as a failure rather
+        // than quietly returning a truncated set that the subset check would then reject anyway.
+        Log::warning('shopify.session_traffic.subset_ceiling_hit', [
+            'date'     => $day,
+            'contains' => $contains,
+            'rows'     => count($out),
+        ]);
+
+        return null;
     }
 
     /**
@@ -309,7 +705,21 @@ class SessionTrafficFetcher
             . 'ORDER BY sessions DESC '
             . 'LIMIT ' . self::PAGE_SIZE . ' OFFSET ' . $offset;
 
-        $table = $this->runQuery($client, $ql);
+        return $this->parseRows($this->runQuery($client, $ql), $day);
+    }
+
+    /**
+     * Turn one ShopifyQL table into landing-path rows. Shared by the legacy full scan and the
+     * bounded subset paging, so the two can never drift into parsing the same response differently.
+     *
+     * NULL on any unreadable response — the caller must treat that as "the day is incomplete",
+     * never as "the page was empty".
+     *
+     * @param  array{0: array<int, mixed>, 1: array<int, mixed>}|null  $table
+     * @return array<int, array{path: string, traffic_type: string, sessions: int}>|null
+     */
+    private function parseRows(?array $table, string $day): ?array
+    {
         if ($table === null) {
             return null;
         }

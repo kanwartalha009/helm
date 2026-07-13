@@ -205,6 +205,34 @@ class ShopifyReconcileSessionDayCommand extends Command
             $this->error('OVER-COUNT: the paged sum EXCEEDS the store total — OFFSET paging is returning rows twice.');
         }
 
+        /* ── 5. Does the BOUNDED strategy work on this store? ────────────────────────── */
+
+        $this->newLine();
+        $this->line('── Bounded strategy (the fix): enumerate products + collections, derive store-wide ──');
+
+        $probe = $this->runQl(
+            $client,
+            'FROM sessions SHOW sessions GROUP BY traffic_type '
+            . "SINCE {$day} UNTIL {$day} "
+            . "WHERE landing_page_path CONTAINS '/products/' "
+            . 'LIMIT 50',
+        );
+
+        if ($probe === null) {
+            $this->error('  CONTAINS is NOT supported by this endpoint — the fetcher will fall back to the full scan.');
+            $this->line('  The full scan hits a page ceiling on days this size, so those days cannot reconcile.');
+        } else {
+            $prodTotal = 0;
+            foreach ($probe as $r) {
+                $prodTotal += (int) round((float) ($r['sessions'] ?? 0));
+            }
+
+            $this->info('  CONTAINS works. Product-landing sessions: ' . number_format($prodTotal));
+            $this->line('  Store-wide is then ' . number_format($storeTotal - $prodTotal)
+                . ' minus collection landings — DERIVED, so it reconciles by construction and the');
+            $this->line('  ' . number_format($rowCount) . '-row junk tail never has to be downloaded at all.');
+        }
+
         $dump = (int) $this->option('dump');
         if ($dump > 0) {
             $this->newLine();

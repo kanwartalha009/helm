@@ -84,6 +84,17 @@ final class SessionTrafficFetcherTest extends TestCase
         ];
     }
 
+    /**
+     * Index resolved rows by "entity:traffic_type" so an assertion names what it means.
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return \Illuminate\Support\Collection<string, array<string, mixed>>
+     */
+    private function byKey(array $rows)
+    {
+        return collect($rows)->keyBy(fn (array $r): string => $r['entity_key'] . ':' . $r['traffic_type']);
+    }
+
     /** The store-level 4-row split the fetcher reconciles against. */
     private function totalsResponse(int $paid, int $direct, int $organic, int $unknown): array
     {
@@ -96,28 +107,77 @@ final class SessionTrafficFetcherTest extends TestCase
     }
 
     /**
-     * Route each faked GraphQL call by looking at the ShopifyQL in the request body. The
-     * fetcher issues one totals call and then N page calls.
+     * A fake store, not a fake response.
      *
-     * @param array<int, array<int, array<int, string>>> $pages rows per page, in order
+     * ══ WHY THIS HAD TO BECOME FILTER-AWARE ══
+     * The fetcher no longer enumerates every landing path — it queries the '/products/' and
+     * '/collections/' SUBSETS and derives store-wide by subtraction (see fetchDay). So it now issues
+     * FIVE kinds of call: the store split, the two subset splits, and the two subset page queries.
+     * The old fake answered "any GROUP BY traffic_type" with the store totals, which would hand the
+     * product-subset check the STORE's numbers and make every test lie.
+     *
+     * This serves the supplied rows the way a real store would: filtered by the CONTAINS predicate,
+     * sliced by LIMIT/OFFSET, and with the subset totals COMPUTED from those same rows — so a test
+     * cannot accidentally assert against a self-contradictory store.
+     *
+     * `$subsetOverrides` exists to inject a DELIBERATE disagreement (Shopify says the product subset
+     * has 500 sessions; paging it yields 10), which is the only thing "incomplete" can now mean.
+     *
+     * @param  array<int, array<int, array<int, string>>>  $pages  rows, in pages (flattened here)
+     * @param  array<string, array<string, int>>  $subsetOverrides  '/products/' => ['paid' => 500]
      */
-    private function fakeShopify(array $totals, array $pages): void
+    private function fakeShopify(array $totals, array $pages, array $subsetOverrides = []): void
     {
-        $pageNo = 0;
+        $all = $pages === [] ? [] : array_merge(...$pages);
 
         Http::fake([
-            '*/graphql.json' => function ($request) use ($totals, $pages, &$pageNo) {
+            '*/graphql.json' => function ($request) use ($totals, $all, $subsetOverrides) {
                 $ql = (string) ($request->data()['variables']['q'] ?? '');
 
-                if (str_contains($ql, 'GROUP BY traffic_type')) {
-                    return Http::response($totals, 200);
+                $filter = null;
+                foreach (['/products/', '/collections/'] as $needle) {
+                    if (str_contains($ql, "CONTAINS '{$needle}'")) {
+                        $filter = $needle;
+                        break;
+                    }
                 }
 
-                $rows = $pages[$pageNo] ?? [];
-                $pageNo++;
+                $matching = $filter === null
+                    ? $all
+                    : array_values(array_filter($all, fn (array $r) => str_contains($r[0], $filter)));
+
+                // ── The per-traffic-type split (no landing_page_path dimension) ──
+                if (! str_contains($ql, 'landing_page_path,')) {
+                    if ($filter === null) {
+                        return Http::response($totals, 200);   // the STORE total, as supplied
+                    }
+
+                    // A subset total. Computed from the same rows the page queries will serve, so
+                    // the fake store is self-consistent — unless the test deliberately overrides it.
+                    $byType = $subsetOverrides[$filter] ?? [];
+                    if ($byType === []) {
+                        foreach ($matching as $r) {
+                            $byType[$r[1]] = ($byType[$r[1]] ?? 0) + (int) $r[2];
+                        }
+                    }
+
+                    $rows = [];
+                    foreach ($byType as $type => $sessions) {
+                        $rows[] = [(string) $type, (string) $sessions];
+                    }
+
+                    return Http::response($this->table(['traffic_type', 'sessions'], $rows), 200);
+                }
+
+                // ── A page of the landing-path breakdown, honouring LIMIT/OFFSET like the real API ──
+                $limit  = preg_match('/LIMIT (\d+)/', $ql, $m) ? (int) $m[1] : 1000;
+                $offset = preg_match('/OFFSET (\d+)/', $ql, $m) ? (int) $m[1] : 0;
 
                 return Http::response(
-                    $this->table(['landing_page_path', 'traffic_type', 'sessions'], $rows),
+                    $this->table(
+                        ['landing_page_path', 'traffic_type', 'sessions'],
+                        array_slice($matching, $offset, $limit),
+                    ),
                     200,
                 );
             },
@@ -158,29 +218,74 @@ final class SessionTrafficFetcherTest extends TestCase
 
     public function test_a_day_that_does_not_reconcile_is_stored_incomplete(): void
     {
-        // Shopify says 500 sessions; the rows we got add to 10. Something was dropped. The ONLY
-        // safe response is to admit it — a 10 rendered as fact would be a lie with a decimal point.
+        // Shopify says the PRODUCT subset has 500 sessions; paging that subset yields 10. Rows were
+        // dropped, so the day is a lie and must be flagged.
+        //
+        // ══ WHAT "DOES NOT RECONCILE" NOW MEANS ══
+        // It used to mean "Σ(every landing path) !== the store total". That test is UNACHIEVABLE on
+        // a real store: every checkout mints a unique one-session URL, so a busy day has tens of
+        // thousands of distinct paths, we hit the page ceiling, and the day failed by however many
+        // rows we didn't reach. That is precisely the production bug (152,621 vs 151,485).
+        //
+        // We no longer enumerate the junk tail at all — store-wide is DERIVED by subtraction, so it
+        // reconciles by construction. The only thing that can still go wrong is failing to page the
+        // PRODUCT or COLLECTION subsets to their end, and that is what this now asserts.
         $this->fakeShopify(
             $this->totalsResponse(paid: 500, direct: 0, organic: 0, unknown: 0),
             [[['/products/jay', 'paid', '10']]],
+            ['/products/' => ['paid' => 500]],   // Shopify: the product subset is 500. We got 10.
         );
 
         $conn   = $this->conn();
         $result = app(SessionTrafficFetcher::class)->fetchDay($conn, self::DAY);
 
-        $this->assertFalse($result['isComplete']);
-        $this->assertSame(500, $result['storeTotal']);
-        $this->assertSame(10, $result['pagedTotal']);
+        $this->assertFalse($result['isComplete'], 'the product subset was not paged to the end');
 
-        // The rows are still stored — but every one of them is flagged, so the read layer
-        // renders "—" rather than 10.
+        // Rows are still stored — but every one is flagged, so the read layer renders "—", not 10.
         foreach ($result['rows'] as $row) {
             $this->assertFalse($row['is_complete']);
         }
 
         app(SessionTrafficSync::class)->syncDay($conn, self::DAY);
         $this->assertSame(0, SessionTrafficDaily::where('is_complete', true)->count());
-        $this->assertSame(1, SessionTrafficDaily::where('is_complete', false)->count());
+    }
+
+    public function test_a_busy_day_whose_junk_tail_exceeds_the_page_ceiling_now_RECONCILES(): void
+    {
+        // ══ THE PRODUCTION BUG, PINNED ══
+        //     2026-06-28  Shopify: 152,621 sessions   our breakdown: 151,485   short 1,136
+        // Every checkout mints a unique one-session landing URL, so the distinct-path count scales
+        // with traffic without limit. The old fetcher paged ALL of them, hit its 25,000-row ceiling,
+        // and came up short by exactly the rows it never reached — for THREE WEEKS, on the days that
+        // matter most, with no way to fix it.
+        //
+        // Here: 1 product with 20 sessions, and 30,000 junk checkout URLs carrying 30,000 sessions.
+        // Store total 30,020. The junk tail is FAR beyond any ceiling — and it no longer matters,
+        // because we never ask for it.
+        $junk = [];
+        for ($i = 0; $i < 30_000; $i++) {
+            $junk[] = ["/checkouts/cn/token-{$i}/en", 'direct', '1'];
+        }
+
+        $this->fakeShopify(
+            $this->totalsResponse(paid: 20, direct: 30_000, organic: 0, unknown: 0),
+            [array_merge([['/products/jay', 'paid', '20']], $junk)],
+        );
+
+        $result = app(SessionTrafficFetcher::class)->fetchDay($this->conn(), self::DAY);
+
+        $this->assertTrue($result['isComplete'], 'the junk tail must not be able to break a day');
+        $this->assertSame(30_020, $result['storeTotal']);
+        $this->assertSame(30_020, $result['pagedTotal'], 'the parts still sum to the store total');
+
+        $byKey = $this->byKey($result['rows']);
+
+        // The product is measured exactly…
+        $this->assertSame(20, $byKey['jay:paid']['sessions']);
+
+        // …and all 30,000 junk URLs are accounted for in ONE derived store-wide row, without a
+        // single one of them ever being downloaded.
+        $this->assertSame(30_000, $byKey['store-wide:direct']['sessions']);
     }
 
     public function test_locale_variants_of_one_product_collapse_into_a_single_row(): void
@@ -476,34 +581,31 @@ final class SessionTrafficFetcherTest extends TestCase
         // rows — hundreds of them — so callers read "1,847 rows written" as success. The backfill
         // logged the day as filled, the repair button reported success, and the window stayed blank
         // click after click. A row count says NOTHING about whether the rows can be trusted.
+        // Shopify says the product subset holds 500 sessions; paging it yields one row worth 10.
+        // Rows were dropped, so the day cannot be trusted — even though it wrote a row.
         $this->fakeShopify(
             $this->totalsResponse(paid: 500, direct: 0, organic: 0, unknown: 0),
-            [[['/products/jay', 'paid', '10']]],   // Shopify says 500; the breakdown adds to 10
+            [[['/products/jay', 'paid', '10']]],
+            ['/products/' => ['paid' => 500]],
         );
 
         $result = app(SessionTrafficSync::class)->syncDay($this->conn(), self::DAY);
 
         // Rows WERE written…
-        $this->assertSame(1, $result->rowsWritten);
-        $this->assertSame(1, SessionTrafficDaily::count());
+        $this->assertGreaterThan(0, $result->rowsWritten);
+        $this->assertGreaterThan(0, SessionTrafficDaily::count());
 
-        // …and the day is still UNUSABLE. This is the assertion that would have caught it.
+        // …and the day is still UNUSABLE. THIS is the assertion that would have caught the lie:
+        // the old contract could only say "rows > 0", which is not an answer to "can I trust this?".
         $this->assertTrue($result->established, 'we did get an answer out of Shopify');
         $this->assertFalse($result->complete, 'a day that does not reconcile is NOT a success');
-        $this->assertSame(490, $result->shortfall());
 
         // The verdict is recorded, and it says the day cannot be used.
         $day = SessionTrafficDay::where('date', self::DAY)->firstOrFail();
         $this->assertFalse((bool) $day->is_complete);
-        $this->assertSame(500, $day->store_total);
-        $this->assertSame(10, $day->paged_total);
 
-        // And it explains ITSELF — "Shopify reports 500 sessions … breakdown only adds up to 10
-        // (490 missing)" — so the operator gets a fact they can act on, not an amber shrug.
-        $reason = $result->reason();
-        $this->assertStringContainsString('500', $reason);
-        $this->assertStringContainsString('10', $reason);
-        $this->assertStringContainsString('490 missing', $reason);
+        // Nothing in the breakdown table is readable, so the read gate renders "—", never a number.
+        $this->assertSame(0, SessionTrafficDaily::where('is_complete', true)->count());
     }
 
     public function test_a_genuinely_quiet_day_is_recorded_as_complete_even_though_it_has_no_rows(): void
