@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Jobs\SyncBrandDayJob;
+use App\Jobs\SyncBrandEnrichmentJob;
 use App\Models\Brand;
 use App\Models\DailyMetric;
 use App\Models\PlatformConnection;
@@ -12,14 +13,12 @@ use App\Models\SyncLog;
 use App\Platforms\Contracts\MetricSnapshot;
 use App\Platforms\Contracts\PlatformAdapter;
 use App\Platforms\PlatformRegistry;
-use App\Platforms\Shopify\RevenueFetcher;
 use App\Platforms\Support\PlatformRateLimitedException;
 use App\Services\Currency\FxService;
-use App\Services\Sync\AdSetSync;
-use App\Services\Sync\CampaignSync;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Mockery;
 use RuntimeException;
 use Tests\TestCase;
@@ -58,15 +57,12 @@ final class SyncBrandDayJobTest extends TestCase
         $registry = new PlatformRegistry(app(), ['shopify' => $adapter::class]);
         app()->instance($adapter::class, $adapter);
 
-        // Isolate the unit: the best-effort sub-syncs (campaigns, ad-sets,
-        // breakdowns, funnel, commerce) are not under test and must not attempt HTTP.
-        $campaigns = Mockery::mock(CampaignSync::class)->shouldIgnoreMissing();
-        $adSets    = Mockery::mock(AdSetSync::class)->shouldIgnoreMissing();
-        $revenue   = Mockery::mock(RevenueFetcher::class);
-        $revenue->shouldReceive('funnelByDimensionRange')->andReturn([]);
-        $revenue->shouldReceive('salesByDimensionRange')->andReturn([]);
+        // Phase 1 no longer DOES the enrichment — it dispatches SyncBrandEnrichmentJob and stops.
+        // Faking the bus keeps that job off the `sync` queue driver, where it would otherwise run
+        // inline and attempt real HTTP; it also lets us assert the hand-off itself.
+        Bus::fake([SyncBrandEnrichmentJob::class]);
 
-        $job->handle($registry, app(FxService::class), $campaigns, $adSets, $revenue);
+        $job->handle($registry, app(FxService::class));
     }
 
     private function queuedLog(CarbonImmutable $date): SyncLog
@@ -112,6 +108,54 @@ final class SyncBrandDayJobTest extends TestCase
         $this->conn->refresh();
         $this->assertNotNull($this->conn->last_sync_at);
         $this->assertNull($this->conn->last_error);
+
+        // Phase 1 hands enrichment off rather than doing it. This is what makes the dashboard
+        // fill fast: the worker is released the moment the headline number is down.
+        Bus::assertDispatched(SyncBrandEnrichmentJob::class);
+    }
+
+    public function test_the_headline_number_lands_BEFORE_enrichment_is_even_queued(): void
+    {
+        // THE point of the split. "Sync now" used to hold a worker for a minute per brand doing
+        // campaigns/creatives/breakdowns, so across 88 brands the LAST brand's revenue — the
+        // column the dashboard actually shows — landed minutes after the first.
+        //
+        // Now phase 1 writes daily_metrics and STOPS. The enrichment job is only dispatched
+        // afterwards, which puts it at the BACK of a FIFO queue — behind every other brand's
+        // phase-1 job. So every brand's revenue is written before ANY enrichment begins.
+        $date = CarbonImmutable::now('UTC')->subDay()->startOfDay();
+        $log  = $this->queuedLog($date);
+
+        $adapter = new FakeShopifyAdapter(fn () => new MetricSnapshot(
+            brandId: $this->brand->id,
+            platform: 'shopify',
+            date: $date,
+            currency: 'EUR',
+            revenue: 500.0,
+            netSales: 480.0,
+            totalSales: 500.0,
+            orders: 9,
+            refundsAmount: 0.0,
+            isComplete: true,
+        ));
+
+        $this->runJob(new SyncBrandDayJob($this->brand, $this->conn, $date, $log->id), $adapter);
+
+        // The number is already in the table…
+        $this->assertNotNull(
+            DailyMetric::where('brand_id', $this->brand->id)->where('platform', 'shopify')->first(),
+            'the headline number must be written by phase 1, not by enrichment',
+        );
+
+        // …and enrichment has merely been QUEUED, for the same brand-day, on the same queue (the
+        // shared queue is load-bearing: a separate pool would drain in parallel and destroy the
+        // ordering guarantee this whole split depends on).
+        Bus::assertDispatched(
+            SyncBrandEnrichmentJob::class,
+            fn (SyncBrandEnrichmentJob $j): bool => $j->brand->id === $this->brand->id
+                && $j->date->toDateString() === $date->toDateString()
+                && $j->queue === 'shopify-sync',
+        );
     }
 
     public function test_funnel_step_fields_land_in_daily_metrics_columns(): void

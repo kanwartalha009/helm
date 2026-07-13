@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { Banner } from '@/components/ui';
 import { InventoryTable } from '@/components/inventory/InventoryTable';
+import { InventorySyncButton } from '@/components/inventory/InventorySyncButton';
 import { EMPTY_SPLIT, SessionTrafficStrip, TRAFFIC_TYPES } from '@/components/inventory/SessionTraffic';
 import { useInventory } from '@/hooks/useInventory';
 import { useDashboardData } from '@/hooks/useDashboardData';
@@ -96,6 +98,14 @@ export function InventoryPage() {
 
   const inv = useInventory(selectedSlug, period, customFrom, customTo, !!selectedSlug);
   const data = inv.data;
+
+  // After a manual sync lands, pull the table again. Invalidating the whole `inventory` key (not
+  // just the current window) matters: the sync refreshed the last 7 days, and the operator may
+  // flip to a different period straight after — a cached 30-day response would still be stale.
+  const qc = useQueryClient();
+  const refetchInventory = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ['inventory'] });
+  }, [qc]);
 
   const products = useMemo(() => {
     if (!data) return [];
@@ -289,6 +299,11 @@ export function InventoryPage() {
         </div>
 
         <span style={{ flex: 1 }} />
+
+        {/* Refresh stock, sales, product ad spend and sessions for a short recent window.
+            Queued + polled — the button names the dataset it's on while it runs. */}
+        <InventorySyncButton slug={selectedSlug} onSynced={refetchInventory} />
+
         <span className="text-xs muted">
           {data
             ? `${rangeLabel(data.from, data.to)} · ${

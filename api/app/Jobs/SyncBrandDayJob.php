@@ -5,22 +5,14 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Models\Brand;
-use App\Models\CommerceDailyMetric;
 use App\Models\DailyMetric;
 use App\Models\PlatformConnection;
-use App\Models\ShopifyFunnelDaily;
 use App\Models\SyncLog;
 use App\Platforms\PlatformRegistry;
-use App\Platforms\Shopify\RevenueFetcher;
 use App\Platforms\Support\PlatformRateLimitedException;
 use App\Platforms\Support\SyncFailureClassifier;
 use App\Platforms\Support\Throttle;
 use App\Services\Currency\FxService;
-use App\Services\Sync\AdSetSync;
-use App\Services\Sync\CampaignSync;
-use App\Services\Sync\CreativeSync;
-use App\Services\Sync\KlaviyoSync;
-use App\Services\Sync\SessionTrafficSync;
 use Carbon\CarbonImmutable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -31,11 +23,19 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Platform-agnostic sync of one day for one (brand × connection).
+ * PHASE 1 of the daily sync: the headline number, and nothing else.
  *
- * Resolves the adapter via PlatformRegistry, calls fetchDay(), writes a row
- * into daily_metrics and a row into sync_logs. Throws on failure so Horizon
- * handles retry (3 attempts, exponential backoff). See spec §12.3.
+ * Resolves the adapter via PlatformRegistry, calls fetchDay(), writes ONE row into daily_metrics
+ * (revenue for Shopify, spend for the ad platforms — the two columns the dashboard shows) and one
+ * row into sync_logs. Then it dispatches SyncBrandEnrichmentJob and gets out of the way.
+ *
+ * Everything else — campaigns, ad sets, creatives, breakdowns, product spend, funnel, sessions,
+ * commerce, Klaviyo — used to run inline here, which is why "Sync now" felt slow: a worker was
+ * held for a minute or more per brand doing work nobody was waiting on, so the last brand's
+ * revenue landed minutes after the first. See SyncBrandEnrichmentJob for the FIFO ordering that
+ * now guarantees every brand's headline number is written before any enrichment starts.
+ *
+ * Throws on failure so Horizon handles retry (3 attempts, exponential backoff). See spec §12.3.
  */
 class SyncBrandDayJob implements ShouldQueue
 {
@@ -80,7 +80,7 @@ class SyncBrandDayJob implements ShouldQueue
         $this->onQueue($platformConnection->platform === 'shopify' ? 'shopify-sync' : 'ads-sync');
     }
 
-    public function handle(PlatformRegistry $registry, FxService $fx, CampaignSync $campaignSync, AdSetSync $adSetSync, CreativeSync $creativeSync, RevenueFetcher $revenue, KlaviyoSync $klaviyoSync): void
+    public function handle(PlatformRegistry $registry, FxService $fx): void
     {
         // Two paths in:
         //   - $logId set      → controller/command already wrote a `queued`
@@ -162,77 +162,25 @@ class SyncBrandDayJob implements ShouldQueue
                 'last_error'   => null,
             ]);
 
-            // Keep the ads audit current: pull this day's campaign-level rows for
-            // Meta/Google right after the account-level metric lands. Best-effort
-            // — syncDay guards the platform and swallows its own errors, so it can
-            // never fail the day sync that has already succeeded above.
-            $campaignSync->syncDay($this->platformConnection, $this->date);
-
-            // Ad-set / ad-group / asset-group level rows for the same day (spec §4
-            // Phase 3c) — feeds the under-performer drill-down. Same from=to=date
-            // range as the campaign pull; best-effort + self-guarded to the three ad
-            // platforms, so it never affects the day sync that already succeeded.
-            $adSetSync->syncRange($this->platformConnection, $this->date, $this->date);
-
-            // Ad-level (creative) rows for the same day — Meta + TikTok. Creatives were the ONE
-            // dataset never wired into the daily sync: they were written only by the backfill
-            // commands, so the Creatives tab went stale the moment a backfill finished. Worse,
-            // `thumbnail_url` is a short-lived CDN link, so previews on still-running ads went
-            // blank over time. Same self-guarding best-effort contract as the ad-set pull above.
-            $creativeSync->syncRange($this->platformConnection, $this->date, $this->date);
-
-            // Meta audience-segment spend (ASC new/engaged/existing/unknown) for
-            // the dashboard's Audience view. Meta-only + best-effort (self-guards
-            // and swallows its own errors), so it never affects the main sync.
-            $campaignSync->syncMetaBreakdown($this->platformConnection, $this->date);
-
-            // Meta spend attributed to Shopify products (ad_product_daily) for
-            // the Inventory Intelligence report — one extra Meta insights call
-            // (level=ad, single day) per brand-day. Meta-only + best-effort
-            // (self-guards and swallows its own errors) like the breakdown above.
-            $campaignSync->syncMetaAdProducts($this->platformConnection, $this->date);
-
-            // TikTok audience breakdowns (country/device/age×gender) for the ads
-            // hub's TikTok Audience view. Also best-effort + self-guarded to tiktok.
-            foreach (['country', 'device', 'age_gender'] as $tiktokAxis) {
-                $campaignSync->syncTikTokBreakdown($this->platformConnection, $this->date, $tiktokAxis);
-            }
-
-            // Google device + geographic breakdowns for the ads hub's Google
-            // Overview (device donut/detail + region map). Google-only + best-effort.
-            foreach (['device', 'country'] as $googleAxis) {
-                $campaignSync->syncGoogleBreakdown($this->platformConnection, $this->date, $googleAxis);
-            }
-
-            // Shopify web funnel (sessions → cart → checkout → purchase) by country
-            // + landing path for the monthly report's §10/§11. Shopify-only +
-            // best-effort — a funnel hiccup never fails the day's main sync.
-            if ($this->platformConnection->platform === 'shopify') {
-                $this->syncShopifyFunnel($revenue, $this->platformConnection, $this->date);
-
-                // Sessions by traffic type per landing entity (Bosco item B) →
-                // session_traffic_daily, behind Inventory Intelligence. Self-guarding and
-                // self-reconciling: if the paged rows don't add up to Shopify's own store
-                // total for the day, the day is stored is_complete = false and reads show
-                // "—" rather than a short number nobody can trust.
-                app(SessionTrafficSync::class)->syncDay($this->platformConnection, $this->date->toDateString());
-
-                // Shopify commerce by country / product / category into
-                // commerce_daily_metrics for the monthly report's §1/§2/§7/§8 and
-                // the overall-performance breakdowns. Without this the granular
-                // tables only ever hold whatever shopify:backfill-commerce last
-                // wrote, so months drift stale/€0; this keeps them fresh forward.
-                // Best-effort + self-guarded, like the funnel above.
-                $this->syncShopifyCommerce($revenue, $fx, $this->platformConnection, $this->date);
-
-                // Klaviyo email-attributed revenue (GO-1.1) → email_daily_metrics.
-                // Runs on the SHOPIFY connection so it fires once per brand-day (not
-                // once per ad connection). Re-pulls this day because Klaviyo attribution
-                // changes retroactively. Self-guarded — never throws (incl. rate limits),
-                // so it can never re-queue or fail the brand's main sync. No-op when the
-                // brand has no Klaviyo key. Email revenue is its OWN channel (§0.1).
-                $klaviyoSync->syncBrandDaySafe($this->brand, $this->date);
-            }
+            // ══ THE HEADLINE NUMBER IS NOW DOWN. STOP HERE. ══
+            //
+            // Everything else this brand-day needs — campaigns, ad sets, creatives, breakdowns,
+            // product spend, funnel, sessions, commerce, Klaviyo — is ENRICHMENT. It used to run
+            // inline, right here, and that was the reason "Sync now" felt slow: each job held a
+            // worker for a minute or more doing enrichment, so with 88 brands the LAST brand's
+            // revenue and spend — the two columns Bosco actually looks at — landed several
+            // minutes after the first. The dashboard was waiting on data nobody was looking at.
+            //
+            // So enrichment moves to its own job. The ordering that makes this work is FIFO:
+            // every phase-1 job is enqueued UP FRONT (sync:daily / triggerAll dispatch them all),
+            // and an enrichment job is only pushed when its phase-1 finishes — landing it at the
+            // BACK of the queue, behind all the other brands' phase-1 jobs. So every brand's
+            // revenue + spend is written before ANY enrichment starts. The dashboard fills first,
+            // completely, and the slow work drains afterwards.
+            //
+            // Same queue on purpose: a separate queue would need a new Horizon supervisor, and
+            // would break exactly the ordering guarantee we're relying on.
+            SyncBrandEnrichmentJob::dispatch($this->brand, $this->platformConnection, $this->date);
         } catch (PlatformRateLimitedException $e) {
             // Not a failure — the platform asked us to wait. Hand the worker
             // slot to another brand and come back after the reported delay
@@ -302,130 +250,7 @@ class SyncBrandDayJob implements ShouldQueue
             ]);
     }
 
-    /**
-     * Pull one day of the Shopify web funnel (sessions → cart → checkout →
-     * purchase) by country + landing path into shopify_funnel_daily. Best-effort:
-     * each dimension guards itself so a ShopifyQL hiccup never touches the day's
-     * main sync, which has already succeeded. History is filled by
-     * shopify:backfill-funnel; this keeps it fresh.
-     */
-    private function syncShopifyFunnel(RevenueFetcher $revenue, PlatformConnection $conn, CarbonImmutable $date): void
-    {
-        $day = $date->toDateString();
 
-        foreach (['country' => 'session_country', 'landing' => 'landing_page_path'] as $type => $dim) {
-            try {
-                $rows = $revenue->funnelByDimensionRange($conn, $dim, $day, $day);
-            } catch (Throwable $e) {
-                Log::warning('sync.shopify_funnel.failed', [
-                    'brand_id'  => $conn->brand_id,
-                    'dimension' => $type,
-                    'date'      => $day,
-                    'error'     => $e->getMessage(),
-                ]);
-                continue;
-            }
-            if ($rows === []) {
-                continue;
-            }
-
-            $records = [];
-            foreach ($rows as $r) {
-                $seg = trim((string) ($r['segment_key'] ?? ''));
-                if ($seg === '') {
-                    continue;
-                }
-                $records[] = [
-                    'brand_id'           => (int) $conn->brand_id,
-                    'date'               => $day,
-                    'dimension'          => $type,
-                    'segment_key'        => mb_substr($seg, 0, 191),
-                    'segment_label'      => mb_substr((string) ($r['segment_label'] ?? $seg), 0, 191),
-                    'sessions'           => (int) ($r['sessions'] ?? 0),
-                    'cart_additions'     => (int) ($r['cart_additions'] ?? 0),
-                    'reached_checkout'   => (int) ($r['reached_checkout'] ?? 0),
-                    'completed_checkout' => (int) ($r['completed_checkout'] ?? 0),
-                    'is_complete'        => true,
-                    'pulled_at'          => now(),
-                ];
-            }
-
-            foreach (array_chunk($records, 500) as $chunk) {
-                ShopifyFunnelDaily::upsert(
-                    $chunk,
-                    ['brand_id', 'date', 'dimension', 'segment_key'],
-                    ['segment_label', 'sessions', 'cart_additions', 'reached_checkout', 'completed_checkout', 'is_complete', 'pulled_at'],
-                );
-            }
-        }
-    }
-
-    /**
-     * Pull one day of Shopify commerce (revenue / orders / units / refunds) split
-     * by country, product and category into commerce_daily_metrics — the granular
-     * tables behind the monthly report's §1/§2/§7/§8 and the overall-performance
-     * breakdowns. Native revenue + the day's stored fx snapshot (spec rule 7), so
-     * reports show USD without converting at read time. Best-effort: each
-     * dimension self-guards so a ShopifyQL hiccup never touches the day's main
-     * sync (already succeeded). History is filled by shopify:backfill-commerce;
-     * this keeps it fresh going forward. Upsert key + update list match the
-     * backfill exactly, so the two paths are idempotent against each other.
-     */
-    private function syncShopifyCommerce(RevenueFetcher $revenue, FxService $fx, PlatformConnection $conn, CarbonImmutable $date): void
-    {
-        $day      = $date->toDateString();
-        $currency = (string) ($this->brand->base_currency ?: 'USD');
-        $fxRate   = $fx->cachedToUsd($currency, $date);
-
-        foreach (['country' => 'billing_country', 'product' => 'product_title', 'category' => 'product_type'] as $type => $dim) {
-            try {
-                $sales = $revenue->salesByDimensionRange($conn, $dim, $day, $day);
-            } catch (Throwable $e) {
-                Log::warning('sync.shopify_commerce.failed', [
-                    'brand_id'  => $conn->brand_id,
-                    'dimension' => $type,
-                    'date'      => $day,
-                    'error'     => $e->getMessage(),
-                ]);
-                continue;
-            }
-            if ($sales === []) {
-                continue;
-            }
-
-            $records = [];
-            foreach ($sales as $r) {
-                $key = trim((string) ($r['key'] ?? ''));
-                if ($key === '') {
-                    continue;
-                }
-                $records[] = [
-                    'brand_id'        => (int) $conn->brand_id,
-                    'date'            => $day,
-                    'dimension_type'  => $type,
-                    'dimension_key'   => mb_substr($key, 0, 191),
-                    'dimension_label' => mb_substr((string) ($r['label'] ?? $key), 0, 191),
-                    'orders'          => $r['orders'] ?? null,
-                    'units'           => $r['units'] ?? null,
-                    'net_sales'       => $r['net'] ?? null,
-                    'total_sales'     => $r['total'] ?? null,
-                    'refunds_amount'  => $r['refunds'] ?? null,
-                    'currency'        => $currency,
-                    'fx_rate_to_usd'  => $fxRate,
-                    'is_complete'     => true,
-                    'pulled_at'       => now(),
-                ];
-            }
-
-            foreach (array_chunk($records, 500) as $chunk) {
-                CommerceDailyMetric::upsert(
-                    $chunk,
-                    ['brand_id', 'date', 'dimension_type', 'dimension_key'],
-                    ['dimension_label', 'orders', 'units', 'net_sales', 'total_sales', 'refunds_amount', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
-                );
-            }
-        }
-    }
 
     /** @return array<int, int> retry delays in seconds: 1m, 5m, 15m */
     public function backoff(): array

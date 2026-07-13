@@ -220,8 +220,13 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         Route::middleware('role:master_admin,manager')
             ->post('brands/{brand}/backfill-dataset', [BrandDataCoverageController::class, 'store']);
 
-        // Inventory Intelligence — per-product stock × Meta spend for one brand.
+        // Inventory Intelligence — per-product stock × ad spend × sessions for one brand.
         Route::get('brands/{brand}/inventory', [InventoryController::class, 'show']);
+        // Manual "Sync now" for this page: refreshes stock, sales, product ad spend and sessions
+        // over a short recent window. Queued — the UI polls the GET while it runs.
+        Route::post('brands/{brand}/inventory/sync', [InventoryController::class, 'sync'])
+            ->middleware('throttle:6,1');
+        Route::get('brands/{brand}/inventory/sync',  [InventoryController::class, 'syncStatus']);
 
         // Ads hub — per-brand ad-platform Overview (Meta today; platform-agnostic).
         Route::get('brands/{brand}/ads', [AdsController::class, 'show']);
