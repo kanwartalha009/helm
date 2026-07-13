@@ -40,6 +40,7 @@ class ShopifyBackfillSessionTrafficCommand extends Command
         . '{--since= : first day to pull (Y-m-d); default 90 days ago} '
         . '{--until= : last day to pull (Y-m-d); default yesterday} '
         . '{--missing : only brands with NO existing rows} '
+        . '{--repair : re-pull ONLY the days that are missing or did not reconcile (is_complete=false)} '
         . '{--force : re-pull days already recorded in backfill_coverage}';
 
     protected $description = 'Backfill sessions by traffic type per product/collection into session_traffic_daily.';
@@ -106,6 +107,37 @@ class ShopifyBackfillSessionTrafficCommand extends Command
             // already done is the whole cost with none of the benefit.
             if ((bool) $this->option('force')) {
                 $coverage->forget($brand->id, self::DATASET, '', $since->toDateString(), $until->toDateString());
+            }
+
+            /*
+             * ══ --repair: RE-PULL ONLY WHAT IS ACTUALLY BROKEN ══
+             * A day that failed reconciliation is stored `is_complete = false` and marked DONE in
+             * backfill_coverage — done is not the same as good. The read gate needs every day in
+             * the window to be `is_complete = true`, so a single bad day blanks a whole 30-day
+             * window, and `--force` is the only way to revisit it.
+             *
+             * But `--force` re-pulls the ENTIRE range — and at the rates measured, ~96% of those
+             * days are already fine. Re-pulling them costs hours of throttled ShopifyQL and
+             * changes nothing. This un-marks ONLY the unreconciled days, so `pendingDays()` then
+             * naturally returns exactly them plus any day never pulled at all.
+             */
+            if ((bool) $this->option('repair')) {
+                $bad = SessionTrafficDaily::query()
+                    ->where('brand_id', $brand->id)
+                    ->whereBetween('date', [$since->toDateString(), $until->toDateString()])
+                    ->where('is_complete', false)
+                    ->distinct()
+                    ->pluck('date')
+                    ->map(fn ($d) => CarbonImmutable::parse((string) $d)->toDateString())
+                    ->all();
+
+                foreach ($bad as $badDay) {
+                    $coverage->forget($brand->id, self::DATASET, '', $badDay, $badDay);
+                }
+
+                if ($bad !== []) {
+                    $this->line('· ' . $brand->name . ': repairing ' . count($bad) . ' unreconciled day(s).');
+                }
             }
 
             $pending = $coverage->pendingDays(
