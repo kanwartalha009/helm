@@ -110,6 +110,47 @@ final class SessionTrafficTest extends TestCase
         }
     }
 
+    public function test_accented_urls_fold_to_the_same_ascii_handle_as_shopify_stores(): void
+    {
+        // REGRESSION — this crashed a real backfill (Nude Project, 2025-08-18):
+        //
+        //   SQLSTATE[23000]: Duplicate entry
+        //   '76-2025-08-18-product-polo-pique-stripes-color-1-direct' for key 'session_traffic_unique'
+        //
+        // `rawurldecode` turns /products/polo-piqu%C3%A9-stripes into "polo-piqué-stripes". PHP saw
+        // a DIFFERENT string from "polo-pique-stripes" and made two aggregation buckets. MySQL's
+        // utf8mb4_unicode_ci collation is ACCENT-INSENSITIVE, so it saw ONE key — and rejected the
+        // batch mid-insert, killing the whole run.
+        //
+        // Folding to ASCII is also simply more correct: Shopify handles ARE lowercase ASCII slugs,
+        // so both spellings are the same product and their sessions must SUM.
+        $this->assertSame(
+            'polo-pique-stripes-color-1',
+            LandingPathMapper::productHandle('/products/polo-piqu%C3%A9-stripes-color-1'),
+        );
+        $this->assertSame(
+            'polo-pique-stripes-color-1',
+            LandingPathMapper::productHandle('/products/polo-pique-stripes-color-1'),
+        );
+
+        // Spanish handles — the ones this store actually serves — canonicalise as Shopify slugs.
+        $this->assertSame('banador-azul', LandingPathMapper::productHandle('/products/ba%C3%B1ador-azul'));
+        $this->assertSame('cafe-tee', LandingPathMapper::productHandle('/es/products/café-tee'));
+
+        // And the collection path folds identically — same clean() underneath.
+        $this->assertSame('banadores-hombre', LandingPathMapper::collectionHandle('/collections/ba%C3%B1adores-hombre'));
+    }
+
+    public function test_two_url_spellings_of_one_product_SUM_rather_than_collide(): void
+    {
+        // The consequence of the fold: the accented and unaccented URLs are one product, so the
+        // day's sessions add up instead of being split across two rows (or crashing the insert).
+        $a = LandingPathMapper::resolve('/products/polo-piqu%C3%A9-stripes');
+        $b = LandingPathMapper::resolve('/products/polo-pique-stripes');
+
+        $this->assertSame($a, $b, 'both spellings must resolve to the SAME entity, or their sessions split');
+    }
+
     public function test_a_collection_nested_product_is_a_product_not_a_collection(): void
     {
         // Counting /collections/x/products/y as a COLLECTION view would inflate the collection

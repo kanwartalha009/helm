@@ -9,6 +9,7 @@ use App\Models\SessionTrafficDaily;
 use App\Platforms\Shopify\SessionTrafficFetcher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -79,22 +80,53 @@ class SessionTrafficSync
             return null;
         }
 
-        $now     = now();
-        $records = [];
+        $now = now();
 
+        /*
+         * ══ DEDUPE AGAINST THE DATABASE'S OWN NOTION OF EQUALITY ══
+         * The fetcher already buckets by (entity_type, entity_key, traffic_type). That is not
+         * enough, because PHP and MySQL do not agree on what "the same key" means:
+         *
+         *   - MySQL's utf8mb4_unicode_ci collation is ACCENT- and CASE-insensitive, so
+         *     `polo-piqué-x` and `polo-pique-x` are ONE key to it and two to PHP. That crashed a
+         *     real backfill with a 1062 duplicate-entry error mid-batch.
+         *   - `entity_key` is truncated to 191 chars, so two long handles can converge here even
+         *     if they were distinct upstream.
+         *
+         * LandingPathMapper now folds handles to ASCII, which fixes the accent case at the source.
+         * This is the belt to that pair of braces: fold the key the way the DATABASE will, and SUM
+         * on collision. Summing is right — a collision means two spellings of one product, and
+         * their sessions belong together. Dropping one, or letting the insert blow up mid-run,
+         * both lose real data.
+         */
+        $byKey = [];
         foreach ($rows as $r) {
-            $records[] = [
+            $entityKey = mb_substr((string) $r['entity_key'], 0, 191);
+
+            // Same folding MySQL applies: case- and accent-insensitive.
+            $dbKey = mb_strtolower(Str::ascii((string) $r['entity_type']))
+                . "\0" . mb_strtolower(Str::ascii($entityKey))
+                . "\0" . mb_strtolower(Str::ascii((string) $r['traffic_type']));
+
+            if (isset($byKey[$dbKey])) {
+                $byKey[$dbKey]['sessions'] += (int) $r['sessions'];
+                continue;
+            }
+
+            $byKey[$dbKey] = [
                 'brand_id'     => (int) $conn->brand_id,
                 'workspace_id' => null,   // D-022 seam; populated when tenancy lands
                 'date'         => $day,
                 'entity_type'  => (string) $r['entity_type'],
-                'entity_key'   => mb_substr((string) $r['entity_key'], 0, 191),
+                'entity_key'   => $entityKey,
                 'traffic_type' => (string) $r['traffic_type'],
                 'sessions'     => (int) $r['sessions'],
                 'is_complete'  => (bool) $r['is_complete'],
                 'pulled_at'    => $now,
             ];
         }
+
+        $records = array_values($byKey);
 
         // ATOMIC REPLACE of the day, not an upsert.
         //

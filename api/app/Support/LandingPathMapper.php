@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use Illuminate\Support\Str;
+
 /**
  * Resolves a Shopify landing path to the thing a merchant actually thinks about:
  * a product, a collection, or "somewhere else on the store".
@@ -95,13 +97,30 @@ final class LandingPathMapper
     }
 
     /**
-     * Handles are case-insensitive in practice — the same store served both
-     * `/products/NARNIA-PINK` and `/products/narnia-pink` on the SAME day. Lowercasing is what
-     * stops one product's sessions being split across two rows.
+     * Canonicalise a handle to the form Shopify actually stores: lowercase ASCII.
+     *
+     * ══ THE ACCENT TRAP (2026-07-13) ══
+     * `rawurldecode` turns `/products/polo-piqu%C3%A9-stripes` into `polo-piqué-stripes`. In PHP
+     * that is a DIFFERENT string from `polo-pique-stripes`. In MySQL it is the SAME one —
+     * `utf8mb4_unicode_ci` collation is accent-insensitive. So the aggregator built two buckets,
+     * the insert carried two rows, and MySQL rejected the batch:
+     *
+     *     Duplicate entry '76-2025-08-18-product-polo-pique-stripes-color-1-direct'
+     *
+     * Folding to ASCII fixes it at the source AND is the more correct answer anyway: Shopify
+     * handles are always lowercase ASCII slugs, so `polo-piqué-stripes` and `polo-pique-stripes`
+     * are the same product reached by two URL spellings. Their sessions should SUM, not collide.
+     *
+     * This also aligns session handles with `ad_product_daily.product_key` and the catalog, which
+     * are ASCII — a mismatch there would have silently split a product's spend from its sessions.
      */
     private static function clean(string $handle): ?string
     {
-        $handle = mb_strtolower(trim(rawurldecode($handle)));
+        // Str::ascii transliterates é→e, ñ→n, ü→u … using a proper table (not locale-dependent
+        // iconv, which can emit "?" or "'e" and would invent a different handle again).
+        $handle = Str::ascii(rawurldecode($handle));
+        $handle = mb_strtolower(trim($handle));
+
         // Shopify occasionally serves a trailing ')' from a malformed marketing link
         // (observed: "/products/isabella-ribbon-aqua)"). Strip characters a handle can't hold.
         $handle = trim($handle, ").,'\"");
