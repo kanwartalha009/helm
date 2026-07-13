@@ -177,6 +177,12 @@ class ShopifyReconcileSessionDayCommand extends Command
             $storeTotal > 0 ? round(($pagedTotal - $storeTotal) / $storeTotal * 100, 1) . '%' : '—',
         ];
 
+        $this->newLine();
+        $this->line('── LEGACY query (the OLD full landing-path scan) — kept only to SHOW the bug ──');
+        $this->line('   Expect this to be short and to duplicate rows. That is the point: it is the');
+        $this->line('   query that could never add up. The verdict that matters is at the bottom.');
+        $this->newLine();
+
         $this->table(['traffic_type', 'store (truth)', 'paged', 'delta', 'delta %'], $table);
 
         $this->newLine();
