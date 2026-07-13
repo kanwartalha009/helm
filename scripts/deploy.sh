@@ -54,9 +54,35 @@ php artisan migrate --force
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
+# horizon:terminate tells Horizon to finish its current job and EXIT, on the assumption that
+# something restarts it. For a long time nothing did — Horizon stayed dead after a deploy, queued
+# jobs simply never ran, and the only reason anyone noticed was Bosco syncing by hand every
+# morning. `horizon:status` said "inactive" while the app looked fine.
+#
+# The keep-alive cron (see docs/runbooks/server-cron.md) brings it back within a minute. We verify
+# that here rather than trusting it: a deploy that silently leaves the queue dead is worse than a
+# deploy that fails loudly.
 php artisan horizon:terminate || true
 
 echo "==> [6/6] verify the bundle is in place"
 test -f "$ROOT/api/public/app/index.html" || { echo "FATAL: index.html missing after copy — app would 404"; exit 1; }
+
+echo "==> [7/7] verify the queue is actually being consumed"
+QUEUE_DRIVER="$(php artisan tinker --execute='echo config("queue.default");' 2>/dev/null | tail -1 | tr -d '[:space:]')"
+if [ "$QUEUE_DRIVER" = "sync" ]; then
+  echo "FATAL: QUEUE_CONNECTION=sync — every job runs INLINE in the web request."
+  echo "       The daily sync's fast-dashboard split does nothing on this driver."
+  echo "       Set QUEUE_CONNECTION=redis in .env and make sure Horizon runs."
+  exit 1
+fi
+
+# Give the keep-alive cron a minute to bring Horizon back, then check. This is a WARNING, not a
+# hard failure: the app serves fine without workers, it just stops syncing — and we'd rather ship
+# and shout than block a deploy.
+sleep 65
+if ! php artisan horizon:status 2>/dev/null | grep -qi 'running\|active'; then
+  echo "WARNING: Horizon is NOT running after the deploy. Queued jobs will not be processed."
+  echo "         Check the keep-alive cron: crontab -l | grep horizon"
+fi
 
 echo "==> done. The SPA + /api are live."
