@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { toast } from '@/stores/toastStore';
 
 /**
  * Manual "Sync now" for Inventory Intelligence.
@@ -48,6 +49,19 @@ export function useStartInventorySync(slug: string | undefined) {
       // very next paint rather than after the first poll lands.
       qc.setQueryData(['inventory-sync', slug], data);
       qc.invalidateQueries({ queryKey: ['inventory-sync', slug] });
+    },
+    onError: (err: unknown) => {
+      // A silently-swallowed error is what makes a button feel DEAD: the click does nothing, the
+      // label never changes, and the operator has no idea whether they even hit it. Say something.
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      toast.error(
+        'Could not start the sync',
+        status === 404
+          ? 'The sync endpoint is not available yet — deploy the latest API.'
+          : status === 429
+            ? 'Too many sync requests. Wait a minute and try again.'
+            : 'Something went wrong. Check the logs and try again.',
+      );
     },
   });
 }

@@ -23,6 +23,10 @@ export function InventorySyncButton({ slug, onSynced }: { slug?: string; onSynce
 
   const run = data?.run ?? null;
   const active = run?.status === 'queued' || run?.status === 'running';
+
+  // `start.isPending` covers the POST round-trip, so the label changes on the very first paint
+  // after the click. Without it the button sits there looking DEAD for a few hundred ms — which
+  // is exactly long enough for someone to conclude it doesn't work and click it again.
   const pending = start.isPending || active;
 
   // Refetch the table exactly once, when the run flips out of the active state. `useRef` guards
@@ -63,7 +67,7 @@ export function InventorySyncButton({ slug, onSynced }: { slug?: string; onSynce
         {pending ? 'Syncing…' : 'Sync now'}
       </Button>
 
-      {active && (
+      {pending && (
         <span
           className="text-xs muted"
           style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
@@ -71,8 +75,9 @@ export function InventorySyncButton({ slug, onSynced }: { slug?: string; onSynce
         >
           <Spinner />
           {/* The job writes "3/5 · Sessions" BEFORE each step, so this names what is happening
-              NOW rather than what last finished. */}
-          {run?.message ?? 'Queued…'}
+              NOW rather than what last finished. Falls back to "Queued…" during the POST and
+              before the worker picks the job up — never a bare spinner with no words. */}
+          {start.isPending ? 'Queueing…' : (run?.message ?? 'Queued…')}
         </span>
       )}
     </div>

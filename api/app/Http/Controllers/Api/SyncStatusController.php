@@ -370,9 +370,14 @@ class SyncStatusController extends Controller
                 continue;
             }
 
-            // Ad platform — fan out one day at a time across the 7-day
-            // window. One queued sync_logs row per day.
-            for ($d = $from; $d->lessThanOrEqualTo($today); $d = $d->addDay()) {
+            // Ad platform — fan out one day at a time across the window, one queued sync_logs
+            // row per day.
+            //
+            // NEWEST FIRST. This used to walk $from → $today, which queued the OLDEST day first
+            // and left today's spend — the number on the dashboard — until last. On a queue that
+            // is FIFO, that is the worst possible order: the operator waits for six days of
+            // history they aren't looking at before the figure they clicked "sync" for appears.
+            for ($d = $today; $d->greaterThanOrEqualTo($from); $d = $d->subDay()) {
                 $log = SyncLog::create([
                     'brand_id'    => $brand->id,
                     'platform'    => $conn->platform,
