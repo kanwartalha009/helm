@@ -161,8 +161,12 @@ export function SessionCell({ total, split }: { total: number | null | undefined
   const paidPct = total > 0 ? Math.round((paid / total) * 100) : 0;
   const orgPct  = total > 0 ? 100 - paidPct : 0;   // complement, so the two always sum to 100
 
+  // FIXED width, not minWidth. This cell holds a bar plus two nowrap labels, so with only a
+  // minimum it grew to whatever its content wanted and dragged the whole table past its
+  // container — the overflow you could see in the screenshot. A fixed box means the column is
+  // predictable and the table's width is decided by the table, not by one long label.
   return (
-    <div style={{ minWidth: 150, textAlign: 'left' }}>
+    <div style={{ width: 190, textAlign: 'left' }}>
       <div style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 13 }}>{fmt(total)}</div>
 
       {total > 0 ? (
@@ -171,6 +175,7 @@ export function SessionCell({ total, split }: { total: number | null | undefined
             style={{
               display: 'flex',
               height: 7,
+              width: '100%',
               borderRadius: 4,
               overflow: 'hidden',
               background: 'var(--surface-subtle)',
@@ -181,11 +186,12 @@ export function SessionCell({ total, split }: { total: number | null | undefined
             {organic > 0 && <span style={{ width: `${orgPct}%`, background: ORGANIC_COLOR }} />}
           </div>
 
-          <div style={{ display: 'flex', gap: 10, fontSize: 11, whiteSpace: 'nowrap' }}>
-            <span style={{ color: PAID_COLOR, fontWeight: 500 }}>
+          {/* Wraps to a second line on a narrow viewport instead of shoving the table sideways. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 10, rowGap: 1, fontSize: 11 }}>
+            <span style={{ color: PAID_COLOR, fontWeight: 500, whiteSpace: 'nowrap' }}>
               Paid {fmt(paid)} · {paidPct}%
             </span>
-            <span style={{ color: ORGANIC_COLOR, fontWeight: 500 }}>
+            <span style={{ color: ORGANIC_COLOR, fontWeight: 500, whiteSpace: 'nowrap' }}>
               Organic {fmt(organic)} · {orgPct}%
             </span>
           </div>

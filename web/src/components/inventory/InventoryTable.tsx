@@ -109,12 +109,16 @@ export function InventoryTable(props: Props) {
         borderRadius: 'var(--radius-lg)',
       }}
     >
-      <div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      {/* Scrolls horizontally instead of painting outside its own border. `table-layout: fixed`
+          plus explicit widths on the two flexible columns (#, Product) means the browser sizes
+          the table from the LAYOUT, not from whichever cell happens to hold the longest string —
+          which is what let one long product title push everything sideways. */}
+      <div className="table-scroll" style={{ borderRadius: 'var(--radius-lg)' }}>
+        <table style={{ width: '100%', minWidth: 1180, borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>
               <th style={{ ...thL, width: 34 }}>#</th>
-              <th style={thL}>{collection ? 'Collection' : 'Product'}</th>
+              <th style={{ ...thL, minWidth: 190 }}>{collection ? 'Collection' : 'Product'}</th>
               <th style={thBase}>Stock total</th>
               {collection && <th style={thBase}>Products</th>}
               <th style={thBase}>Units</th>
@@ -152,7 +156,14 @@ export function InventoryTable(props: Props) {
                   >
                     <td style={{ ...tdL, color: 'var(--text-muted)' }}>{i + 1}</td>
                     <td style={tdL}>
-                      <div style={{ fontWeight: 500 }}>{p.title}</div>
+                      {/* Truncate rather than let one long title stretch the column and push the
+                          table past its container. Full name stays available on hover. */}
+                      <div
+                        style={{ fontWeight: 500, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                        title={p.title}
+                      >
+                        {p.title}
+                      </div>
                     </td>
                     {metricCells(p, money, {})}
                   </tr>
@@ -205,7 +216,7 @@ function CollectionRows({
               <path d="m9 18 6-6-6-6" />
             </svg>
             <div>
-              <div style={{ fontWeight: 600 }}>{g.name}</div>
+              <div style={{ fontWeight: 600, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }} title={g.name}>{g.name}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                 {g.productCount} {g.productCount === 1 ? 'product' : 'products'}
               </div>
@@ -220,7 +231,7 @@ function CollectionRows({
           <tr key={p.handle}>
             <td style={{ ...tdL, background: SUBTLE }} />
             <td style={{ ...tdL, background: SUBTLE, paddingLeft: 44 }}>
-              <div style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>{p.title}</div>
+              <div style={{ fontWeight: 500, color: 'var(--text-secondary)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }} title={p.title}>{p.title}</div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'ui-monospace, SFMono-Regular, monospace' }}>
                 {p.handle}
               </div>

@@ -1902,3 +1902,51 @@ td.col-group-start {
   color: var(--text);
   border-bottom-color: var(--accent);
 }
+
+/* ==========================================================================
+   TABLE OVERFLOW — one rule, every table (2026-07-13)
+   ==========================================================================
+   Symptom: on Inventory, and in the reports, table content spilled OUTSIDE the
+   table's own border — cells rendering over the page background.
+
+   Cause: none of the 13 tables in this app had an overflow guard. A `<table>` is
+   NOT constrained by `width: 100%` — that is a MINIMUM, not a maximum. As soon as
+   the columns' intrinsic content is wider than the container (and most of our
+   cells are `white-space: nowrap`, so they cannot shrink), the table grows past
+   its parent and paints outside it. Add one wide column — the paid-vs-organic
+   sessions cell was the last straw — and the whole layout breaks.
+
+   Fix: any element that directly wraps a table becomes a horizontal scroll
+   container. `:has()` means this applies to every existing table AND every future
+   one, with no per-file change to remember.
+
+   `overflow-y` is deliberately NOT set: `overflow-x: auto` alone already forces
+   the y axis to `auto` (the CSS spec allows no other combination with `visible`).
+   That is fine here — our sticky table headers scroll correctly inside a scroll
+   container, and modals/toasts are `position: fixed`, so they escape it.
+*/
+.table-scroll,
+:where(div):has(> table) {
+  overflow-x: auto;
+  max-width: 100%;
+  /* Slim, unobtrusive scrollbar — the table should look flush until you need it. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong, #cbd5e1) transparent;
+}
+:where(div):has(> table)::-webkit-scrollbar {
+  height: 8px;
+}
+:where(div):has(> table)::-webkit-scrollbar-thumb {
+  background: var(--border-strong, #cbd5e1);
+  border-radius: 4px;
+}
+:where(div):has(> table)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* A table inside a scroll container must be free to reach its natural width —
+   otherwise `width: 100%` would squash the columns back down and re-introduce the
+   overlap it is meant to prevent. */
+:where(div):has(> table) > table {
+  min-width: 100%;
+}
