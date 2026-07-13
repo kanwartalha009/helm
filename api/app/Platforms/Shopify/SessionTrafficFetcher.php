@@ -119,11 +119,18 @@ class SessionTrafficFetcher
         $isComplete = $storeTotal !== null && $storeTotal === $pagedTotal;
 
         if (! $isComplete) {
+            // The DELTA and its SIGN are the diagnosis, so log them rather than making a human
+            // subtract two numbers out of a log line:
+            //   negative → we are SHORT rows (something is being dropped, or a page was skipped)
+            //   positive → we DOUBLE-COUNTED (OFFSET paging returned a row on two pages — which
+            //              can happen when `ORDER BY sessions DESC` ties across a page boundary)
+            // Those are different bugs with different fixes; conflating them wastes a day.
             Log::warning('shopify.session_traffic.reconcile_failed', [
                 'brand_id'    => $conn->brand_id,
                 'date'        => $day,
                 'store_total' => $storeTotal,
                 'paged_total' => $pagedTotal,
+                'delta'       => $storeTotal === null ? null : $pagedTotal - $storeTotal,
             ]);
         }
 
@@ -315,13 +322,25 @@ class SessionTrafficFetcher
                 return null;
             }
 
+            // ══ A BLANK LANDING PATH IS STORE-WIDE TRAFFIC, NOT A ROW TO THROW AWAY ══
+            // This used to `continue` — "a genuinely blank landing path, nothing to attribute".
+            // That silently broke reconciliation for good: `storeTotal` comes from
+            // `GROUP BY traffic_type`, which COUNTS these sessions, while `pagedTotal` is summed
+            // from the rows this method returns, which DIDN'T. So any day on which Shopify logged
+            // even one blank-path session was short by exactly that much, failed the exact-equality
+            // check, and was stored `is_complete = false` — permanently, no matter how many times
+            // it was re-pulled. Measured on Nude Project: 15 of 377 days poisoned this way, and
+            // because the Inventory gate needs 30 CONSECUTIVE clean days, that ~4% failure rate was
+            // enough to make the 30-day window unrenderable on essentially every brand.
+            //
+            // The row is not unattributable — it's UNATTRIBUTED-TO-A-PRODUCT, which is the whole
+            // point of the store-wide bucket. `LandingPathMapper::resolve('')` already folds it
+            // there. Keeping it preserves the one invariant this class exists to defend:
+            // Σ(rows) === the store's own total.
             $path = trim((string) $row['landing_page_path']);
-            if ($path === '') {
-                continue;   // a genuinely blank landing path — nothing to attribute
-            }
 
             $out[] = [
-                'path'         => $path,
+                'path'         => $path,   // '' → store-wide, via LandingPathMapper::resolve()
                 'traffic_type' => (string) $row['traffic_type'],
                 'sessions'     => (int) round((float) $row['sessions']),
             ];
