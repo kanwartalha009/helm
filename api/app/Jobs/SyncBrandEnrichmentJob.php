@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Models\Brand;
 use App\Models\CommerceDailyMetric;
+use App\Models\DailyMetric;
 use App\Models\PlatformConnection;
 use App\Models\ShopifyFunnelDaily;
 use App\Platforms\Shopify\RevenueFetcher;
@@ -110,6 +111,13 @@ class SyncBrandEnrichmentJob implements ShouldQueue
             }
 
             if ($conn->platform === 'shopify') {
+                // GROSS revenue — the order-by-order scan, moved OFF the dashboard's critical
+                // path. It took 74s on Meller (~3,500 orders/day) while every other sync ran in
+                // 1-2s, and it produced nothing the dashboard's headline number needs. Phase 1
+                // now writes total_sales/net_sales/orders/refunds from one ShopifyQL call; this
+                // fills in the three columns only the scan can produce.
+                $this->syncGrossRevenue($revenue, $conn, $date);
+
                 // Web funnel (sessions → cart → checkout → purchase) — monthly report §10/§11.
                 $this->syncShopifyFunnel($revenue, $conn, $date);
 
@@ -141,11 +149,52 @@ class SyncBrandEnrichmentJob implements ShouldQueue
     }
 
     /**
-     * Pull one day of the Shopify web funnel (sessions → cart → checkout →
-     * purchase) by country + landing path into shopify_funnel_daily. Best-effort:
-     * each dimension guards itself so a ShopifyQL hiccup never touches the day's
-     * main sync, which has already succeeded. History is filled by
-     * shopify:backfill-funnel; this keeps it fresh.
+     * Gross revenue for the day, from the order-by-order scan — the 74-second call, off the
+     * dashboard's critical path.
+     *
+     * Writes ONLY the three columns the scan uniquely produces. total_sales / net_sales / orders /
+     * refunds_amount belong to phase 1 (one ShopifyQL call, authoritative and fast); letting a
+     * slow, fallible scan overwrite them would risk replacing a correct number the operator is
+     * already looking at with a worse one.
+     */
+    private function syncGrossRevenue(RevenueFetcher $revenue, PlatformConnection $conn, CarbonImmutable $date): void
+    {
+        try {
+            $gross = $revenue->fetchGrossDay($conn, $date);
+        } catch (Throwable $e) {
+            Log::warning('sync.gross_revenue.failed', [
+                'brand_id' => $conn->brand_id,
+                'date'     => $date->toDateString(),
+                'error'    => $e->getMessage(),
+            ]);
+
+            return;
+        }
+
+        // An incomplete scan writes NOTHING. A page-capped partial total would understate a big
+        // brand's gross revenue while looking perfectly precise.
+        if ($gross === null) {
+            return;
+        }
+
+        // ONLY the three columns the scan uniquely produces. total_sales / net_sales / orders /
+        // refunds_amount are phase 1's, written from ShopifyQL — a slow, fallible scan must never
+        // overwrite the fast, authoritative figures the dashboard is already showing.
+        DailyMetric::query()
+            ->where('brand_id', $conn->brand_id)
+            ->where('platform', 'shopify')
+            ->where('date', $date->toDateString())
+            ->update([
+                'revenue'         => $gross['revenue'],
+                'revenue_net'     => $gross['revenueNet'],
+                'refunded_orders' => $gross['refundedOrders'],
+            ]);
+    }
+
+    /**
+     * One day of the Shopify web funnel (sessions → cart → checkout → purchase) by country +
+     * landing path into shopify_funnel_daily. Each dimension guards itself, so a ShopifyQL hiccup
+     * never touches the headline number, which is already written. History: shopify:backfill-funnel.
      */
     private function syncShopifyFunnel(RevenueFetcher $revenue, PlatformConnection $conn, CarbonImmutable $date): void
     {

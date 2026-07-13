@@ -116,6 +116,24 @@ class RevenueFetcher
     /**
      * Fetch one day for one (brand × shopify connection) and return a snapshot.
      */
+    /**
+     * THE DASHBOARD'S FAST PATH. One ShopifyQL call. No order pagination.
+     *
+     * ══ WHY ══
+     * This used to page through EVERY ORDER of the day to compute gross revenue and the order
+     * count. On Meller (~3,500 web orders/day) that took **74 seconds** — measured on the Sync
+     * health page, against 1–2s for every other brand and platform. Bosco was manually syncing
+     * each morning and watching the dashboard fill one brand at a time.
+     *
+     * Every number the dashboard actually shows — total_sales, net_sales, refunds, orders —
+     * already comes from ONE ShopifyQL `FROM sales` call. `netSalesByDay()` has been fetching the
+     * order count all along and `fetch()` was throwing it away in favour of the 74-second scan.
+     *
+     * So the scan is gone from the hot path. Gross `revenue` / `revenue_net` / `refunded_orders`
+     * are the only figures it uniquely produced; they are now filled by the enrichment job
+     * (fetchGrossDay below) and OMITTED here — omitted, not nulled, so phase 1 can never erase
+     * what phase 2 wrote. See MetricSnapshot::$omitFields.
+     */
     public function fetch(PlatformConnection $conn, CarbonImmutable $date): MetricSnapshot
     {
         $brand  = $conn->brand;
@@ -123,13 +141,73 @@ class RevenueFetcher
         $shop   = (string) $conn->external_id;
         $client = $this->makeClient($conn);
 
+        $dateStr  = $date->setTimezone($tz)->startOfDay()->toDateString();
+        $currency = $this->resolveCurrency($conn, $client);
+
+        $dayFigures = $this->netSalesByDay($client, $dateStr, $dateStr)[$dateStr] ?? null;
+
+        $todayLocal = CarbonImmutable::now($tz)->startOfDay();
+        $isComplete = $date->setTimezone($tz)->startOfDay()->lessThan($todayLocal);
+
+        // ShopifyQL returned nothing for the day. That is NOT a €0 day — it is a day we know
+        // nothing about (a hiccup, or a store that didn't exist yet). Leave every figure null and
+        // let the dashboard render "—". The old code could infer a confirmed zero because it also
+        // had the order scan to corroborate; without the scan we cannot, so we don't pretend to.
+        if ($dayFigures === null) {
+            return new MetricSnapshot(
+                brandId:    $conn->brand_id,
+                platform:   'shopify',
+                date:       $date,
+                currency:   $currency,
+                metadata:   ['shop' => $shop],
+                isComplete: $isComplete,
+                omitFields: self::GROSS_FIELDS,
+            );
+        }
+
+        return new MetricSnapshot(
+            brandId:       $conn->brand_id,
+            platform:      'shopify',
+            date:          $date,
+            currency:      $currency,
+            netSales:      $dayFigures['net'] ?? null,
+            totalSales:    $dayFigures['total'] ?? null,
+            // Straight from ShopifyQL — reliable on high-volume brands, where paging thousands of
+            // orders was both slow and fragile.
+            orders:        $dayFigures['orders'] ?? null,
+            refundsAmount: $dayFigures['returns'] ?? null,
+            metadata:      ['shop' => $shop],
+            isComplete:    $isComplete,
+            omitFields:    self::GROSS_FIELDS,
+        );
+    }
+
+    /** Columns only the order-by-order scan can produce. Filled by the enrichment job. */
+    private const GROSS_FIELDS = ['revenue', 'revenue_net', 'refunded_orders'];
+
+    /**
+     * The order-by-order scan, now OFF the dashboard's critical path.
+     *
+     * Produces gross revenue (Σ order totalPrice for the allowed sales channels), the refunded
+     * order count, and a refund total used only as a fallback. Slow by nature — Meller pages
+     * thousands of orders — which is exactly why it runs in enrichment, after every brand's
+     * headline number is already on screen.
+     *
+     * @return array{revenue: float, revenueNet: float, refundedOrders: int, refundsAmount: float}|null
+     *         null when the scan could not be completed — the caller must then write NOTHING
+     *         rather than a zero.
+     */
+    public function fetchGrossDay(PlatformConnection $conn, CarbonImmutable $date): ?array
+    {
+        $brand  = $conn->brand;
+        $tz     = $brand?->timezone ?? 'UTC';
+        $client = $this->makeClient($conn);
+
         $startLocal = $date->setTimezone($tz)->startOfDay();
         $endLocal   = $startLocal->endOfDay();
         $startUtc   = $startLocal->setTimezone('UTC')->toIso8601String();
         $endUtc     = $endLocal->setTimezone('UTC')->toIso8601String();
         $dateStr    = $startLocal->toDateString();
-
-        $currency = $this->resolveCurrency($conn, $client);
 
         // Paginated single-day pull. High-volume brands exceed one page easily
         // (Meller does ~3,500 web orders/day), so we MUST follow the cursor —
@@ -205,57 +283,31 @@ GQL;
         } while ($hasNext && $cursor !== '' && $pages < self::MAX_HISTORY_PAGES);
 
         if ($pages >= self::MAX_HISTORY_PAGES) {
-            Log::warning('Shopify fetch() hit the page cap for a single day.', [
+            // We stopped short of the end, so the totals are UNDERCOUNTS. Returning them would
+            // silently understate a big brand's gross revenue. Return null: the caller writes
+            // nothing, and the previous value (or "—") stands.
+            Log::warning('Shopify gross scan hit the page cap for a single day — figures discarded.', [
                 'brand_id' => $conn->brand_id,
-                'shop'     => $shop,
-                'date'     => $date->toDateString(),
+                'date'     => $dateStr,
             ]);
+
+            return null;
         }
 
-        // net_sales / total_sales: Shopify's own figures via ShopifyQL (one-day
-        // window). Null if ShopifyQL is unavailable — missing, not zero.
-        $netByDay   = $this->netSalesByDay($client, $dateStr, $dateStr);
-        $dayFigures = $netByDay[$dateStr] ?? null;
-        $netSales   = $dayFigures['net'] ?? null;
-        $totalSales = $dayFigures['total'] ?? null;
-
-        // Refunds: prefer Shopify's own `returns` (the exact figure total_sales
-        // nets out) over the order-by-order scan above — one consistent source,
-        // reliable on high-volume brands. Falls back to the scan if ShopifyQL
-        // didn't return this day.
-        if (($dayFigures['returns'] ?? null) !== null) {
-            $refundsAmount = (float) $dayFigures['returns'];
+        // Refunds: prefer Shopify's own `returns` (the exact figure total_sales nets out) over the
+        // scan — one consistent source, reliable on high-volume brands. The scan's own total is
+        // the fallback when ShopifyQL has no row for the day.
+        $returns = $this->netSalesByDay($client, $dateStr, $dateStr)[$dateStr]['returns'] ?? null;
+        if ($returns !== null) {
+            $refundsAmount = (float) $returns;
         }
 
-        // Confirmed-zero day: the order scan succeeded with no orders and
-        // ShopifyQL has no sales row — a real €0 day, not missing. Store 0 so it
-        // renders €0 complete instead of a perpetual "—"/Partial.
-        if ($dayFigures === null && $orders === 0) {
-            $netSales      = 0.0;
-            $totalSales    = 0.0;
-            $refundsAmount = 0.0;
-        }
-
-        $revenueNet = round($revenue - $refundsAmount, 2);
-
-        $todayLocal = CarbonImmutable::now($tz)->startOfDay();
-        $isComplete = $date->setTimezone($tz)->startOfDay()->lessThan($todayLocal);
-
-        return new MetricSnapshot(
-            brandId:        $conn->brand_id,
-            platform:       'shopify',
-            date:           $date,
-            currency:       $currency,
-            revenue:        round($revenue, 2),
-            revenueNet:     $revenueNet,
-            netSales:       $netSales,
-            totalSales:     $totalSales,
-            orders:         $orders,
-            refundsAmount:  round($refundsAmount, 2),
-            refundedOrders: $refundedOrders,
-            metadata:       ['shop' => $shop],
-            isComplete:     $isComplete,
-        );
+        return [
+            'revenue'        => round($revenue, 2),
+            'revenueNet'     => round($revenue - $refundsAmount, 2),
+            'refundedOrders' => $refundedOrders,
+            'refundsAmount'  => round($refundsAmount, 2),
+        ];
     }
 
     /**

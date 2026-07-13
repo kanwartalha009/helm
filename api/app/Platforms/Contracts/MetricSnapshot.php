@@ -49,6 +49,19 @@ final class MetricSnapshot
         // real zero, so the funnel renders "—", never a fake 0.
         public readonly ?int $addToCarts = null,
         public readonly ?int $checkoutsInitiated = null,
+        /**
+         * Columns this snapshot must NOT write, because it deliberately did not measure them.
+         *
+         * `updateableFields()` normally lists every column, so a null on the snapshot OVERWRITES
+         * whatever is in the table. That is correct when null means "the platform reported
+         * nothing" — but not when it means "we didn't ask". Shopify's fast daily path skips the
+         * order-by-order scan (74s on a high-volume brand) and leaves gross `revenue` to the
+         * enrichment job; without this list, phase 1 would helpfully erase the number phase 2 just
+         * wrote. Missing is not zero, and it is not null-over-a-real-value either.
+         *
+         * @var array<int, string>
+         */
+        public readonly array $omitFields = [],
     ) {}
 
     /**
@@ -104,11 +117,16 @@ final class MetricSnapshot
     /** Columns that get overwritten on upsert. Everything else is set on insert only. */
     public function updateableFields(): array
     {
-        return [
+        $fields = [
             'revenue', 'revenue_net', 'net_sales', 'total_sales', 'orders', 'refunds_amount', 'refunded_orders',
             'spend', 'impressions', 'clicks', 'conversions', 'conversion_value',
             'reach', 'link_clicks', 'landing_page_views', 'add_to_carts', 'checkouts_initiated',
             'currency', 'fx_rate_to_usd', 'metadata', 'is_complete', 'pulled_at',
         ];
+
+        // Columns the snapshot never measured are left ALONE, not overwritten with null.
+        return $this->omitFields === []
+            ? $fields
+            : array_values(array_diff($fields, $this->omitFields));
     }
 }
