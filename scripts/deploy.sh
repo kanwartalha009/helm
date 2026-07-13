@@ -62,13 +62,21 @@ php artisan view:cache
 # The keep-alive cron (see docs/runbooks/server-cron.md) brings it back within a minute. We verify
 # that here rather than trusting it: a deploy that silently leaves the queue dead is worse than a
 # deploy that fails loudly.
+# queue:restart signals ALL workers (Horizon's and any plain queue:work) to finish their current
+# job and exit, so the keep-alive brings them back running the NEW code. Without it, workers keep
+# the old code in memory indefinitely — a deploy that appears to succeed while the queue silently
+# runs yesterday's logic. horizon:terminate alone only covers Horizon.
+php artisan queue:restart || true
 php artisan horizon:terminate || true
 
 echo "==> [6/6] verify the bundle is in place"
 test -f "$ROOT/api/public/app/index.html" || { echo "FATAL: index.html missing after copy — app would 404"; exit 1; }
 
 echo "==> [7/7] verify the queue is actually being consumed"
-QUEUE_DRIVER="$(php artisan tinker --execute='echo config("queue.default");' 2>/dev/null | tail -1 | tr -d '[:space:]')"
+# Read .env directly. `artisan tinker` is a DEV dependency (laravel/tinker) and does not exist on
+# a production install (`composer install --no-dev`) — using it here would make this check throw
+# on the one machine it exists to protect.
+QUEUE_DRIVER="$(grep -E '^QUEUE_CONNECTION=' "$ROOT/api/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "\"' \r")"
 if [ "$QUEUE_DRIVER" = "sync" ]; then
   echo "FATAL: QUEUE_CONNECTION=sync — every job runs INLINE in the web request."
   echo "       The daily sync's fast-dashboard split does nothing on this driver."

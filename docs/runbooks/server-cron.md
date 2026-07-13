@@ -29,18 +29,48 @@ killed the queue workers permanently.**
 Cloudways has no Supervisor UI, so the keep-alive is a cron: it starts Horizon if, and only if, it
 isn't already running.
 
-## The cron (Cloudways → Application → Cron Job Management)
+## Step 1 — the scheduler cron (Cloudways → Application → Cron Job Management)
 
 Replace `<app>` with the real application directory.
 
 ```cron
 # Laravel scheduler — every minute. Without this, NOTHING scheduled ever runs.
 * * * * * cd /home/master/applications/<app>/public_html/api && php artisan schedule:run >> /dev/null 2>&1
+```
 
-# Horizon keep-alive — restarts the queue workers if they are not running (e.g. after a deploy,
-# a crash, or an OOM kill). `pgrep` makes this idempotent: it never starts a second copy.
+## Step 2 — keep Horizon alive. Two options.
+
+### Option A — Supervisor (RECOMMENDED)
+
+Cloudways ships a Supervisord integration, but the package is not installed by default. The
+**Application Settings → Supervisord Jobs** tab will say so:
+
+> "Supervisord is not installed on your server. You can install it from Settings and Packages
+> section of your Server."
+
+1. **Server** (not Application) → **Settings & Packages** → **Packages** → install **Supervisor**.
+2. Back to **Application → Application Settings → Supervisord Jobs** → add a job:
+
+   - **Command:** `php artisan horizon`
+   - **Directory / working dir:** `/home/master/applications/<app>/public_html/api`
+   - **Processes:** `1` — Horizon spawns its own workers per `config/horizon.php`. Running two
+     Horizon masters double-processes every job.
+   - **Autostart / Autorestart:** on. This is the whole point: it brings Horizon back after a
+     crash, an OOM kill, and after `deploy.sh` calls `horizon:terminate`.
+
+### Option B — cron keep-alive (no install needed)
+
+If you can't or won't install Supervisor, this achieves the same thing with the cron panel you
+already have. `pgrep` makes it idempotent — it starts Horizon only when it isn't already running,
+so it never spawns a second copy.
+
+```cron
 * * * * * cd /home/master/applications/<app>/public_html/api && pgrep -f "artisan horizon" > /dev/null || php artisan horizon >> storage/logs/horizon.log 2>&1 &
 ```
+
+Weaker than Supervisor in one way: a Horizon that hangs (rather than exits) is still "running" to
+`pgrep`, so it won't be restarted. Supervisor handles that; this doesn't. Good enough to unblock,
+not the end state.
 
 ## Verify
 
