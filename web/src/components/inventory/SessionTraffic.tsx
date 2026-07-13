@@ -91,16 +91,20 @@ export function SessionTrafficStrip({ s, windowTo }: { s: InventorySessions; win
         </span>
       </div>
 
-      <SplitBar split={s.byType} total={total} height={8} />
+      {/* PAID vs ORGANIC first — the split Bosco actually acts on. Same two colours as the
+          per-product cells, so the eye carries the meaning down the table. */}
+      <PaidOrganicBar split={s.byType} total={total} />
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 10 }}>
+      {/* The full five-type breakdown stays underneath: it's the honest detail, and it's how you
+          see WHERE the organic half is coming from. Muted, because it's reference, not the headline. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 12 }}>
         {TYPES.map((t) => {
           const n = s.byType![t];
           const pct = total > 0 ? Math.round((n / total) * 100) : 0;
           return (
             <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
               <i style={{ width: 8, height: 8, borderRadius: 2, background: COLOR[t], display: 'inline-block' }} />
-              <span>{LABEL[t]}</span>
+              <span className="muted">{LABEL[t]}</span>
               <span className="muted">{fmt(n)} · {pct}%</span>
             </span>
           );
@@ -118,39 +122,119 @@ export function SessionTrafficStrip({ s, windowTo }: { s: InventorySessions; win
   );
 }
 
-/** The per-row cell: total + a mini stacked bar. "—" when the window isn't reconciled. */
+/* ---- Per-row cell: PAID vs ORGANIC (Bosco, 2026-07-13) ------------------- */
+
+const PAID_COLOR    = '#2563EB';   // blue — bought
+const ORGANIC_COLOR = '#16A34A';   // green — earned
+
+/**
+ * Collapse the five Shopify traffic types into the only split a media buyer acts on:
+ * **paid** (traffic you bought) vs **organic** (traffic you earned).
+ *
+ * "Organic" here means everything that is not paid — organic search/social, direct, unknown and
+ * unattributed. That is deliberate and it is the honest grouping: Shopify's `direct` and `unknown`
+ * buckets are not *paid*, so lumping them with organic understates nothing and invents nothing.
+ * Dropping them instead would silently shrink the denominator and inflate the paid share, which is
+ * exactly the number Bosco would act on.
+ */
+function paidVsOrganic(split: SessionSplit): { paid: number; organic: number } {
+  const paid = split.paid;
+  const organic = split.direct + split.organic + split.unknown + split.unattributed;
+  return { paid, organic };
+}
+
+/**
+ * The per-row cell: a two-colour bar with both numbers and both percentages.
+ *
+ * Blue = paid, green = organic. Deliberately high-contrast rather than a subtle palette — this is
+ * scanned down a column of 3,892 products, so it has to read at a glance.
+ *
+ * "—" when the window isn't reconciled. Never a 0-length bar, which would read as "no traffic"
+ * rather than "we don't know".
+ */
 export function SessionCell({ total, split }: { total: number | null | undefined; split: SessionSplit | null | undefined }) {
   if (total === null || total === undefined || !split) {
     return <span className="muted">—</span>;
   }
 
+  const { paid, organic } = paidVsOrganic(split);
+  const paidPct = total > 0 ? Math.round((paid / total) * 100) : 0;
+  const orgPct  = total > 0 ? 100 - paidPct : 0;   // complement, so the two always sum to 100
+
   return (
-    <div style={{ minWidth: 92 }} title={TYPES.map((t) => `${LABEL[t]}: ${fmt(split[t])}`).join('\n')}>
-      <div style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(total)}</div>
-      {total > 0 && <SplitBar split={split} total={total} height={4} />}
+    <div style={{ minWidth: 150, textAlign: 'left' }}>
+      <div style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 13 }}>{fmt(total)}</div>
+
+      {total > 0 ? (
+        <>
+          <div
+            style={{
+              display: 'flex',
+              height: 7,
+              borderRadius: 4,
+              overflow: 'hidden',
+              background: 'var(--surface-subtle)',
+              margin: '4px 0 3px',
+            }}
+          >
+            {paid > 0 && <span style={{ width: `${paidPct}%`, background: PAID_COLOR }} />}
+            {organic > 0 && <span style={{ width: `${orgPct}%`, background: ORGANIC_COLOR }} />}
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, fontSize: 11, whiteSpace: 'nowrap' }}>
+            <span style={{ color: PAID_COLOR, fontWeight: 500 }}>
+              Paid {fmt(paid)} · {paidPct}%
+            </span>
+            <span style={{ color: ORGANIC_COLOR, fontWeight: 500 }}>
+              Organic {fmt(organic)} · {orgPct}%
+            </span>
+          </div>
+        </>
+      ) : (
+        // A covered window with genuinely zero landings. A real 0, not missing data — so we say
+        // so in words rather than drawing an empty bar that looks like a rendering failure.
+        <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>no landings</div>
+      )}
     </div>
   );
 }
 
-function SplitBar({ split, total, height }: { split: SessionSplit; total: number; height: number }) {
-  if (total <= 0) return null;
+/** The headline bar: paid vs organic, big, with both numbers and both percentages. */
+function PaidOrganicBar({ split, total }: { split: SessionSplit; total: number }) {
+  const { paid, organic } = paidVsOrganic(split);
+  const paidPct = total > 0 ? Math.round((paid / total) * 100) : 0;
+  const orgPct  = total > 0 ? 100 - paidPct : 0;
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height,
-        borderRadius: height / 2,
-        overflow: 'hidden',
-        background: 'var(--surface-subtle)',
-        marginTop: 4,
-      }}
-    >
-      {TYPES.map((t) => {
-        const pct = (split[t] / total) * 100;
-        if (pct <= 0) return null;
-        return <span key={t} style={{ width: `${pct}%`, background: COLOR[t] }} />;
-      })}
-    </div>
+    <>
+      <div
+        style={{
+          display: 'flex',
+          height: 12,
+          borderRadius: 6,
+          overflow: 'hidden',
+          background: 'var(--surface-subtle)',
+        }}
+      >
+        {paid > 0 && <span style={{ width: `${paidPct}%`, background: PAID_COLOR }} />}
+        {organic > 0 && <span style={{ width: `${orgPct}%`, background: ORGANIC_COLOR }} />}
+      </div>
+
+      <div style={{ display: 'flex', gap: 20, marginTop: 8, fontSize: 13 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+          <i style={{ width: 10, height: 10, borderRadius: 3, background: PAID_COLOR, display: 'inline-block' }} />
+          <strong>Paid</strong>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(paid)}</span>
+          <span className="muted">· {paidPct}%</span>
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+          <i style={{ width: 10, height: 10, borderRadius: 3, background: ORGANIC_COLOR, display: 'inline-block' }} />
+          <strong>Organic</strong>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(organic)}</span>
+          <span className="muted">· {orgPct}%</span>
+        </span>
+      </div>
+    </>
   );
 }
+

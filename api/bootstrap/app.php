@@ -78,6 +78,17 @@ return Application::configure(basePath: dirname(__DIR__))
             );
         })->everyMinute()->name('scheduler-heartbeat')->withoutOverlapping();
 
+        // Reap orphaned sync_logs — rows stuck `queued`/`running` whose job no longer exists
+        // (queue flushed, Horizon restarted mid-flight, worker OOM-killed). Left alone they sit
+        // at "Queued" forever: Sync health shows pending work that will never happen, and the
+        // "already syncing" guard treats the brand as busy. Hourly, 2h threshold — well past the
+        // ~1h a legitimately re-reserved job could wait, so we never reap live work.
+        $schedule->command('sync:reap-stale')
+            ->hourly()
+            ->withoutOverlapping()
+            ->onOneServer()
+            ->appendOutputTo(storage_path('logs/schedule.log'));
+
         // Twice-daily sync — 7-day rolling window per brand × connection.
         $schedule->command('sync:daily')
             ->twiceDailyAt(1, 13, 0)

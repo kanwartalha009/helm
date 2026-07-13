@@ -123,11 +123,13 @@ export function InventoryTable(props: Props) {
               <th style={thBase}>Revenue</th>
               <th style={thBase}>ROAS blended</th>
               <th style={thBase}>Active ads</th>
-              <th style={thBase} title="Sessions that landed on this product's page, split by traffic type. A visitor who lands on the homepage and then browses to this product is counted under Store-wide, not here.">
-                Sessions
-              </th>
               <th style={thL}>Status</th>
               <th style={thL}>Action</th>
+              {/* Sessions LAST (Bosco, 2026-07-13): it's the widest cell (bar + two labels) and
+                  reads as context for the row, not as a metric you sort the table by. */}
+              <th style={thL} title="Sessions that LANDED on this product's page, split paid vs organic. Someone who arrives on the homepage and then browses to this product is counted under Store-wide, not here.">
+                Sessions · paid vs organic
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -272,15 +274,13 @@ function metricCells(
         {item.roas != null ? formatRoas(item.roas) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
       </td>
       <td style={num}>{item.ads != null ? item.ads : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
-      <td style={{ ...num, textAlign: 'right' }}>
-        <div style={{ display: 'inline-block', textAlign: 'left' }}>
-          <SessionCell total={item.sessions} split={item.sessionsByType} />
-        </div>
-      </td>
       <td style={left}>
         <StatusPill status={item.status} />
       </td>
       <td style={{ ...left, fontSize: 12.5, color: ACTION_COLOR[item.action] }}>{ACTION_LABEL[item.action]}</td>
+      <td style={left}>
+        <SessionCell total={item.sessions} split={item.sessionsByType} />
+      </td>
     </>
   );
 }
