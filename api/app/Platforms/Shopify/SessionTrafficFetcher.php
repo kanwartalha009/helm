@@ -656,12 +656,25 @@ class SessionTrafficFetcher
         $offset = 0;
 
         for ($page = 0; $page < self::MAX_PAGES; $page++) {
-            // Same proven clause order as RevenueFetcher: GROUP BY … SINCE … UNTIL … WHERE … ORDER
-            // BY … LIMIT … OFFSET.
+            // ══ ORDER BY landing_page_path — NOT BY sessions ══
+            // `ORDER BY sessions DESC` is NOT a total order. The tail of a real day is thousands of
+            // rows all tied at 1 session, so Shopify is free to return tied rows in a different
+            // order on every request — and OFFSET paging across an unstable sort both DUPLICATES
+            // rows and SKIPS them. Measured on Nude Project, 2026-06-28: 8,861 sessions came back
+            // on two pages, while `direct` finished 976 sessions SHORT and `paid` finished 14 OVER.
+            // Both directions, same day. The breakdown could never have added up.
+            //
+            // `landing_page_path` is near-unique within a subset (at most one row per traffic type
+            // shares it), so ordering by it gives a stable, essentially total order and OFFSET
+            // paging becomes deterministic. Any residual wobble is caught: duplicates are deduped
+            // below, and a skipped row makes the subset check fail and the day fail closed.
+            //
+            // Same proven clause order as RevenueFetcher: GROUP BY … SINCE … UNTIL … WHERE …
+            // ORDER BY … LIMIT … OFFSET.
             $ql = 'FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type '
                 . "SINCE {$day} UNTIL {$day} "
                 . "WHERE landing_page_path CONTAINS '{$filter}' "
-                . 'ORDER BY sessions DESC '
+                . 'ORDER BY landing_page_path '
                 . 'LIMIT ' . self::PAGE_SIZE . ' OFFSET ' . $offset;
 
             $rows = $this->parseRows($this->runQuery($client, $ql), $day);
@@ -670,11 +683,15 @@ class SessionTrafficFetcher
             }
 
             foreach ($rows as $r) {
-                $out[] = $r;
+                // Belt to the ORDER BY's braces. If a row still arrives on two pages, take it ONCE.
+                // Summing it would inflate that product and then over-subtract from store-wide,
+                // driving the remainder negative — a wrong number that looks precise.
+                $key = (string) $r['path'] . "\0" . strtolower(trim((string) $r['traffic_type']));
+                $out[$key] ??= $r;
             }
 
             if (count($rows) < self::PAGE_SIZE) {
-                return $out;   // short page = the end of this subset
+                return array_values($out);   // short page = the end of this subset
             }
 
             $offset += self::PAGE_SIZE;

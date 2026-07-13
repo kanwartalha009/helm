@@ -288,6 +288,38 @@ final class SessionTrafficFetcherTest extends TestCase
         $this->assertSame(30_000, $byKey['store-wide:direct']['sessions']);
     }
 
+    public function test_unstable_paging_cannot_double_count_a_product(): void
+    {
+        // ══ THE SECOND PRODUCTION BUG, PINNED ══
+        // Measured on Nude Project, 2026-06-28: "duplicated across pages: 8,861 sessions".
+        // `ORDER BY sessions DESC` is not a total order — the tail is thousands of rows tied at 1
+        // session — so Shopify returned some rows on TWO pages and skipped others. `paid` came back
+        // 14 sessions OVER while `direct` came back 976 UNDER. On the same day.
+        //
+        // We now order by landing_page_path (stable) AND dedupe by (path, traffic_type). This fake
+        // returns the SAME row on both pages — the worst case — and the product must still be
+        // counted exactly once. Summing it twice would inflate the product and then over-subtract
+        // from store-wide, driving the remainder negative: a wrong number that looks precise.
+        $rows = [
+            ['/products/p0', 'paid', '1'],
+            ['/products/p1', 'paid', '1'],
+            ['/products/p2', 'paid', '1'],
+            ['/products/p0', 'paid', '1'],   // ← the same row again, as an unstable sort produces
+        ];
+
+        $this->fakeShopify(
+            $this->totalsResponse(paid: 3, direct: 0, organic: 0, unknown: 0),
+            [$rows],
+            ['/products/' => ['paid' => 3]],   // Shopify's own truth: three product sessions
+        );
+
+        $result = app(SessionTrafficFetcher::class)->fetchDay($this->conn(), self::DAY);
+
+        $byKey = $this->byKey($result['rows']);
+        $this->assertSame(1, $byKey['p0:paid']['sessions'], 'a duplicated row must be counted ONCE');
+        $this->assertTrue($result['isComplete']);
+    }
+
     public function test_locale_variants_of_one_product_collapse_into_a_single_row(): void
     {
         // Three URLs, one product. If these stayed separate, Jay's real traffic (11) would be
