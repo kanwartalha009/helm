@@ -75,7 +75,7 @@ class ShopifyReconcileSessionDayCommand extends Command
 
         /* ── 1. The store's own truth: GROUP BY traffic_type ─────────────────────────── */
 
-        $storeRows = $this->run($client, "FROM sessions SHOW sessions GROUP BY traffic_type SINCE {$day} UNTIL {$day} LIMIT 50");
+        $storeRows = $this->runQl($client, "FROM sessions SHOW sessions GROUP BY traffic_type SINCE {$day} UNTIL {$day} LIMIT 50");
         if ($storeRows === null) {
             $this->error('STORE TOTAL QUERY FAILED — this is the `store_total: null` case in the logs.');
             $this->line('That call is 4 rows and cheap, so a failure here is a throttle or a transient. It is worth retrying.');
@@ -103,7 +103,7 @@ class ShopifyReconcileSessionDayCommand extends Command
 
         for ($p = 0; $p < self::MAX_PAGES; $p++) {
             $offset = $p * self::PAGE_SIZE;
-            $rows   = $this->run(
+            $rows   = $this->runQl(
                 $client,
                 'FROM sessions SHOW sessions GROUP BY landing_page_path, traffic_type '
                 . "SINCE {$day} UNTIL {$day} ORDER BY sessions DESC "
@@ -222,8 +222,14 @@ class ShopifyReconcileSessionDayCommand extends Command
         return self::SUCCESS;
     }
 
-    /** @return array<int, array<string, mixed>>|null */
-    private function run(ShopifyClient $client, string $ql): ?array
+    /**
+     * NOT named `run()`. `Illuminate\Console\Command::run()` is public and final-in-spirit —
+     * declaring a private `run()` here is a fatal error at autoload time, which takes down
+     * `artisan` itself (and therefore the whole deploy).
+     *
+     * @return array<int, array<string, mixed>>|null
+     */
+    private function runQl(ShopifyClient $client, string $ql): ?array
     {
         $gql = <<<'GQL'
 query ($q: String!) {
