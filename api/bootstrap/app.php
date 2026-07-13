@@ -53,6 +53,31 @@ return Application::configure(basePath: dirname(__DIR__))
     |
     */
     ->withSchedule(function (Schedule $schedule): void {
+        /*
+         * SCHEDULER HEARTBEAT — one line a minute, and it exists for a reason.
+         *
+         * On 2026-07-13 we discovered production had been running with NO system cron: the
+         * schedule was perfect, `schedule:list` looked healthy, and nothing had ever invoked it.
+         * Bosco had been manually syncing every morning for months. The failure was invisible
+         * because a scheduler that never runs looks EXACTLY like a scheduler with nothing due.
+         *
+         * `storage/logs/schedule.log` can't answer the question either — it's only written when a
+         * scheduled command actually fires, so an empty file is ambiguous.
+         *
+         * This writes a timestamp every minute. The file's mtime IS the answer:
+         *
+         *     tail -1 storage/logs/scheduler-heartbeat.log     → when the scheduler last ran
+         *
+         * Older than ~2 minutes = the system cron is dead. No guessing, no ambiguity.
+         * Cost: one file write a minute.
+         */
+        $schedule->call(function (): void {
+            file_put_contents(
+                storage_path('logs/scheduler-heartbeat.log'),
+                now()->toIso8601String() . PHP_EOL,
+            );
+        })->everyMinute()->name('scheduler-heartbeat')->withoutOverlapping();
+
         // Twice-daily sync — 7-day rolling window per brand × connection.
         $schedule->command('sync:daily')
             ->twiceDailyAt(1, 13, 0)
