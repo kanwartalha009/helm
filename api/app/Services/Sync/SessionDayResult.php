@@ -33,18 +33,40 @@ final class SessionDayResult
         public readonly ?int $storeTotal,
         /** What our landing-page breakdown added up to. */
         public readonly int $pagedTotal,
+        /**
+         * Why the day is unusable, straight from the fetcher.
+         *
+         * ══ WHY THIS ISN'T DERIVED FROM storeTotal − pagedTotal ══
+         * It was, and it produced a message that contradicted itself:
+         *
+         *     "2026-06-28 — Shopify reports 152,621 sessions but its landing-page breakdown only
+         *      adds up to 152,621 (0 missing)."   …listed as a FAILURE.
+         *
+         * In the bounded strategy `pagedTotal` is DERIVED from the store total, so it always equals
+         * it and the shortfall is structurally zero. The day had failed for a completely different
+         * reason — a subset that didn't page to the end — and the message had no way to say so. An
+         * error message that cannot describe the error is worse than no message.
+         *
+         * @var list<string>
+         */
+        public readonly array $reasons = [],
     ) {}
 
     /** The day could not be established at all — do not record it as covered. */
-    public static function failed(?int $storeTotal = null, int $pagedTotal = 0): self
+    public static function failed(?int $storeTotal = null, int $pagedTotal = 0, array $reasons = []): self
     {
-        return new self(false, false, 0, $storeTotal, $pagedTotal);
+        return new self(false, false, 0, $storeTotal, $pagedTotal, $reasons);
     }
 
     /** We pulled the day. `complete` says whether the result can be trusted. */
-    public static function pulled(bool $complete, int $rowsWritten, ?int $storeTotal, int $pagedTotal): self
-    {
-        return new self(true, $complete, $rowsWritten, $storeTotal, $pagedTotal);
+    public static function pulled(
+        bool $complete,
+        int $rowsWritten,
+        ?int $storeTotal,
+        int $pagedTotal,
+        array $reasons = [],
+    ): self {
+        return new self(true, $complete, $rowsWritten, $storeTotal, $pagedTotal, $reasons);
     }
 
     /** Sessions the breakdown is short by. Null when Shopify's own total was never obtained. */
@@ -53,17 +75,29 @@ final class SessionDayResult
         return $this->storeTotal === null ? null : $this->storeTotal - $this->pagedTotal;
     }
 
-    /** A one-line reason a day is unusable, for an operator who cannot read the logs. */
+    /** Why this day is unusable, for an operator who cannot read the logs. */
     public function reason(): string
     {
-        if (! $this->established) {
-            return 'Shopify did not return the day (request or parse failure).';
-        }
         if ($this->complete) {
             return 'ok';
         }
+
+        // The FETCHER knows exactly what went wrong. Prefer its answer over anything inferred here —
+        // inferring it is what produced "adds up to 152,621 (0 missing)" on a day marked FAILED.
+        if ($this->reasons !== []) {
+            return implode(' ', $this->reasons);
+        }
+
+        if (! $this->established) {
+            return 'Shopify did not return the day (request or parse failure).';
+        }
         if ($this->storeTotal === null) {
             return 'Shopify would not return its own session total for the day, so nothing could be checked against it.';
+        }
+
+        if ((int) $this->shortfall() === 0) {
+            // NEVER print "0 missing" next to the word "failed" again. Admit we don't know.
+            return 'The day did not pass its completeness check, and the reason was not recorded.';
         }
 
         return sprintf(

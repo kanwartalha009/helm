@@ -232,6 +232,11 @@ class SessionTrafficFetcher
             'isComplete' => $isComplete,
             'storeTotal' => $storeTotal,
             'pagedTotal' => $pagedTotal,
+            'reasons'    => $isComplete ? [] : [
+                'Fell back to the full landing-path scan, which cannot enumerate a day this large '
+                . '(every checkout mints a unique one-session URL). This happens when the filtered '
+                . 'queries could not be run — usually Shopify throttling.',
+            ],
         ];
     }
 
@@ -274,6 +279,7 @@ class SessionTrafficFetcher
         $pagedCollections = $this->sumByType($collectionRows);
 
         $isComplete = true;
+        $reasons    = [];   // WHY the day failed, in words the operator can act on
 
         // ══ A SIXTH TRAFFIC TYPE MUST FAIL THE DAY, LOUDLY ══
         // Store-wide is derived by subtracting attributed sessions from `storeByType`, and that
@@ -289,6 +295,7 @@ class SessionTrafficFetcher
                     'type'     => $type,
                 ]);
                 $isComplete = false;
+                $reasons[]  = "Shopify returned a traffic type we do not know about ('{$type}').";
             }
         }
 
@@ -307,6 +314,13 @@ class SessionTrafficFetcher
                         'shopify'  => $want,
                     ]);
                     $isComplete = false;
+                    $reasons[]  = sprintf(
+                        'Shopify says %s %s sessions landed on %s pages, but paging that list returned %s.',
+                        number_format($want),
+                        $type,
+                        $label,
+                        number_format($got),
+                    );
                 }
             }
         }
@@ -343,7 +357,13 @@ class SessionTrafficFetcher
                     'attributed'  => $attributed[$type] ?? 0,
                 ]);
                 $isComplete = false;
-                $remainder  = 0;
+                $reasons[]  = sprintf(
+                    'More %s sessions were attributed to products/collections (%s) than Shopify says the store had (%s).',
+                    $type,
+                    number_format($attributed[$type] ?? 0),
+                    number_format($storeByType[$type] ?? 0),
+                );
+                $remainder = 0;
             }
 
             $storeWide[$type] = $remainder;
@@ -390,6 +410,7 @@ class SessionTrafficFetcher
             'isComplete' => $isComplete,
             'storeTotal' => array_sum($storeByType),
             'pagedTotal' => $pagedTotal,
+            'reasons'    => $reasons,
         ];
     }
 
@@ -473,13 +494,14 @@ class SessionTrafficFetcher
      * @param array<int, array<string, mixed>> $raw
      * @return array{rows: array<int, array<string, mixed>>, isComplete: bool, storeTotal: int|null, pagedTotal: int}
      */
-    private function incomplete(array $raw, ?int $storeTotal, int $pagedTotal): array
+    private function incomplete(array $raw, ?int $storeTotal, int $pagedTotal, array $reasons = []): array
     {
         return [
             'rows'       => $this->aggregate($raw, false),
             'isComplete' => false,
             'storeTotal' => $storeTotal,
             'pagedTotal' => $pagedTotal,
+            'reasons'    => $reasons,
         ];
     }
 
@@ -803,6 +825,17 @@ class SessionTrafficFetcher
     }
 
     /**
+     * ══ RETRY TRANSIENT FAILURES; NEVER RETRY A PARSE ERROR ══
+     * ShopifyQL is cost-throttled. A single throttled page request used to return null, which made
+     * `pageFiltered` return null, which made the BOUNDED path bail out, which dropped us into the
+     * legacy full scan — which hits the page ceiling and comes up tens of thousands of sessions
+     * short. That is exactly 2026-07-12 (105,008 vs 78,337): one transient 429 during a busy
+     * backfill silently downgraded a working strategy to a broken one.
+     *
+     * So: transport failures are retried with a widening backoff. Parse errors are NOT — they are
+     * deterministic, three attempts would fail identically, and the only thing retrying buys is a
+     * four-second pause before the same answer.
+     *
      * @return array{0: array<int, mixed>, 1: array<int, mixed>}|null
      */
     private function runQuery(ShopifyClient $client, string $ql): ?array
@@ -816,36 +849,55 @@ query ($q: String!) {
 }
 GQL;
 
-        try {
-            $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
-        } catch (Throwable $e) {
-            Log::warning('shopify.session_traffic.request_failed', ['error' => $e->getMessage(), 'ql' => $ql]);
+        $lastError = null;
 
-            return null;
+        foreach ([0, 1_000_000, 3_000_000, 7_000_000] as $waitMicros) {
+            if ($waitMicros > 0) {
+                usleep($waitMicros);
+            }
+
+            try {
+                $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
+            } catch (Throwable $e) {
+                $lastError = $e->getMessage();   // throttle / timeout / 5xx — worth another go
+                continue;
+            }
+
+            $resp = $data['shopifyqlQuery'] ?? null;
+            if (! is_array($resp)) {
+                $lastError = 'malformed response envelope';
+                continue;
+            }
+
+            // DETERMINISTIC. Retrying cannot help, and pretending otherwise hides the real fault.
+            if (! empty($resp['parseErrors'])) {
+                $pe = $resp['parseErrors'];
+                Log::warning('shopify.session_traffic.parse_error', [
+                    'parseErrors' => is_array($pe) ? json_encode($pe) : (string) $pe,
+                    'ql'          => $ql,
+                ]);
+
+                return null;
+            }
+
+            $columns = $resp['tableData']['columns'] ?? [];
+            $rows    = $resp['tableData']['rows'] ?? [];
+
+            if (! is_array($columns) || ! is_array($rows)) {
+                $lastError = 'malformed tableData';
+                continue;
+            }
+
+            return [$columns, $rows];
         }
 
-        $resp = $data['shopifyqlQuery'] ?? null;
-        if (! is_array($resp)) {
-            return null;
-        }
-        if (! empty($resp['parseErrors'])) {
-            $pe = $resp['parseErrors'];
-            Log::warning('shopify.session_traffic.parse_error', [
-                'parseErrors' => is_array($pe) ? json_encode($pe) : (string) $pe,
-                'ql'          => $ql,
-            ]);
+        Log::warning('shopify.session_traffic.request_failed', [
+            'error'    => $lastError,
+            'attempts' => 4,
+            'ql'       => $ql,
+        ]);
 
-            return null;
-        }
-
-        $columns = $resp['tableData']['columns'] ?? [];
-        $rows    = $resp['tableData']['rows'] ?? [];
-
-        if (! is_array($columns) || ! is_array($rows)) {
-            return null;
-        }
-
-        return [$columns, $rows];
+        return null;
     }
 
     private function makeClient(PlatformConnection $conn): ShopifyClient

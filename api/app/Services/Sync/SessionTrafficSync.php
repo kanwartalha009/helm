@@ -65,6 +65,9 @@ class SessionTrafficSync
         $isComplete = (bool) $fetched['isComplete'];
         $storeTotal = $fetched['storeTotal'];
         $pagedTotal = (int) $fetched['pagedTotal'];
+        // WHY the day failed, straight from the fetcher. Inferring it downstream produced the
+        // self-contradicting "adds up to 152,621 (0 missing)" on a day reported as FAILED.
+        $reasons    = $fetched['reasons'] ?? [];
 
         // ══ THE QUIET DAY ══
         // No rows AND reconciled (storeTotal 0 === pagedTotal 0) is a real zero-session day. It must
@@ -84,7 +87,7 @@ class SessionTrafficSync
 
             $this->recordDay($conn, $day, false, 0, $storeTotal, $pagedTotal);
 
-            return SessionDayResult::failed($storeTotal, $pagedTotal);
+            return SessionDayResult::failed($storeTotal, $pagedTotal, $reasons);
         }
 
         $records = $this->dedupeTheWayMysqlWill($conn, $day, $rows);
@@ -109,7 +112,7 @@ class SessionTrafficSync
             $this->recordDay($conn, $day, $isComplete, count($records), $storeTotal, $pagedTotal);
         });
 
-        return SessionDayResult::pulled($isComplete, count($records), $storeTotal, $pagedTotal);
+        return SessionDayResult::pulled($isComplete, count($records), $storeTotal, $pagedTotal, $reasons);
     }
 
     /**
