@@ -71,6 +71,40 @@ class SessionTrafficFetcher
     private const COLLECTION_MATCH = '/collections/';
 
     /**
+     * ══ HOW CLOSE IS "IT ADDS UP"? ══
+     * The subset check compares two INDEPENDENTLY COMPUTED ShopifyQL aggregations of the same data:
+     *
+     *     GROUP BY traffic_type                       (Shopify's own subset total)
+     *     GROUP BY landing_page_path, traffic_type    (our paged breakdown, summed)
+     *
+     * The first cut demanded these be BIT-EXACT. Shopify has never promised that, and in production
+     * they drift by a handful of sessions on a busy day:
+     *
+     *     15,238 vs 15,237   (1)          27,504 vs 27,503   (1)
+     *     26,969 vs 26,968   (1)          17,507 vs 17,505   (2)
+     *     22,423 vs 22,422   (1)          15,507 vs 15,502   (5)
+     *
+     * One to five sessions in twenty-seven thousand — 0.004%. Meanwhile the REAL faults this check
+     * exists to catch were 1,136 short (page ceiling), 8,861 duplicated (unstable sort) and 26,671
+     * short (silent fallback): three orders of magnitude larger. The two classes are not close, and
+     * a threshold between them is not a fudge — it is the difference between measurement noise and a
+     * broken query.
+     *
+     * Demanding exactness meant blanking an entire 30-day window — every product, every number the
+     * client actually looks at — to guard against a one-session rounding difference. That is not
+     * rigour; it is the check doing more damage than the fault.
+     *
+     * So: accept a drift under 0.5% (with a 10-session floor, so a small subset isn't failed by a
+     * single session). Anything larger still fails the day closed, loudly, with its reason.
+     *
+     * The invariant that actually matters is untouched: store-wide is DERIVED by subtraction, so the
+     * parts still sum to Shopify's own store total EXACTLY. A drifted session is not lost — it lands
+     * in store-wide, which is where an unattributable session belongs anyway.
+     */
+    private const SUBSET_TOLERANCE_RATIO = 0.005;   // 0.5%
+    private const SUBSET_TOLERANCE_FLOOR = 10;      // sessions
+
+    /**
      * Shopify's traffic types, verified against a full YEAR of a real store (2026-07-12):
      * paid 3,117,263 · direct 2,599,142 · unknown 757,967 · organic 457,105 · unattributed 7.
      * They sum EXACTLY to the store total (6,931,484).
@@ -304,24 +338,53 @@ class SessionTrafficFetcher
                 $got  = $paged[$type] ?? 0;
                 $want = $truth[$type] ?? 0;
 
-                if ($got !== $want) {
-                    Log::warning('shopify.session_traffic.subset_incomplete', [
-                        'brand_id' => $conn->brand_id,
-                        'date'     => $day,
-                        'subset'   => $label,
-                        'type'     => $type,
-                        'paged'    => $got,
-                        'shopify'  => $want,
-                    ]);
-                    $isComplete = false;
-                    $reasons[]  = sprintf(
-                        'Shopify says %s %s sessions landed on %s pages, but paging that list returned %s.',
-                        number_format($want),
-                        $type,
-                        $label,
-                        number_format($got),
-                    );
+                $drift     = abs($got - $want);
+                $tolerance = max(self::SUBSET_TOLERANCE_FLOOR, (int) ceil($want * self::SUBSET_TOLERANCE_RATIO));
+
+                if ($drift === 0) {
+                    continue;
                 }
+
+                // Within tolerance: Shopify's own two aggregations of the same data disagreeing by
+                // a rounding margin. Note it, do NOT fail a whole month of reporting over it.
+                if ($drift <= $tolerance) {
+                    Log::info('shopify.session_traffic.subset_drift_within_tolerance', [
+                        'brand_id'  => $conn->brand_id,
+                        'date'      => $day,
+                        'subset'    => $label,
+                        'type'      => $type,
+                        'paged'     => $got,
+                        'shopify'   => $want,
+                        'drift'     => $drift,
+                        'tolerance' => $tolerance,
+                    ]);
+
+                    continue;
+                }
+
+                // Materially short. THIS is a broken query — a page ceiling, an unstable sort, a
+                // silent fallback — and it must still fail the day closed.
+                Log::warning('shopify.session_traffic.subset_incomplete', [
+                    'brand_id'  => $conn->brand_id,
+                    'date'      => $day,
+                    'subset'    => $label,
+                    'type'      => $type,
+                    'paged'     => $got,
+                    'shopify'   => $want,
+                    'drift'     => $drift,
+                    'tolerance' => $tolerance,
+                ]);
+                $isComplete = false;
+                $reasons[]  = sprintf(
+                    'Shopify says %s %s sessions landed on %s pages, but paging that list returned only %s '
+                    . '(%s missing — more than the %s allowed for rounding).',
+                    number_format($want),
+                    $type,
+                    $label,
+                    number_format($got),
+                    number_format($drift),
+                    number_format($tolerance),
+                );
             }
         }
 
@@ -347,23 +410,36 @@ class SessionTrafficFetcher
 
             if ($remainder < 0) {
                 // We attributed MORE sessions to products+collections than Shopify says the store
-                // had of that type. The arithmetic disagrees with the source, so the day is not
-                // trustworthy — clamp to zero so we never store a negative, and fail it.
-                Log::warning('shopify.session_traffic.negative_store_wide', [
-                    'brand_id'    => $conn->brand_id,
-                    'date'        => $day,
-                    'type'        => $type,
-                    'store_total' => $storeByType[$type] ?? 0,
-                    'attributed'  => $attributed[$type] ?? 0,
-                ]);
-                $isComplete = false;
-                $reasons[]  = sprintf(
-                    'More %s sessions were attributed to products/collections (%s) than Shopify says the store had (%s).',
-                    $type,
-                    number_format($attributed[$type] ?? 0),
-                    number_format($storeByType[$type] ?? 0),
+                // had of that type. A few sessions of overshoot is the same aggregation drift as
+                // above (Shopify's per-subset totals and its store total are computed separately),
+                // and clamping to zero costs nothing. A LARGE overshoot means we are double-counting
+                // and every product number is inflated — that must still fail the day.
+                $overshoot = -$remainder;
+                $tolerance = max(
+                    self::SUBSET_TOLERANCE_FLOOR,
+                    (int) ceil(($storeByType[$type] ?? 0) * self::SUBSET_TOLERANCE_RATIO),
                 );
-                $remainder = 0;
+
+                if ($overshoot > $tolerance) {
+                    Log::warning('shopify.session_traffic.negative_store_wide', [
+                        'brand_id'    => $conn->brand_id,
+                        'date'        => $day,
+                        'type'        => $type,
+                        'store_total' => $storeByType[$type] ?? 0,
+                        'attributed'  => $attributed[$type] ?? 0,
+                        'overshoot'   => $overshoot,
+                    ]);
+                    $isComplete = false;
+                    $reasons[]  = sprintf(
+                        'More %s sessions were attributed to products/collections (%s) than Shopify says the '
+                        . 'store had in total (%s). Product numbers would be inflated, so the day is rejected.',
+                        $type,
+                        number_format($attributed[$type] ?? 0),
+                        number_format($storeByType[$type] ?? 0),
+                    );
+                }
+
+                $remainder = 0;   // never store a negative session count
             }
 
             $storeWide[$type] = $remainder;

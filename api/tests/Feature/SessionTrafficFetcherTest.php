@@ -288,6 +288,65 @@ final class SessionTrafficFetcherTest extends TestCase
         $this->assertSame(30_000, $byKey['store-wide:direct']['sessions']);
     }
 
+    public function test_a_few_sessions_of_shopify_rounding_drift_does_NOT_blank_the_window(): void
+    {
+        // ══ THE PRODUCTION FAILURE THIS FIXES ══
+        //     "Shopify says 27,504 paid sessions landed on product pages,
+        //      but paging that list returned 27,503."
+        //
+        // ONE session in twenty-seven thousand. The subset check compares two INDEPENDENTLY computed
+        // ShopifyQL aggregations of the same data (GROUP BY traffic_type vs GROUP BY
+        // landing_page_path, traffic_type), and Shopify has never promised those are bit-identical.
+        // Demanding exactness blanked a whole 30-day window — every product, every number the client
+        // reads — to guard against a rounding difference.
+        //
+        // The real faults this check exists to catch were 1,136 / 8,861 / 26,671 sessions: three
+        // orders of magnitude larger. A tolerance sits comfortably between the two classes.
+        $rows = [];
+        for ($i = 0; $i < 100; $i++) {
+            $rows[] = ["/products/p{$i}", 'paid', '10'];   // paged rows sum to 1,000
+        }
+
+        $this->fakeShopify(
+            $this->totalsResponse(paid: 1_200, direct: 0, organic: 0, unknown: 0),
+            [$rows],
+            ['/products/' => ['paid' => 1_002]],   // Shopify's own subset total is 2 higher. Noise.
+        );
+
+        $result = app(SessionTrafficFetcher::class)->fetchDay($this->conn(), self::DAY);
+
+        $this->assertTrue($result['isComplete'], '2 sessions of drift must not blank a month of data');
+
+        // The invariant that actually matters is UNTOUCHED: the parts still sum to Shopify's own
+        // store total exactly, because store-wide is DERIVED by subtraction. The drifted session is
+        // not lost — it lands in store-wide, which is where an unattributable session belongs.
+        $this->assertSame(1_200, $result['storeTotal']);
+        $this->assertSame(1_200, $result['pagedTotal']);
+    }
+
+    public function test_a_MATERIALLY_short_subset_still_fails_the_day(): void
+    {
+        // The tolerance must not become a blindfold. A page ceiling or an unstable sort loses rows
+        // by the thousand, and that has to keep failing closed — otherwise we would render a
+        // confidently wrong number, which is the one outcome worse than rendering nothing.
+        $rows = [];
+        for ($i = 0; $i < 100; $i++) {
+            $rows[] = ["/products/p{$i}", 'paid', '10'];   // paged rows sum to 1,000
+        }
+
+        $this->fakeShopify(
+            $this->totalsResponse(paid: 5_000, direct: 0, organic: 0, unknown: 0),
+            [$rows],
+            ['/products/' => ['paid' => 5_000]],   // Shopify says 5,000; we paged 1,000. 80% missing.
+        );
+
+        $result = app(SessionTrafficFetcher::class)->fetchDay($this->conn(), self::DAY);
+
+        $this->assertFalse($result['isComplete'], '4,000 missing sessions is a broken query, not rounding');
+        $this->assertNotEmpty($result['reasons']);
+        $this->assertStringContainsString('4,000 missing', implode(' ', $result['reasons']));
+    }
+
     public function test_unstable_paging_cannot_double_count_a_product(): void
     {
         // ══ THE SECOND PRODUCTION BUG, PINNED ══
