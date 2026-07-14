@@ -3,6 +3,7 @@ import { cn } from '@/lib/cn';
 import { Avatar, Dropdown, DropdownItem, DropdownDivider, Wordmark } from '@/components/ui';
 import { logout } from '@/lib/auth';
 import { useCurrentUser } from '@/hooks/useSettings';
+import { useUiStore } from '@/stores/uiStore';
 
 interface NavSection {
   label: string;
@@ -170,22 +171,60 @@ const NAV: NavSection[] = [
 export function Sidebar() {
   const navigate = useNavigate();
   const { data: user } = useCurrentUser();
+  const collapsed = useUiStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const initials = user?.displayInitials || user?.name?.slice(0, 1)?.toUpperCase() || '?';
+
   return (
     <aside className="sidebar">
-      <Wordmark to="/dashboard" style={{ padding: '0 8px', marginBottom: 8 }} name={user?.agencyName} />
+      <div className="sidebar-head">
+        {/* The wordmark is the one thing that cannot survive 60px, so it goes. The toggle stays
+            pinned in the same spot in both states, so the button never moves under the cursor. */}
+        {!collapsed && (
+          <Wordmark to="/dashboard" style={{ padding: '0 8px' }} name={user?.agencyName} />
+        )}
+
+        <button
+          type="button"
+          className="sidebar-toggle"
+          onClick={toggleSidebar}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
+          title={`${collapsed ? 'Expand' : 'Collapse'} sidebar  [`}
+        >
+          {/* A panel with a bar on the left: the standard "toggle side panel" glyph (Linear, VS
+              Code, Notion all use it). Flipped in the collapsed state so the arrow always points
+              where the click will take you. */}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <line x1="9" y1="4" x2="9" y2="20" />
+          </svg>
+        </button>
+      </div>
 
       {NAV.map((section) => (
         <div key={section.label}>
-          <div className="sidebar-section-label">{section.label}</div>
+          {/* Section labels are TEXT. At 60px there is nowhere for them to go, and truncating
+              "Analyze" to "An…" is noise, not information. A hairline rule keeps the grouping the
+              label was there to convey. */}
+          {collapsed ? (
+            <div className="sidebar-section-rule" aria-hidden="true" />
+          ) : (
+            <div className="sidebar-section-label">{section.label}</div>
+          )}
+
           {section.items.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) => cn('nav-item', isActive && 'active')}
+              // The native tooltip IS the label when collapsed. Without it the icons are a guessing
+              // game — several of them (Inventory / Products / Ads library) are genuinely ambiguous
+              // on their own.
+              title={collapsed ? item.label : undefined}
             >
               {item.icon}
-              {item.label}
+              <span className="nav-item-label">{item.label}</span>
             </NavLink>
           ))}
         </div>
@@ -206,7 +245,13 @@ export function Sidebar() {
                 fontFamily: 'inherit',
               }}
             >
-              <div className="flex items-center gap-8" style={{ width: '100%' }}>
+              <div
+                className="flex items-center gap-8"
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : undefined }}
+                // Collapsed, the avatar is all that is left — so it has to carry the identity that
+                // the name and role were carrying. The menu behind it is unchanged.
+                title={collapsed ? `${user?.name ?? ''} · ${roleLabel(user?.role)}` : undefined}
+              >
                 {user?.avatarUrl ? (
                   <img
                     src={user.avatarUrl}
@@ -217,30 +262,45 @@ export function Sidebar() {
                       borderRadius: '50%',
                       objectFit: 'cover',
                       border: '1px solid var(--border)',
+                      flexShrink: 0,
                     }}
                   />
                 ) : (
                   <Avatar initials={initials} inverted round />
                 )}
-                <div style={{ lineHeight: 1.3, textAlign: 'left', flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>
-                    {user?.name ?? 'Loading…'}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {roleLabel(user?.role)}
-                  </div>
-                </div>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.75"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
+
+                {!collapsed && (
+                  <>
+                    <div style={{ lineHeight: 1.3, textAlign: 'left', flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: 'var(--text)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {user?.name ?? 'Loading…'}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {roleLabel(user?.role)}
+                      </div>
+                    </div>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                      style={{ color: 'var(--text-muted)', flexShrink: 0 }}
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </>
+                )}
               </div>
             </button>
           }

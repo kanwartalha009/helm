@@ -84,9 +84,16 @@ type MetricItem = {
   action: InventoryAction;
 };
 
+/**
+ * `totalAdSpend` is the brand's TOTAL ad spend for the window (summary.adSpend) — attributed AND
+ * unattributed, every connected platform. It is the denominator of the "% of spend" column; see
+ * SpendSharePct for why it is not the sum of the rows.
+ *
+ * null = ad spend is not synced for this window. The column then renders '—' rather than 0%.
+ */
 type Props =
-  | { mode: 'product'; products: InventoryProduct[]; currency: string }
-  | { mode: 'collection'; collections: CollectionGroup[]; currency: string };
+  | { mode: 'product'; products: InventoryProduct[]; currency: string; totalAdSpend: number | null }
+  | { mode: 'collection'; collections: CollectionGroup[]; currency: string; totalAdSpend: number | null };
 
 export function InventoryTable(props: Props) {
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -102,19 +109,32 @@ export function InventoryTable(props: Props) {
   const collection = props.mode === 'collection';
 
   return (
+    /*
+     * ══ WHY THERE IS NO overflow WRAPPER HERE ANY MORE ══
+     * The header cells have always carried `position: sticky; top: 0`, and it has never worked.
+     * The reason: the old `.table-scroll` wrapper set `overflow-x: auto`, and CSS forces
+     * `overflow-y` to `auto` alongside it — so the wrapper became its own scroll container with no
+     * height limit. The header dutifully stuck to the top of a box that never scrolls. Sticky to
+     * nothing.
+     *
+     * The main dashboard's wide table has a working sticky header precisely because it has NO
+     * intermediate overflow wrapper: it sits directly inside `.page-scroll`, which is the real
+     * scroll region, and the header pins to the top of that. `.table-region` is the existing
+     * opt-out class that keeps a table from being turned into a scroll container (by the global
+     * `:where(div):has(> table)` overflow rule). Same pattern, same result.
+     *
+     * Horizontal scrolling is not lost — `.page-scroll` handles it, and the filter chrome is
+     * pinned with `left: 0` so it does not drift sideways with the table.
+     */
     <div
+      className="table-region"
       style={{
         background: 'var(--surface)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-lg)',
       }}
     >
-      {/* Scrolls horizontally instead of painting outside its own border. `table-layout: fixed`
-          plus explicit widths on the two flexible columns (#, Product) means the browser sizes
-          the table from the LAYOUT, not from whichever cell happens to hold the longest string —
-          which is what let one long product title push everything sideways. */}
-      <div className="table-scroll" style={{ borderRadius: 'var(--radius-lg)' }}>
-        <table style={{ width: '100%', minWidth: 1180, borderCollapse: 'collapse', fontSize: 13 }}>
+      <table style={{ width: '100%', minWidth: 1180, borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr>
               <th style={{ ...thL, width: 34 }}>#</th>
@@ -124,6 +144,14 @@ export function InventoryTable(props: Props) {
               <th style={thBase}>Units</th>
               <th style={thBase}>Units prev</th>
               <th style={thBase} title="Ad spend attributed to this product, summed across every connected ad platform (Meta, Google, TikTok) — not Meta alone.">Ad spend</th>
+              {/* Share of the brand's TOTAL ad spend — see the tooltip and the comment in
+                  metricCells for why the denominator is total and not attributed spend. */}
+              <th
+                style={thBase}
+                title="This product's share of the brand's TOTAL ad spend for the window (every platform, attributed and unattributed). The column will NOT sum to 100%: spend that cannot be tied to a specific product is real budget and is not redistributed across the products that happen to be measurable."
+              >
+                % of spend
+              </th>
               <th style={thBase}>Revenue</th>
               <th style={thBase}>ROAS blended</th>
               <th style={thBase}>Active ads</th>
@@ -146,6 +174,7 @@ export function InventoryTable(props: Props) {
                     isOpen={open.has(g.key)}
                     onToggle={() => toggle(g.key)}
                     money={money}
+                    totalAdSpend={props.totalAdSpend}
                   />
                 ))
               : props.products.map((p, i) => (
@@ -165,12 +194,11 @@ export function InventoryTable(props: Props) {
                         {p.title}
                       </div>
                     </td>
-                    {metricCells(p, money, {})}
+                    {metricCells(p, money, { totalSpend: props.totalAdSpend })}
                   </tr>
                 ))}
           </tbody>
-        </table>
-      </div>
+      </table>
     </div>
   );
 }
@@ -181,9 +209,11 @@ function CollectionRows({
   isOpen,
   onToggle,
   money,
+  totalAdSpend,
 }: {
   g: CollectionGroup;
   rank: number;
+  totalAdSpend: number | null;
   isOpen: boolean;
   onToggle: () => void;
   money: (v: number | null) => string;
@@ -223,7 +253,7 @@ function CollectionRows({
             </div>
           </div>
         </td>
-        {metricCells(g, money, { colores: formatNumber(g.productCount) })}
+        {metricCells(g, money, { colores: formatNumber(g.productCount), totalSpend: totalAdSpend })}
       </tr>
 
       {isOpen &&
@@ -236,7 +266,7 @@ function CollectionRows({
                 {p.handle}
               </div>
             </td>
-            {metricCells(p, money, { colores: <span style={{ color: 'var(--text-muted)' }}>—</span>, child: true })}
+            {metricCells(p, money, { colores: <span style={{ color: 'var(--text-muted)' }}>—</span>, child: true, totalSpend: totalAdSpend })}
           </tr>
         ))}
     </>
@@ -247,10 +277,72 @@ function CollectionRows({
 // Ad spend, Revenue, ROAS, Active ads, Sessions, Status, Action. `colores` omitted →
 // no Products column (product view). `child` → subtle background for expanded
 // collection members.
+/**
+ * A product's share of the brand's ad budget.
+ *
+ * ══ WHY THE DENOMINATOR IS **TOTAL** AD SPEND, NOT ATTRIBUTED SPEND ══
+ * The tempting choice is to divide by the sum of the product-attributed spend in this table, so the
+ * column tidily sums to 100%. That would be a flattering lie. Ad spend that cannot be tied to a
+ * specific product — brand campaigns, PMax with opaque asset groups, anything whose landing URL
+ * isn't a product page — is REAL BUDGET. Dividing it away silently redistributes it across the
+ * products that happen to be measurable, and every one of them then looks like it consumed a bigger
+ * share of the budget than it did.
+ *
+ * `summary.adSpend` is total spend across every connected platform, attributed AND unattributed. So
+ * this column will NOT sum to 100%, and the gap is the honest answer to "how much of our spend can
+ * we actually attribute?" — which is a number worth seeing, not hiding.
+ *
+ * '—' when either side is unknown. A null spend is "not synced", not zero, and 0% would be a
+ * confident wrong answer.
+ */
+function SpendSharePct({
+  spend,
+  totalSpend,
+  style,
+}: {
+  spend: number | null;
+  totalSpend: number | null;
+  style: CSSProperties;
+}) {
+  if (spend == null || totalSpend == null || totalSpend <= 0) {
+    return <td style={style}><span style={{ color: 'var(--text-muted)' }}>—</span></td>;
+  }
+
+  const pct = (spend / totalSpend) * 100;
+
+  // Below 0.1% but non-zero, "0.0%" reads as nothing at all. "<0.1%" says "measured, and tiny".
+  const label = pct > 0 && pct < 0.1 ? '<0.1%' : `${pct.toFixed(1)}%`;
+
+  return (
+    <td style={style}>
+      <div style={{ fontWeight: 500 }}>{label}</div>
+      {/* A hairline bar makes the column scannable down 3,892 rows without reading every number.
+          Width is capped at 100% so a rounding artefact can't overflow the cell. */}
+      <div
+        style={{
+          height: 3,
+          marginTop: 3,
+          borderRadius: 2,
+          background: 'var(--surface-subtle)',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            width: `${Math.min(100, Math.max(0, pct))}%`,
+            height: '100%',
+            background: 'var(--accent)',
+          }}
+        />
+      </div>
+    </td>
+  );
+}
+
 function metricCells(
   item: MetricItem,
   money: (v: number | null) => string,
-  opts: { colores?: ReactNode; child?: boolean },
+  opts: { colores?: ReactNode; child?: boolean; totalSpend?: number | null },
 ): ReactNode {
   const bg = opts.child ? SUBTLE : undefined;
   const num: CSSProperties = { ...tdBase, background: bg };
@@ -280,6 +372,7 @@ function metricCells(
           <span style={{ color: 'var(--text-muted)' }}>—</span>
         )}
       </td>
+      <SpendSharePct spend={item.spend} totalSpend={opts.totalSpend ?? null} style={num} />
       <td style={num}>{money(item.revenue)}</td>
       <td style={{ ...num, fontWeight: 600, color: item.roas != null && item.roas >= 3 ? 'var(--success)' : undefined }}>
         {item.roas != null ? formatRoas(item.roas) : <span style={{ color: 'var(--text-muted)' }}>—</span>}

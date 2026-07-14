@@ -14,7 +14,7 @@ import { formatMoney, formatNumber, formatPercent, formatRoas, pctDelta, timeAgo
 import type { DashboardRow, DashboardRowBrand } from '@/types/domain';
 import type { CollectionGroup, InventoryPeriod, InventoryResponse, InventoryStatus } from '@/types/inventory';
 
-type SortKey = 'spend' | 'units' | 'stock' | 'name' | 'status';
+type SortKey = 'spend' | 'revenue' | 'units' | 'stock' | 'name' | 'status';
 type StatusFilter = 'all' | InventoryStatus;
 
 const PERIOD_LABEL: Record<InventoryPeriod, string> = {
@@ -53,6 +53,13 @@ export function InventoryPage() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('spend');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  /*
+   * Minimum revenue filter (Bosco, 2026-07-14). A free number, not preset buckets: "> €1,000" means
+   * something completely different on a brand doing €300/day than on one doing €150k/day, and a
+   * fixed chip ladder would be wrong for most of the 88 brands. Held as a STRING so the field can be
+   * empty (= no filter) without pretending 0 is a meaningful floor.
+   */
+  const [minRevenue, setMinRevenue] = useState<string>('');
   // By product (flat list) vs By collection (model-grouped, expandable) — Bosco.
   const [groupMode, setGroupMode] = useState<'product' | 'collection'>('product');
 
@@ -107,22 +114,34 @@ export function InventoryPage() {
     qc.invalidateQueries({ queryKey: ['inventory'] });
   }, [qc]);
 
+  const minRev = parseMinRevenue(minRevenue);
+
+  // How many products the minimum-revenue filter had to exclude because their revenue is UNKNOWN
+  // (not synced), rather than because it was below the floor. Counted from the full set, so the
+  // number doesn't change as the search box narrows.
+  const unknownRevenueHidden = useMemo(
+    () => (minRev === null || !data ? 0 : data.products.filter((p) => p.revenue == null).length),
+    [data, minRev],
+  );
+
   const products = useMemo(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
     const list = data.products.filter(
       (p) =>
         (statusFilter === 'all' || p.status === statusFilter) &&
+        passesMinRevenue(p.revenue, minRev) &&
         (q === '' || p.title.toLowerCase().includes(q) || p.handle.toLowerCase().includes(q)),
     );
     return [...list].sort((a, b) => {
       if (sort === 'name') return a.title.localeCompare(b.title);
+      if (sort === 'revenue') return descNullLast(a.revenue, b.revenue);
       if (sort === 'units') return descNullLast(a.units, b.units);
       if (sort === 'stock') return b.stock - a.stock;
       if (sort === 'status') return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || descNullLast(a.spend, b.spend);
       return descNullLast(a.spend, b.spend);
     });
-  }, [data, search, sort, statusFilter]);
+  }, [data, search, sort, statusFilter, minRev]);
 
   // "By collection" aggregate — group every product by its model (first word of
   // the title, e.g. all "Nayah …" → one Nayah row). Sum the metrics, blend ROAS,
@@ -193,16 +212,18 @@ export function InventoryPage() {
     const list = collections.filter(
       (g) =>
         (statusFilter === 'all' || g.status === statusFilter) &&
+        passesMinRevenue(g.revenue, minRev) &&
         (q === '' || g.name.toLowerCase().includes(q) || g.products.some((p) => p.title.toLowerCase().includes(q))),
     );
     return [...list].sort((a, b) => {
       if (sort === 'name') return a.name.localeCompare(b.name);
+      if (sort === 'revenue') return descNullLast(a.revenue, b.revenue);
       if (sort === 'units') return descNullLast(a.units, b.units);
       if (sort === 'stock') return b.stock - a.stock;
       if (sort === 'status') return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || descNullLast(a.spend, b.spend);
       return descNullLast(a.spend, b.spend);
     });
-  }, [collections, search, sort, statusFilter]);
+  }, [collections, search, sort, statusFilter, minRev]);
 
   // No brands in scope at all — mirror the dashboard's "add a brand" dead-end
   // rather than showing an empty report shell.
@@ -342,11 +363,61 @@ export function InventoryPage() {
         <span className="text-xs muted" style={{ marginRight: 2 }}>Sort</span>
         <div className="segmented">
           <button type="button" className={sort === 'spend' ? 'active' : ''} onClick={() => setSort('spend')}>Spend</button>
+          <button type="button" className={sort === 'revenue' ? 'active' : ''} onClick={() => setSort('revenue')}>Revenue</button>
           <button type="button" className={sort === 'units' ? 'active' : ''} onClick={() => setSort('units')}>Units</button>
           <button type="button" className={sort === 'stock' ? 'active' : ''} onClick={() => setSort('stock')}>Stock</button>
           <button type="button" className={sort === 'name' ? 'active' : ''} onClick={() => setSort('name')}>A–Z</button>
           <button type="button" className={sort === 'status' ? 'active' : ''} onClick={() => setSort('status')}>Status</button>
         </div>
+
+        <span style={{ width: 14 }} />
+
+        {/* Min revenue. A free number rather than preset buckets: "> €1,000" means something very
+            different on a brand doing €300/day than on one doing €150k/day, and a fixed chip ladder
+            would be wrong for most of the 88 brands. */}
+        <span className="text-xs muted" style={{ marginRight: 2 }}>Min revenue</span>
+        <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={minRevenue}
+            onChange={(e) => setMinRevenue(e.target.value)}
+            placeholder={`e.g. 1000`}
+            aria-label="Minimum revenue"
+            style={{
+              width: 108,
+              padding: '6px 24px 6px 10px',
+              fontSize: 13,
+              borderRadius: 'var(--radius)',
+              border: '1px solid var(--border-strong)',
+              background: 'var(--surface)',
+              color: 'var(--text)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          />
+          {minRevenue !== '' && (
+            <button
+              type="button"
+              onClick={() => setMinRevenue('')}
+              aria-label="Clear minimum revenue"
+              title="Clear"
+              style={{
+                position: 'absolute',
+                right: 4,
+                border: 0,
+                background: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: 2,
+                lineHeight: 1,
+                fontSize: 14,
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
+
         <span style={{ flex: 1 }} />
         <div className="segmented">
           <button type="button" className={statusFilter === 'all' ? 'active' : ''} onClick={() => setStatusFilter('all')}>All</button>
@@ -491,10 +562,39 @@ export function InventoryPage() {
             </div>
           )}
 
+          {/* ══ SAY WHAT THE FILTER HID ══
+              A minimum revenue cannot be applied to a product whose revenue is UNKNOWN (commerce not
+              synced for the window). Those rows are excluded — but silently dropping them would let
+              the operator conclude the products earn nothing, when the truth is we failed to measure
+              them. So they are counted and named. */}
+          {minRev !== null && unknownRevenueHidden > 0 && (
+            <div
+              className="mb-12"
+              style={{
+                fontSize: 12,
+                color: 'var(--warning)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                padding: '10px 12px',
+              }}
+            >
+              {unknownRevenueHidden} product{unknownRevenueHidden === 1 ? ' has' : 's have'} no revenue
+              synced for this window, so {unknownRevenueHidden === 1 ? 'it cannot' : 'they cannot'} be
+              measured against a minimum and {unknownRevenueHidden === 1 ? 'is' : 'are'} hidden while one
+              is set. That is <strong>unknown</strong> revenue, not zero — clear the minimum to see
+              {unknownRevenueHidden === 1 ? ' it' : ' them'}.
+            </div>
+          )}
+
           <div className="table-region">
           {groupMode === 'collection' ? (
             displayCollections.length > 0 ? (
-              <InventoryTable mode="collection" collections={displayCollections} currency={currency} />
+              <InventoryTable
+                mode="collection"
+                collections={displayCollections}
+                currency={currency}
+                totalAdSpend={data.summary.adSpend ?? null}
+              />
             ) : (
               <StateCard>
                 {collections.length === 0
@@ -503,7 +603,12 @@ export function InventoryPage() {
               </StateCard>
             )
           ) : products.length > 0 ? (
-            <InventoryTable mode="product" products={products} currency={currency} />
+            <InventoryTable
+              mode="product"
+              products={products}
+              currency={currency}
+              totalAdSpend={data.summary.adSpend ?? null}
+            />
           ) : (
             <StateCard>
               {data.products.length === 0
@@ -1135,6 +1240,38 @@ const dateInput: CSSProperties = {
   fontSize: 12.5,
   color: 'var(--text)',
 };
+
+/* ---- Revenue filter --------------------------------------------------- */
+
+/**
+ * Parse the "min revenue" box. Empty / junk / negative → null, meaning NO filter.
+ *
+ * Accepts what people actually type into a money box: "1.500", "1,500", "€1500", "1 500".
+ */
+function parseMinRevenue(raw: string): number | null {
+  const cleaned = raw.replace(/[^\d.,-]/g, '').replace(/[.,](?=\d{3}\b)/g, '').replace(',', '.');
+  const n = Number.parseFloat(cleaned);
+
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * ══ A PRODUCT WITH UNKNOWN REVENUE IS NOT A PRODUCT WITH ZERO REVENUE ══
+ * `revenue === null` means commerce has not synced for this window — we do not know what it made.
+ * Treating that as 0 would silently drop every unsynced product the moment a minimum is typed, and
+ * the operator would conclude those products earn nothing rather than that we failed to measure
+ * them. That is the same missing-is-not-zero bug that has bitten this codebase all week.
+ *
+ * So: with NO minimum set, unknown-revenue rows are shown (with '—', as they always are). With a
+ * minimum set, they cannot be evaluated against it and are excluded — and the UI says so out loud,
+ * with a count, rather than letting them vanish quietly.
+ */
+function passesMinRevenue(revenue: number | null | undefined, min: number | null): boolean {
+  if (min === null) return true;
+  if (revenue == null) return false;   // unknown ≠ zero — excluded, and reported in the UI
+
+  return revenue >= min;
+}
 
 /* ---- Date helpers ---------------------------------------------------- */
 

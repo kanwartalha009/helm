@@ -336,6 +336,21 @@ p {
   display: grid;
   grid-template-columns: 220px 1fr;
   min-height: 100vh;
+
+  /* Animate the COLUMN, not the sidebar's own width. The grid track is what the content area is
+     sized against, so transitioning anything else makes the table reflow a frame out of step with
+     the nav and the whole thing judders. */
+  transition: grid-template-columns 160ms ease;
+}
+
+/* Collapsed: icons only. 220px → 64px hands 156px back to the table, which on a 1440px screen is
+   roughly two more columns of an inventory row — the entire point of the feature. */
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 64px 1fr;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell { transition: none; }
 }
 
 .sidebar {
@@ -345,6 +360,86 @@ p {
   display: flex;
   flex-direction: column;
   gap: 24px;
+
+  /* The nav is chrome; the table is the work. Pin the nav so a long table scrolls under it rather
+     than dragging 3,892 rows' worth of empty sidebar down the page with it. */
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;   /* labels are clipped, never allowed to force a horizontal scrollbar */
+}
+
+.sidebar-collapsed .sidebar {
+  padding-left: 10px;
+  padding-right: 10px;
+  align-items: stretch;
+}
+
+/* Wordmark + toggle. space-between when expanded; the toggle centres itself when it's alone. */
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.sidebar-collapsed .sidebar-head {
+  justify-content: center;
+}
+
+.sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.sidebar-toggle:hover {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+
+.sidebar-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Collapsed, the icon flips so the "open panel" bar always sits on the side the click reveals. */
+.sidebar-collapsed .sidebar-toggle svg {
+  transform: scaleX(-1);
+}
+
+/* A section label has nowhere to go at 64px. A hairline preserves the GROUPING, which is what the
+   label was actually for — truncating "Analyze" to "An…" would be noise, not information. */
+.sidebar-section-rule {
+  height: 1px;
+  background: var(--border);
+  margin: 0 6px 8px;
+}
+
+/* Collapsed: the icon centres and the text is removed from layout entirely. `display: none`, not
+   opacity or width — a hidden-but-present label still contributes its width to the flex row and
+   would push the icon off-centre. */
+.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+  gap: 0;
+}
+
+.sidebar-collapsed .nav-item-label {
+  display: none;
 }
 
 .sidebar-section-label {
@@ -442,6 +537,27 @@ p {
 .page-scroll > .table-region {
   position: static;
   z-index: auto;
+}
+
+/* ══ A TABLE REGION MUST NOT BECOME A SCROLL CONTAINER ══
+   The global `:where(div):has(> table)` rule below gives every table wrapper `overflow-x: auto` so
+   a wide table can't paint outside its border. That rule is right for a table inside a card — and
+   FATAL for a sticky header, because CSS forces `overflow-y: auto` alongside `overflow-x: auto`,
+   turning the wrapper into a scroll container with no height limit. The header then sticks to the
+   top of a box that never scrolls, i.e. nowhere.
+
+   A `.table-region` opts out: it scrolls horizontally via `.page-scroll` instead, which is also the
+   vertical scroll region — so `thead { top: 0 }` pins to the top of the viewport, exactly like the
+   main dashboard. `:where()` contributes zero specificity, so a single class wins cleanly. */
+.table-region {
+  overflow: visible;
+}
+
+/* The header must be OPAQUE and above the rows it slides over, or the body shows through it. */
+.table-region thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
 }
 
 /* Filter chips */
