@@ -11,6 +11,7 @@ use Carbon\CarbonImmutable;
 use Google\Ads\GoogleAds\V24\Enums\AdvertisingChannelTypeEnum\AdvertisingChannelType;
 use Google\Ads\GoogleAds\V24\Enums\CampaignStatusEnum\CampaignStatus;
 use Google\Ads\GoogleAds\V24\Enums\DeviceEnum\Device;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Pulls one day of Google Ads reporting metrics for a brand's connection and
@@ -28,7 +29,17 @@ use Google\Ads\GoogleAds\V24\Enums\DeviceEnum\Device;
  */
 final class ReportsFetcher
 {
-    /** geo_target_constant country id → ISO-2 code, resolved once per run. */
+    /**
+     * geo_target_constant country id → ISO-2 code.
+     *
+     * Country criterion ids are global and immutable, so this is cached ACROSS jobs (30 days), not
+     * just within one. A job is a single brand-day, so the instance cache alone meant re-buying this
+     * ~250-row constant for every brand, every day — over a thousand operations a sync, out of a
+     * 15,000/day budget shared by all 200+ brands.
+     */
+    private const GEO_CACHE_KEY = 'google_ads:geo_country_constants';
+
+    /** Within-run memo, in front of the cross-run cache. */
     private array $geoCountryCache = [];
 
     public function __construct(
@@ -362,6 +373,19 @@ final class ReportsFetcher
             return $this->geoCountryCache;
         }
 
+        // ══ THIS IS A CONSTANT. STOP BUYING IT EVERY TIME. ══
+        // The instance cache above only survives one job — and a job is ONE BRAND-DAY. So this
+        // ~250-row query was re-issued for every brand, every day, every backfill: well over a
+        // thousand operations a sync, spent re-learning that Spain is still 2724.
+        //
+        // Google Ads Basic access allows 15,000 operations PER DAY across ALL brands. Country
+        // criterion ids are global and effectively immutable, so a 30-day cache costs nothing and
+        // hands that budget back to the queries that actually carry data.
+        $cached = Cache::get(self::GEO_CACHE_KEY);
+        if (is_array($cached) && $cached !== []) {
+            return $this->geoCountryCache = $cached;
+        }
+
         $gaql = "SELECT geo_target_constant.id, geo_target_constant.country_code "
             . "FROM geo_target_constant WHERE geo_target_constant.target_type = 'Country' "
             . "AND geo_target_constant.status = 'ENABLED'";
@@ -377,6 +401,12 @@ final class ReportsFetcher
             if ($id > 0 && $code !== '') {
                 $map[$id] = $code;
             }
+        }
+
+        // Only cache a REAL answer. Caching an empty map because the token was throttled would
+        // blank every country label for 30 days — a quota error turning into silent data loss.
+        if ($map !== []) {
+            Cache::put(self::GEO_CACHE_KEY, $map, now()->addDays(30));
         }
 
         return $this->geoCountryCache = $map;
