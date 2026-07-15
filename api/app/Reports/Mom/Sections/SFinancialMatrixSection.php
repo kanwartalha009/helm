@@ -32,6 +32,14 @@ use Carbon\CarbonImmutable;
  * delta still resolves against the prior December even though it sits in a
  * different stacked table. Heatmap flags are 'up'/'down'/null on revenue and
  * blended ROAS only — the two cells the PDF actually colors.
+ *
+ * M5 addendum (Kanwar, 2026-07-15 — "last 3/4/6/12 month comparison with
+ * previous year"): when `ReportFilters::$months` is set, both stacked tables
+ * become a TRAILING N-month window ending at the report month (current) and
+ * the same N-month window one year earlier (prior) — a true apples-to-apples
+ * N-vs-N comparison, rather than always-Jan-start full-year blocks. This is
+ * additive: `months` unset (the default) reproduces the exact original
+ * behaviour byte-for-byte.
  */
 final class SFinancialMatrixSection implements MomSection
 {
@@ -52,11 +60,19 @@ final class SFinancialMatrixSection implements MomSection
         $reportMonth = CarbonImmutable::parse($window[0], $tz);
         $reportYear  = (int) $reportMonth->format('Y');
         $priorYear   = $reportYear - 1;
+        $months      = $filters->months; // M5: trailing-window length, or null for the default full-year tables
 
-        // One extra month of lookback (December of priorYear-1) purely to give
-        // January of priorYear a MoM delta to compare against.
-        $queryStart = CarbonImmutable::create($priorYear - 1, 12, 1, 0, 0, 0, $tz);
-        $queryEnd   = $reportMonth->endOfMonth();
+        if ($months !== null) {
+            $priorWindowEnd = $reportMonth->subYear();
+            // One extra month of lookback before the PRIOR window's own start,
+            // purely so its first row still gets a real MoM delta.
+            $queryStart = $priorWindowEnd->subMonths($months - 1)->subMonth();
+        } else {
+            // One extra month of lookback (December of priorYear-1) purely to give
+            // January of priorYear a MoM delta to compare against.
+            $queryStart = CarbonImmutable::create($priorYear - 1, 12, 1, 0, 0, 0, $tz);
+        }
+        $queryEnd = $reportMonth->endOfMonth();
 
         $byMonth = $this->monthlyMetrics($brand->id, $queryStart->toDateString(), $queryEnd->toDateString());
         if ($byMonth === []) {
@@ -67,8 +83,13 @@ final class SFinancialMatrixSection implements MomSection
             ];
         }
 
-        $currentYearRows = $this->buildRows($byMonth, $reportYear, 1, (int) $reportMonth->format('n'));
-        $priorYearRows   = $this->buildRows($byMonth, $priorYear, 1, 12);
+        if ($months !== null) {
+            $currentYearRows = $this->buildTrailingRows($byMonth, $reportMonth, $months);
+            $priorYearRows   = $this->buildTrailingRows($byMonth, $reportMonth->subYear(), $months);
+        } else {
+            $currentYearRows = $this->buildRows($byMonth, $reportYear, 1, (int) $reportMonth->format('n'));
+            $priorYearRows   = $this->buildRows($byMonth, $priorYear, 1, 12);
+        }
 
         $reportRow = $byMonth[$reportMonth->format('Y-m')] ?? null;
         $priorYearSameMonthKey = $reportMonth->subYear()->format('Y-m');
@@ -88,6 +109,7 @@ final class SFinancialMatrixSection implements MomSection
             'month'  => $reportMonth->format('Y-m'),
             'reportYear' => $reportYear,
             'priorYear'  => $priorYear,
+            'monthsWindow' => $months, // M5: the active trailing-window length, or null = default full-year tables
             'currentYearRows' => $currentYearRows,
             'priorYearRows'   => $priorYearRows,
             'summary' => $summary,
@@ -107,41 +129,64 @@ final class SFinancialMatrixSection implements MomSection
     {
         $rows = [];
         for ($m = $fromMonth; $m <= $toMonth; $m++) {
-            $key = sprintf('%04d-%02d', $year, $m);
-            $cur = $byMonth[$key] ?? null;
-
-            $prevDate = CarbonImmutable::createFromDate($year, $m, 1)->subMonth();
-            $prevKey  = $prevDate->format('Y-m');
-            $prev = $byMonth[$prevKey] ?? null;
-
-            if ($cur === null) {
-                $rows[] = ['month' => $key, 'label' => CarbonImmutable::createFromDate($year, $m, 1)->isoFormat('MMMM YYYY'), 'status' => 'no_data'];
-                continue;
-            }
-
-            $roas = $cur['spend'] > 0.0 ? round($cur['revenue'] / $cur['spend'], 2) : null;
-            $prevRoas = ($prev !== null && $prev['spend'] > 0.0) ? round($prev['revenue'] / $prev['spend'], 2) : null;
-
-            $rows[] = [
-                'month'  => $key,
-                'label'  => CarbonImmutable::createFromDate($year, $m, 1)->isoFormat('MMMM YYYY'),
-                'status' => 'ok',
-                'orders' => $cur['orders'],
-                'aov'    => $cur['orders'] > 0 ? round($cur['revenue'] / $cur['orders'], 2) : null,
-                'returnsPct' => $cur['revenue'] > 0.0 ? round(abs($cur['refunds']) / $cur['revenue'] * 100, 1) : null,
-                'revenue' => round($cur['revenue'], 2),
-                'spend'   => round($cur['spend'], 2),
-                'googleSharePct' => $cur['spend'] > 0.0 ? round($cur['googleSpend'] / $cur['spend'] * 100, 1) : null,
-                'roas'    => $roas,
-                'deltaRevenuePct' => $prev !== null ? $this->pctDelta($cur['revenue'], $prev['revenue']) : null,
-                'deltaSpendPct'   => $prev !== null ? $this->pctDelta($cur['spend'], $prev['spend']) : null,
-                'deltaRoasPct'    => $this->pctDelta($roas, $prevRoas),
-                'revenueFlag' => $this->flag($cur['revenue'], $prev['revenue'] ?? null),
-                'roasFlag'    => $this->flag($roas, $prevRoas),
-            ];
+            $rows[] = $this->rowFor($byMonth, CarbonImmutable::createFromDate($year, $m, 1));
         }
 
         return $rows;
+    }
+
+    /**
+     * M5 addendum — `count` months ending at (and including) `endMonth`,
+     * oldest-first, crossing a calendar-year boundary freely (unlike
+     * buildRows, which is always a single-year Jan..N slice). Each row uses
+     * the exact same per-row shape/math as buildRows via the shared rowFor().
+     *
+     * @param array<string, array{orders:int, revenue:float, refunds:float, spend:float, googleSpend:float}> $byMonth
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildTrailingRows(array $byMonth, CarbonImmutable $endMonth, int $count): array
+    {
+        $rows = [];
+        for ($i = $count - 1; $i >= 0; $i--) {
+            $rows[] = $this->rowFor($byMonth, $endMonth->subMonths($i)->startOfMonth());
+        }
+
+        return $rows;
+    }
+
+    /** @param array<string, array{orders:int, revenue:float, refunds:float, spend:float, googleSpend:float}> $byMonth */
+    private function rowFor(array $byMonth, CarbonImmutable $monthDate): array
+    {
+        $key = $monthDate->format('Y-m');
+        $cur = $byMonth[$key] ?? null;
+
+        $prevKey = $monthDate->subMonth()->format('Y-m');
+        $prev    = $byMonth[$prevKey] ?? null;
+
+        if ($cur === null) {
+            return ['month' => $key, 'label' => $monthDate->isoFormat('MMMM YYYY'), 'status' => 'no_data'];
+        }
+
+        $roas = $cur['spend'] > 0.0 ? round($cur['revenue'] / $cur['spend'], 2) : null;
+        $prevRoas = ($prev !== null && $prev['spend'] > 0.0) ? round($prev['revenue'] / $prev['spend'], 2) : null;
+
+        return [
+            'month'  => $key,
+            'label'  => $monthDate->isoFormat('MMMM YYYY'),
+            'status' => 'ok',
+            'orders' => $cur['orders'],
+            'aov'    => $cur['orders'] > 0 ? round($cur['revenue'] / $cur['orders'], 2) : null,
+            'returnsPct' => $cur['revenue'] > 0.0 ? round(abs($cur['refunds']) / $cur['revenue'] * 100, 1) : null,
+            'revenue' => round($cur['revenue'], 2),
+            'spend'   => round($cur['spend'], 2),
+            'googleSharePct' => $cur['spend'] > 0.0 ? round($cur['googleSpend'] / $cur['spend'] * 100, 1) : null,
+            'roas'    => $roas,
+            'deltaRevenuePct' => $prev !== null ? $this->pctDelta($cur['revenue'], $prev['revenue']) : null,
+            'deltaSpendPct'   => $prev !== null ? $this->pctDelta($cur['spend'], $prev['spend']) : null,
+            'deltaRoasPct'    => $this->pctDelta($roas, $prevRoas),
+            'revenueFlag' => $this->flag($cur['revenue'], $prev['revenue'] ?? null),
+            'roasFlag'    => $this->flag($roas, $prevRoas),
+        ];
     }
 
     /** @return array<string, array{orders:int, revenue:float, refunds:float, spend:float, googleSpend:float}> */

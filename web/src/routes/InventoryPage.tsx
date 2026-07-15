@@ -594,6 +594,7 @@ export function InventoryPage() {
                 collections={displayCollections}
                 currency={currency}
                 totalAdSpend={data.summary.adSpend ?? null}
+                totalRevenue={data.summary.revenue ?? null}
               />
             ) : (
               <StateCard>
@@ -608,6 +609,7 @@ export function InventoryPage() {
               products={products}
               currency={currency}
               totalAdSpend={data.summary.adSpend ?? null}
+              totalRevenue={data.summary.revenue ?? null}
             />
           ) : (
             <StateCard>

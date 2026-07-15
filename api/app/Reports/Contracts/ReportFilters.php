@@ -28,6 +28,13 @@ final class ReportFilters
         // When set it OVERRIDES the derived previous/last_year month below. Additive;
         // v1/other report types never set this and are unaffected.
         public readonly ?string $compareMonth = null, // Y-m
+        // M5 addendum (Kanwar, 2026-07-15): trailing-window length for S1's
+        // financial matrix — "last 3/4/6/12 months vs the same months last
+        // year" as an alternative to the section's default always-Jan-start
+        // full-year tables. Additive and mom-S1-specific; null (unset or an
+        // unrecognised value) preserves every other report type's/section's
+        // existing behaviour exactly.
+        public readonly ?int $months = null,
     ) {}
 
     /** @param array<string, mixed> $p query params */
@@ -56,6 +63,7 @@ final class ReportFilters
             week:    $week,
             platform: in_array($p['platform'] ?? null, ['meta', 'google', 'tiktok'], true) ? (string) $p['platform'] : null,
             compareMonth: $ym($p['compare_month'] ?? null),
+            months: in_array((int) ($p['months'] ?? 0), [3, 4, 6, 12], true) ? (int) $p['months'] : null,
         );
     }
 

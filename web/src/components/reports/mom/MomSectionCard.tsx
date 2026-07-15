@@ -1,12 +1,26 @@
 import { useState } from 'react';
-import { Card, Button } from '@/components/ui';
+import { Card, Button, Segmented } from '@/components/ui';
 import { useTriggerBackfill } from '@/hooks/useApiData';
 import type { MomFiltersInput, MomSectionManifestEntry } from '@/hooks/useMomReport';
 import { useMomCommentary, useMomSection, useSaveMomCommentary } from '@/hooks/useMomReport';
 import { SECTION_CHART_RENDERERS } from './sectionCharts';
+import { SECTION_TABLE_RENDERERS } from './sectionTables';
 import { GenericKeyValue, GenericTable } from './GenericTable';
 import { SNextStepsCard } from './SNextSteps';
 import { SNovedadesCard } from './SNovedades';
+
+// M5 addendum (Kanwar, 2026-07-15) — S1's own trailing-window control (last
+// 3/4/6/12 months vs the same months last year). Lives here, not on the
+// shared MomFilterBar, since it's specific to S1's financial matrix (see
+// SFinancialMatrixSection's own M5 docblock) — every other section ignores
+// the `months` param entirely.
+const MONTHS_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'Full year' },
+  { value: '3', label: '3mo' },
+  { value: '4', label: '4mo' },
+  { value: '6', label: '6mo' },
+  { value: '12', label: '12mo' },
+];
 
 /**
  * REV2 R1/R2 — one CARD per section: header (label + ready state), the
@@ -57,7 +71,11 @@ function MetricSectionCard({
   filters: MomFiltersInput;
   currency: string;
 }) {
-  const { data, isLoading, isError, refetch, isRefetching } = useMomSection(slug, section.key, filters, section.ready);
+  // S1-only trailing-window selector; '' means "unset" (the default full-year
+  // tables) — kept as a plain string so it drops cleanly out of extraParams.
+  const [monthsWindow, setMonthsWindow] = useState('');
+  const extraParams = section.key === 'S1' && monthsWindow ? { months: monthsWindow } : undefined;
+  const { data, isLoading, isError, refetch, isRefetching } = useMomSection(slug, section.key, filters, section.ready, extraParams);
   const [showNotes, setShowNotes] = useState(false);
   const backfill = useTriggerBackfill(slug);
 
@@ -71,7 +89,12 @@ function MetricSectionCard({
 
   return (
     <Card style={{ padding: 18 }}>
-      <SectionHeader label={section.label} sub={data?.status && data.status !== 'ok' ? statusNote(data) : undefined} />
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <SectionHeader label={section.label} sub={data?.status && data.status !== 'ok' ? statusNote(data) : undefined} />
+        {section.key === 'S1' && (
+          <Segmented options={MONTHS_OPTIONS} value={monthsWindow} onChange={setMonthsWindow} />
+        )}
+      </div>
 
       {isLoading && <div className="muted text-sm">Loading…</div>}
 
@@ -162,7 +185,12 @@ function SectionBody({
 }) {
   const chartRenderer = SECTION_CHART_RENDERERS[sectionKey];
   const chart = chartRenderer ? chartRenderer(payload, currency) : null;
+  // M5 (Kanwar, 2026-07-15 — "table primary, chart secondary") — a bespoke
+  // color-coded HeatTable twin (sectionTables.tsx) takes priority over the
+  // plain uncolored GenericTable fallback wherever one exists.
+  const tableRenderer = SECTION_TABLE_RENDERERS[sectionKey];
   const rows: Record<string, unknown>[] | null = Array.isArray(payload.rows) ? payload.rows : null;
+  const table = tableRenderer ? tableRenderer(payload, currency) : (rows ? <GenericTable rows={rows} /> : <GenericKeyValue payload={payload} />);
 
   const showChart = (view === 'chart' || view === 'both') && chart;
   // Falls back to the table when the requested view is 'chart' but this
@@ -174,8 +202,10 @@ function SectionBody({
       {payload.unavailable && typeof payload.unavailable === 'object' && !Array.isArray(payload.unavailable) && (
         <UnavailableNote unavailable={payload.unavailable} />
       )}
+      {/* Table renders before the chart — the color-coded numbers are the
+          primary view, the chart is the secondary/visual-summary view. */}
+      {showTable && <div>{table}</div>}
       {showChart && <div>{chart}</div>}
-      {showTable && (rows ? <GenericTable rows={rows} /> : <GenericKeyValue payload={payload} />)}
     </div>
   );
 }

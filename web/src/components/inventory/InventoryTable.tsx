@@ -92,8 +92,8 @@ type MetricItem = {
  * null = ad spend is not synced for this window. The column then renders '—' rather than 0%.
  */
 type Props =
-  | { mode: 'product'; products: InventoryProduct[]; currency: string; totalAdSpend: number | null }
-  | { mode: 'collection'; collections: CollectionGroup[]; currency: string; totalAdSpend: number | null };
+  | { mode: 'product'; products: InventoryProduct[]; currency: string; totalAdSpend: number | null; totalRevenue: number | null }
+  | { mode: 'collection'; collections: CollectionGroup[]; currency: string; totalAdSpend: number | null; totalRevenue: number | null };
 
 export function InventoryTable(props: Props) {
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -153,6 +153,15 @@ export function InventoryTable(props: Props) {
                 % of spend
               </th>
               <th style={thBase}>Revenue</th>
+              {/* Share of the brand's total product revenue for the window. Unlike "% of spend",
+                  this DOES sum to ~100%: every product's revenue is in the denominator, there is no
+                  unattributed-revenue bucket. See RevenueSharePct. */}
+              <th
+                style={thBase}
+                title="This product's share of the brand's total product revenue for the window. Unlike % of spend, this sums to 100% across the catalogue — all revenue is attributed to a product."
+              >
+                % of revenue
+              </th>
               <th style={thBase}>ROAS blended</th>
               <th style={thBase}>Active ads</th>
               <th style={thL}>Status</th>
@@ -175,6 +184,7 @@ export function InventoryTable(props: Props) {
                     onToggle={() => toggle(g.key)}
                     money={money}
                     totalAdSpend={props.totalAdSpend}
+                    totalRevenue={props.totalRevenue}
                   />
                 ))
               : props.products.map((p, i) => (
@@ -194,7 +204,7 @@ export function InventoryTable(props: Props) {
                         {p.title}
                       </div>
                     </td>
-                    {metricCells(p, money, { totalSpend: props.totalAdSpend })}
+                    {metricCells(p, money, { totalSpend: props.totalAdSpend, totalRevenue: props.totalRevenue })}
                   </tr>
                 ))}
           </tbody>
@@ -210,10 +220,12 @@ function CollectionRows({
   onToggle,
   money,
   totalAdSpend,
+  totalRevenue,
 }: {
   g: CollectionGroup;
   rank: number;
   totalAdSpend: number | null;
+  totalRevenue: number | null;
   isOpen: boolean;
   onToggle: () => void;
   money: (v: number | null) => string;
@@ -253,7 +265,7 @@ function CollectionRows({
             </div>
           </div>
         </td>
-        {metricCells(g, money, { colores: formatNumber(g.productCount), totalSpend: totalAdSpend })}
+        {metricCells(g, money, { colores: formatNumber(g.productCount), totalSpend: totalAdSpend, totalRevenue })}
       </tr>
 
       {isOpen &&
@@ -266,7 +278,7 @@ function CollectionRows({
                 {p.handle}
               </div>
             </td>
-            {metricCells(p, money, { colores: <span style={{ color: 'var(--text-muted)' }}>—</span>, child: true, totalSpend: totalAdSpend })}
+            {metricCells(p, money, { colores: <span style={{ color: 'var(--text-muted)' }}>—</span>, child: true, totalSpend: totalAdSpend, totalRevenue })}
           </tr>
         ))}
     </>
@@ -295,54 +307,56 @@ function CollectionRows({
  * '—' when either side is unknown. A null spend is "not synced", not zero, and 0% would be a
  * confident wrong answer.
  */
-function SpendSharePct({
-  spend,
-  totalSpend,
-  style,
-}: {
-  spend: number | null;
-  totalSpend: number | null;
-  style: CSSProperties;
-}) {
-  if (spend == null || totalSpend == null || totalSpend <= 0) {
+/**
+ * A "% of a whole" cell: the number, plus a hairline bar so the column is scannable down thousands
+ * of rows without reading every figure. Shared by "% of spend" and "% of revenue" so the two can
+ * never drift into rendering differently.
+ *
+ * '—' when either side is unknown. A null part is "not synced", not zero, and 0% would be a
+ * confident wrong answer — the same missing-is-not-zero rule the rest of this table follows.
+ */
+function ShareCell({ part, whole, style }: { part: number | null; whole: number | null; style: CSSProperties }) {
+  if (part == null || whole == null || whole <= 0) {
     return <td style={style}><span style={{ color: 'var(--text-muted)' }}>—</span></td>;
   }
 
-  const pct = (spend / totalSpend) * 100;
-
+  const pct = (part / whole) * 100;
   // Below 0.1% but non-zero, "0.0%" reads as nothing at all. "<0.1%" says "measured, and tiny".
   const label = pct > 0 && pct < 0.1 ? '<0.1%' : `${pct.toFixed(1)}%`;
 
   return (
     <td style={style}>
       <div style={{ fontWeight: 500 }}>{label}</div>
-      {/* A hairline bar makes the column scannable down 3,892 rows without reading every number.
-          Width is capped at 100% so a rounding artefact can't overflow the cell. */}
-      <div
-        style={{
-          height: 3,
-          marginTop: 3,
-          borderRadius: 2,
-          background: 'var(--surface-subtle)',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            width: `${Math.min(100, Math.max(0, pct))}%`,
-            height: '100%',
-            background: 'var(--accent)',
-          }}
-        />
+      <div style={{ height: 3, marginTop: 3, borderRadius: 2, background: 'var(--surface-subtle)', overflow: 'hidden' }}>
+        {/* Capped at 100% so a rounding artefact can't overflow the cell. */}
+        <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: '100%', background: 'var(--accent)' }} />
       </div>
     </td>
   );
 }
 
+/**
+ * Share of the brand's TOTAL ad spend. The denominator is total spend (attributed + unattributed),
+ * NOT the sum of the rows — see the type doc on `totalAdSpend`. This column will not sum to 100%,
+ * and the gap is the honest measure of attribution coverage.
+ */
+function SpendSharePct({ spend, totalSpend, style }: { spend: number | null; totalSpend: number | null; style: CSSProperties }) {
+  return <ShareCell part={spend} whole={totalSpend} style={style} />;
+}
+
+/**
+ * Share of the brand's total product revenue. Unlike spend, this DOES sum to ~100%: every product's
+ * revenue is in the denominator (`summary.revenue` is the sum of the per-product figures), so there
+ * is no unattributed remainder.
+ */
+function RevenueSharePct({ revenue, totalRevenue, style }: { revenue: number | null; totalRevenue: number | null; style: CSSProperties }) {
+  return <ShareCell part={revenue} whole={totalRevenue} style={style} />;
+}
+
 function metricCells(
   item: MetricItem,
   money: (v: number | null) => string,
-  opts: { colores?: ReactNode; child?: boolean; totalSpend?: number | null },
+  opts: { colores?: ReactNode; child?: boolean; totalSpend?: number | null; totalRevenue?: number | null },
 ): ReactNode {
   const bg = opts.child ? SUBTLE : undefined;
   const num: CSSProperties = { ...tdBase, background: bg };
@@ -374,6 +388,7 @@ function metricCells(
       </td>
       <SpendSharePct spend={item.spend} totalSpend={opts.totalSpend ?? null} style={num} />
       <td style={num}>{money(item.revenue)}</td>
+      <RevenueSharePct revenue={item.revenue} totalRevenue={opts.totalRevenue ?? null} style={num} />
       <td style={{ ...num, fontWeight: 600, color: item.roas != null && item.roas >= 3 ? 'var(--success)' : undefined }}>
         {item.roas != null ? formatRoas(item.roas) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
       </td>

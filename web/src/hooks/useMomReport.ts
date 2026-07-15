@@ -57,14 +57,23 @@ export function useMomReport(slug: string | undefined, filters: MomFiltersInput)
   });
 }
 
-/** One section, one request — the whole point of this architecture (M0). */
+/**
+ * One section, one request — the whole point of this architecture (M0).
+ *
+ * `extraParams` (M5 addendum, Kanwar 2026-07-15) lets ONE section layer its
+ * own query params on top of the shared filters without touching
+ * `MomFiltersInput` — e.g. S1's 3/4/6/12-month window selector, which is a
+ * control on that section's own card, not a report-wide filter every other
+ * section would need to understand.
+ */
 export function useMomSection<T = Record<string, unknown>>(
   slug: string | undefined,
   key: string,
   filters: MomFiltersInput,
   enabled: boolean,
+  extraParams?: Record<string, string>,
 ) {
-  const q = toQuery(filters);
+  const q = { ...toQuery(filters), ...extraParams };
   return useQuery({
     queryKey: ['mom-section', slug, key, q],
     enabled: !!slug && enabled,
