@@ -81,7 +81,7 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
     const labels = ok.map((r) => r.label?.slice(0, 3) ?? r.month);
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
-        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+        <div style={{ flex: '1 1 45%', minWidth: 280 }}>
           <div className="muted text-sm" style={{ marginBottom: 4 }}>Revenue &amp; spend, {p.reportYear}</div>
           <TrendLineChart
             labels={labels}
@@ -90,11 +90,13 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
             valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
             seriesLabel="Revenue"
             compareLabel="Ad spend"
+            height={200}
+            fill
           />
         </div>
-        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+        <div style={{ flex: '1 1 45%', minWidth: 280 }}>
           <div className="muted text-sm" style={{ marginBottom: 4 }}>Blended ROAS, {p.reportYear}</div>
-          <TrendLineChart labels={labels} series={ok.map((r) => r.roas)} valueFormatter={(n) => `${n.toFixed(1)}x`} seriesLabel="Blended ROAS" />
+          <TrendLineChart labels={labels} series={ok.map((r) => r.roas)} valueFormatter={(n) => `${n.toFixed(1)}x`} seriesLabel="Blended ROAS" height={200} fill />
         </div>
       </div>
     );
@@ -123,11 +125,14 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
           series={series.map((s) => s.revenue)}
           compareSeries={compare ? compare.map((s) => s.revenue) : null}
           valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
-          seriesLabel="This month"
-          compareLabel={compare ? 'Comparison' : undefined}
+          seriesLabel={monthName(p.month) ?? 'This month'}
+          compareLabel={compare ? monthName(p.compareMonth) ?? 'Comparison' : undefined}
           height={200}
+          fill
         />
-        {p.customerSalesSplit && <ModeledCustomerSplit split={p.customerSalesSplit} currency={currency} />}
+        {p.customerSalesSplit && (
+          <ModeledCustomerSplit split={p.customerSalesSplit} series={p.customerSalesSeries ?? null} currency={currency} />
+        )}
       </div>
     );
   },
@@ -267,14 +272,25 @@ function fmt(v: number | null, currency: string | undefined, suffix: string | un
   return suffix ? `${v.toFixed(2)}${suffix}` : formatMoney(v, currency, { whole: true });
 }
 
+/** 'YYYY-MM' → 'MMM YYYY' (e.g. '2026-05' → 'May 2026'); null-safe. */
+function monthName(ym: string | null | undefined): string | null {
+  if (!ym) return null;
+  const [y, m] = ym.split('-').map(Number);
+  if (!y || !m) return null;
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${MONTHS[m - 1] ?? ym} ${y}`;
+}
+
 /**
- * Modeled new-vs-returning sales split shown beneath S2's Total sales chart
- * (Kanwar, 2026-07-15). Amounts at the top, a single proportional split bar
- * below, and the estimation method spelled out — Shopify can't split sales by
- * customer type, so this is v1's new × AOV estimate, clearly marked "Modeled".
+ * Modeled new-vs-returning sales beneath S2's Total sales chart (Kanwar,
+ * 2026-07-15). Amounts at the top, then a real GRAPH — two lines (New / Returning)
+ * over the trailing 6 months on a SHARED scale so they're honestly comparable —
+ * with the estimation method spelled out. Shopify can't split sales by customer
+ * type, so this is v1's new × AOV estimate, clearly marked "Modeled".
  */
 function ModeledCustomerSplit({
   split,
+  series,
   currency,
 }: {
   split: {
@@ -282,12 +298,11 @@ function ModeledCustomerSplit({
     new: { customers: number; sales: number; pct: number | null };
     returning: { customers: number; sales: number; pct: number | null };
   };
+  series: { month: string; label: string; new: number | null; returning: number | null }[] | null;
   currency: string;
 }) {
   const n = split.new;
   const r = split.returning;
-  const totalSales = Math.max(0, n.sales) + Math.max(0, r.sales);
-  const newWidth = totalSales > 0 ? (Math.max(0, n.sales) / totalSales) * 100 : 50;
   const NEW = '#1f6f5c';
   const RET = '#c9a227';
 
@@ -298,15 +313,26 @@ function ModeledCustomerSplit({
         <span className="chip" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.4 }}>Modeled — estimate</span>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, marginBottom: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, marginBottom: 10 }}>
         <SplitAmount label="New customers" color={NEW} sales={n.sales} customers={n.customers} pct={n.pct} currency={currency} />
         <SplitAmount label="Returning customers" color={RET} sales={r.sales} customers={r.customers} pct={r.pct} currency={currency} />
       </div>
 
-      <div style={{ display: 'flex', height: 14, borderRadius: 6, overflow: 'hidden', background: '#E7E9F0' }} aria-hidden>
-        <div style={{ width: `${newWidth}%`, background: NEW }} />
-        <div style={{ width: `${100 - newWidth}%`, background: RET }} />
-      </div>
+      {series && series.length > 0 && (
+        <TrendLineChart
+          labels={series.map((s) => s.label)}
+          series={series.map((s) => s.new)}
+          compareSeries={series.map((s) => s.returning)}
+          valueFormatter={(v) => formatMoney(v, currency, { compact: true })}
+          seriesLabel="New customer sales"
+          compareLabel="Returning customer sales"
+          seriesColor={NEW}
+          compareColor={RET}
+          compareDashed={false}
+          height={170}
+          fill
+        />
+      )}
 
       {split.method && (
         <div className="muted" style={{ fontSize: 10, marginTop: 6, fontStyle: 'italic' }}>{split.method}</div>

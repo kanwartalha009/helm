@@ -89,6 +89,10 @@ export function TrendLineChart({
   valueFormatter = fmtCompact,
   seriesLabel,
   compareLabel,
+  seriesColor = ACCENT,
+  compareColor = ACCENT_GHOST,
+  compareDashed = true,
+  fill = false,
 }: {
   labels: string[];
   series: (number | null)[];
@@ -99,9 +103,16 @@ export function TrendLineChart({
   // which — solid = `series`, dashed/ghost = `compareSeries`.
   seriesLabel?: string;
   compareLabel?: string;
+  seriesColor?: string;
+  compareColor?: string;
+  compareDashed?: boolean;
+  // `fill` makes the SVG stretch to fill its container's width (height scales
+  // proportionally) instead of letterboxing — so a chart in a flex column has
+  // no empty space on the right.
+  fill?: boolean;
 }) {
   const width = Math.max(280, labels.length * 56);
-  const padL = 40;
+  const padL = 44;
   const padB = 20;
   const padT = 10;
   const innerW = width - padL - 8;
@@ -127,7 +138,8 @@ export function TrendLineChart({
     return d.trim();
   };
 
-  const gridY = [0, 0.5, 1].map((f) => padT + innerH * f);
+  // Label every gridline, not just top/bottom — so the y-axis scale is legible.
+  const gridFracs = [0, 0.5, 1];
   const showLegend = !!seriesLabel || !!(compareSeries && compareLabel);
 
   return (
@@ -136,33 +148,53 @@ export function TrendLineChart({
         <div style={{ display: 'flex', gap: 14, marginBottom: 4, fontSize: 11 }} className="muted">
           {seriesLabel && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 16, height: 0, borderTop: `2px solid ${ACCENT}` }} />
+              <span style={{ width: 16, height: 0, borderTop: `2px solid ${seriesColor}` }} />
               {seriesLabel}
             </span>
           )}
           {compareSeries && compareLabel && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 16, height: 0, borderTop: `2px dashed ${ACCENT_GHOST}` }} />
+              <span style={{ width: 16, height: 0, borderTop: `2px ${compareDashed ? 'dashed' : 'solid'} ${compareColor}` }} />
               {compareLabel}
             </span>
           )}
         </div>
       )}
-      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMinYMid meet" role="img">
-      {gridY.map((y, i) => (
-        <line key={i} x1={padL} y1={y} x2={width} y2={y} stroke={GRID} strokeWidth={1} />
+      {/* Fill: 100% width + auto height (no letterbox). Otherwise fixed height. */}
+      <svg
+        width="100%"
+        height={fill ? undefined : height}
+        style={fill ? { height: 'auto', display: 'block' } : undefined}
+        preserveAspectRatio={fill ? undefined : 'xMinYMid meet'}
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+      >
+      {gridFracs.map((f, i) => {
+        const y = padT + innerH * f;
+        return <line key={`g${i}`} x1={padL} y1={y} x2={width} y2={y} stroke={GRID} strokeWidth={1} />;
+      })}
+      {gridFracs.map((f, i) => (
+        <text key={`t${i}`} x={0} y={padT + innerH * f + 4} fontSize={10} fill="var(--text-muted, #6b7280)">
+          {valueFormatter(max - range * f)}
+        </text>
       ))}
-      <text x={0} y={padT + 4} fontSize={10} fill="var(--text-muted, #6b7280)">{valueFormatter(max)}</text>
-      <text x={0} y={padT + innerH + 4} fontSize={10} fill="var(--text-muted, #6b7280)">{valueFormatter(min)}</text>
 
       {compareSeries && (
-        <path d={toPath(compareSeries)} fill="none" stroke={ACCENT_GHOST} strokeWidth={1.5} strokeDasharray="4 3" />
+        <path
+          d={toPath(compareSeries)}
+          fill="none"
+          stroke={compareColor}
+          strokeWidth={compareDashed ? 1.5 : 2}
+          strokeDasharray={compareDashed ? '4 3' : undefined}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       )}
-      <path d={toPath(series)} fill="none" stroke={ACCENT} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={toPath(series)} fill="none" stroke={seriesColor} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
 
       {series.map((v, i) =>
         v === null ? null : (
-          <circle key={i} cx={padL + i * step} cy={padT + innerH - ((v - min) / range) * innerH} r={2.5} fill={ACCENT} />
+          <circle key={i} cx={padL + i * step} cy={padT + innerH - ((v - min) / range) * innerH} r={2.5} fill={seriesColor} />
         ),
       )}
 

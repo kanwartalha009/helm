@@ -78,8 +78,11 @@ final class SSalesEvolutionSection implements MomSection
             'compareSeries' => $cmp,
             'total'   => $total,
             'compareTotal' => $cmp !== null ? round(array_sum(array_column($cmp, 'revenue')), 2) : null,
-            // MODELED new-vs-returning sales split — see the class docblock.
+            // MODELED new-vs-returning sales split for THIS month (headline amounts).
             'customerSalesSplit' => $this->modeledCustomerSplit($brand, $start, $end, $total),
+            // MODELED new-vs-returning sales TREND — trailing 6 months, so the
+            // split renders as a real graph (two lines), not a single bar.
+            'customerSalesSeries' => $this->modeledCustomerSeries($brand, $start),
         ];
     }
 
@@ -129,6 +132,76 @@ final class SSalesEvolutionSection implements MomSection
                 'pct'       => $mix['retPct'],
             ],
         ];
+    }
+
+    /**
+     * Trailing 6-month MODELED new-vs-returning sales trend (report month +
+     * 5 prior). One ShopifyQL call (CustomerMix::forRange) for the counts, one
+     * grouped SQL query for monthly revenue+orders, then the same new × AOV
+     * estimate per month. A month with no customer/order data lands as null so
+     * the line breaks honestly rather than dropping to a fake 0. Null (omitted)
+     * when the customer split isn't available at all.
+     *
+     * @return array<int, array{month: string, label: string, new: ?float, returning: ?float}>|null
+     */
+    private function modeledCustomerSeries(Brand $brand, string $start): ?array
+    {
+        $tz         = $brand->timezone ?: 'UTC';
+        $monthStart = CarbonImmutable::parse($start, $tz)->startOfMonth();
+        $rangeStart = $monthStart->subMonths(5);
+
+        $rangeEnd = $monthStart->endOfMonth();
+
+        $counts = $this->customerMix->forRange($brand, $rangeStart->toDateString(), $rangeEnd->toDateString());
+        if ($counts === null) {
+            return null;
+        }
+
+        // Per-DAY revenue + orders (grouped by the date column — driver-agnostic,
+        // works on MySQL/Postgres/sqlite), then bucketed into months in PHP so
+        // no DB-specific date function is used (D-005 revenue basis).
+        $revCol = '(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))';
+        $daily = DailyMetric::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', 'shopify')
+            ->whereBetween('date', [$rangeStart->toDateString(), $rangeEnd->toDateString()])
+            ->groupBy('date')
+            ->selectRaw("date, COALESCE(SUM({$revCol}), 0) AS revenue, COALESCE(SUM(orders), 0) AS orders")
+            ->get();
+
+        /** @var array<string, array{revenue: float, orders: int}> $monthly */
+        $monthly = [];
+        foreach ($daily as $d) {
+            $ym = CarbonImmutable::parse((string) $d->date)->format('Y-m');
+            $monthly[$ym]['revenue'] = ($monthly[$ym]['revenue'] ?? 0.0) + (float) $d->revenue;
+            $monthly[$ym]['orders']  = ($monthly[$ym]['orders'] ?? 0) + (int) $d->orders;
+        }
+
+        $series = [];
+        for ($i = 0; $i < 6; $i++) {
+            $m   = $rangeStart->addMonths($i);
+            $ym  = $m->format('Y-m');
+            $rev = $monthly[$ym]['revenue'] ?? null;
+            $ord = $monthly[$ym]['orders'] ?? null;
+            $mix = $counts[$ym] ?? null;
+
+            $newSales = null;
+            $retSales = null;
+            if ($mix !== null && $rev !== null && $rev > 0.0 && $ord !== null && $ord > 0) {
+                $aov      = $rev / $ord;
+                $newSales = round(min($mix['new'] * $aov, $rev), 2);
+                $retSales = round($rev - $newSales, 2);
+            }
+
+            $series[] = [
+                'month'     => $ym,
+                'label'     => $m->isoFormat('MMM'),
+                'new'       => $newSales,
+                'returning' => $retSales,
+            ];
+        }
+
+        return $series;
     }
 
     /** @return array<int, array{day: int, revenue: float}>|null */

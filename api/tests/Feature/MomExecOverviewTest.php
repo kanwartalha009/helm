@@ -123,6 +123,16 @@ class MomExecOverviewTest extends TestCase
         $this->assertEquals(60, $res->json('customerSalesSplit.new.customers'));
         $this->assertEquals(40, $res->json('customerSalesSplit.returning.customers'));
         $this->assertNotEmpty($res->json('customerSalesSplit.method'));
+
+        // The trailing 6-month TREND series backs the new/returning graph: the
+        // report month carries the same modeled split; prior months with no
+        // data are null (line breaks honestly, never a fake 0).
+        $series = collect($res->json('customerSalesSeries'));
+        $this->assertCount(6, $series);
+        $reportMonth = $series->firstWhere('month', $this->monthStart()->format('Y-m'));
+        $this->assertEquals(600.0, $reportMonth['new']);
+        $this->assertEquals(400.0, $reportMonth['returning']);
+        $this->assertNull($series->first()['new']); // 5 months back — no data seeded
     }
 
     public function test_sex_wires_new_vs_returning_and_cac_from_customer_split(): void
