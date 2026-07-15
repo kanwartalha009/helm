@@ -18,5 +18,9 @@ return [
         'weekly'              => \App\Reports\Weekly\WeeklyReport::class,
         'creatives'           => \App\Reports\Creative\CreativeReport::class,
         'ads-audit'           => \App\Reports\AdsAudit\AdsAuditReport::class,
+        // M2 (monthly-report-v2-mom.md) — SHELL only (month/layout/freshness).
+        // Section data is fetched separately via MomSectionController; v1
+        // ('monthly') is completely untouched by this entry (REV2 R7).
+        'mom'                 => \App\Reports\Mom\MomReport::class,
     ],
 ];

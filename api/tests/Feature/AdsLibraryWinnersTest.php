@@ -28,7 +28,7 @@ final class AdsLibraryWinnersTest extends TestCase
     }
 
     /** @param array<string, mixed> $o */
-    private function seed(int $brandId, string $adId, array $o = []): void
+    private function seedAd(int $brandId, string $adId, array $o = []): void
     {
         DB::table('ad_creative_daily')->insert(array_merge([
             'brand_id' => $brandId, 'platform' => 'meta', 'date' => $this->day(), 'ad_id' => $adId,
@@ -46,8 +46,8 @@ final class AdsLibraryWinnersTest extends TestCase
     public function test_evidence_floor_excludes_49_includes_51(): void
     {
         $brand = Brand::factory()->create(['base_currency' => 'USD']);
-        $this->seed($brand->id, 'UNDER', ['spend' => 49, 'conversion_value' => 200]);
-        $this->seed($brand->id, 'OVER', ['spend' => 51, 'conversion_value' => 200]);
+        $this->seedAd($brand->id, 'UNDER', ['spend' => 49, 'conversion_value' => 200]);
+        $this->seedAd($brand->id, 'OVER', ['spend' => 51, 'conversion_value' => 200]);
 
         $this->admin();
         $res = $this->getJson('/api/ads-library/winners')->assertOk()->json();
@@ -61,8 +61,8 @@ final class AdsLibraryWinnersTest extends TestCase
     public function test_confidence_early_below_150_solid_at_150(): void
     {
         $brand = Brand::factory()->create(['base_currency' => 'USD']);
-        $this->seed($brand->id, 'EARLY', ['spend' => 149, 'conversion_value' => 300]);
-        $this->seed($brand->id, 'SOLID', ['spend' => 151, 'conversion_value' => 300]);
+        $this->seedAd($brand->id, 'EARLY', ['spend' => 149, 'conversion_value' => 300]);
+        $this->seedAd($brand->id, 'SOLID', ['spend' => 151, 'conversion_value' => 300]);
 
         $this->admin();
         $rows = collect($this->getJson('/api/ads-library/winners')->assertOk()->json('rows'))->keyBy('adId');
@@ -74,8 +74,8 @@ final class AdsLibraryWinnersTest extends TestCase
     public function test_default_sort_is_roas_desc(): void
     {
         $brand = Brand::factory()->create(['base_currency' => 'USD']);
-        $this->seed($brand->id, 'LOW', ['spend' => 100, 'conversion_value' => 100]);  // ROAS 1
-        $this->seed($brand->id, 'HIGH', ['spend' => 100, 'conversion_value' => 300]); // ROAS 3
+        $this->seedAd($brand->id, 'LOW', ['spend' => 100, 'conversion_value' => 100]);  // ROAS 1
+        $this->seedAd($brand->id, 'HIGH', ['spend' => 100, 'conversion_value' => 300]); // ROAS 3
 
         $this->admin();
         $rows = $this->getJson('/api/ads-library/winners')->assertOk()->json('rows');
@@ -88,8 +88,8 @@ final class AdsLibraryWinnersTest extends TestCase
     {
         $foot = Brand::factory()->create(['base_currency' => 'USD', 'niche' => 'footwear']);
         $jewel = Brand::factory()->create(['base_currency' => 'USD', 'niche' => 'jewelry']);
-        $this->seed($foot->id, 'F1', ['spend' => 200, 'conversion_value' => 400]);
-        $this->seed($jewel->id, 'J1', ['spend' => 200, 'conversion_value' => 400]);
+        $this->seedAd($foot->id, 'F1', ['spend' => 200, 'conversion_value' => 400]);
+        $this->seedAd($jewel->id, 'J1', ['spend' => 200, 'conversion_value' => 400]);
 
         $this->admin();
         $ids = array_column($this->getJson('/api/ads-library/winners?niche=footwear')->assertOk()->json('rows'), 'adId');
@@ -100,7 +100,7 @@ final class AdsLibraryWinnersTest extends TestCase
     {
         $brand = Brand::factory()->create(['base_currency' => 'USD']);
         for ($i = 0; $i < 101; $i++) {
-            $this->seed($brand->id, 'A' . $i, ['spend' => 200, 'conversion_value' => 400]);
+            $this->seedAd($brand->id, 'A' . $i, ['spend' => 200, 'conversion_value' => 400]);
         }
 
         $this->admin();
@@ -112,8 +112,8 @@ final class AdsLibraryWinnersTest extends TestCase
     public function test_search_matches_body_text(): void
     {
         $brand = Brand::factory()->create(['base_currency' => 'USD']);
-        $this->seed($brand->id, 'HOOK', ['spend' => 200, 'conversion_value' => 400, 'body_text' => 'unboxing the new drop']);
-        $this->seed($brand->id, 'OTHER', ['spend' => 200, 'conversion_value' => 400, 'body_text' => 'winter sale ends soon']);
+        $this->seedAd($brand->id, 'HOOK', ['spend' => 200, 'conversion_value' => 400, 'body_text' => 'unboxing the new drop']);
+        $this->seedAd($brand->id, 'OTHER', ['spend' => 200, 'conversion_value' => 400, 'body_text' => 'winter sale ends soon']);
 
         $this->admin();
         $ids = array_column($this->getJson('/api/ads-library/winners?search=unboxing')->assertOk()->json('rows'), 'adId');
@@ -124,8 +124,8 @@ final class AdsLibraryWinnersTest extends TestCase
     {
         $mine = Brand::factory()->create(['base_currency' => 'USD']);
         $other = Brand::factory()->create(['base_currency' => 'USD']);
-        $this->seed($mine->id, 'MINE', ['spend' => 200, 'conversion_value' => 400]);
-        $this->seed($other->id, 'THEIRS', ['spend' => 200, 'conversion_value' => 400]);
+        $this->seedAd($mine->id, 'MINE', ['spend' => 200, 'conversion_value' => 400]);
+        $this->seedAd($other->id, 'THEIRS', ['spend' => 200, 'conversion_value' => 400]);
 
         $tm = User::factory()->create(['role' => 'team_member']);
         $mine->users()->attach($tm->id);

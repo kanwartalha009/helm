@@ -72,6 +72,18 @@ class RevenueFetcher
     // pagination ceiling.
     private const SHOPIFYQL_ROW_LIMIT = 10000;
 
+    /**
+     * M0 (2026-07-14): bounded Guzzle timeout for the ShopifyQL call made
+     * synchronously inside a report request (customersByMonthRange, called
+     * from MonthlyReport::newVsExistingSection). ShopifyClient's normal
+     * default is 30s, meant for background sync jobs; a report request
+     * blocking a web worker for up to 30s (x2, since the section pulls a
+     * current + a comparison window) was the confirmed root cause of the
+     * new-polinesia monthly report freeze. A failed/slow call here degrades
+     * to needs_source (missing != zero) rather than hanging the request.
+     */
+    private const REPORT_CONTEXT_TIMEOUT_SECS = 12;
+
     public function __construct(private readonly OAuthService $oauth) {}
 
     /**
@@ -851,7 +863,9 @@ GQL;
      */
     public function customersByMonthRange(PlatformConnection $conn, string $sinceStr, string $untilStr): array
     {
-        $client  = $this->makeClient($conn);
+        // M0: bounded timeout — this call runs synchronously inside a report
+        // request, not a background job. See REPORT_CONTEXT_TIMEOUT_SECS doc.
+        $client  = $this->makeClient($conn, timeoutSeconds: self::REPORT_CONTEXT_TIMEOUT_SECS);
         $channel = str_replace("'", '', $this->shopifyqlChannel());
         $ql = 'FROM sales SHOW net_sales, total_sales, orders, customers, returning_customers GROUP BY month '
             . "SINCE {$sinceStr} UNTIL {$untilStr} "
@@ -1014,7 +1028,7 @@ GQL;
      * per failing call and updates the stored credentials so subsequent jobs
      * pick up the new token without re-OAuth.
      */
-    private function makeClient(PlatformConnection $conn): ShopifyClient
+    private function makeClient(PlatformConnection $conn, ?int $timeoutSeconds = null): ShopifyClient
     {
         $accessToken = (string) ($conn->credentials['access_token'] ?? '');
         if ($accessToken === '') {
@@ -1022,7 +1036,7 @@ GQL;
         }
 
         $shop   = (string) $conn->external_id;
-        $client = new ShopifyClient($shop, $accessToken);
+        $client = new ShopifyClient($shop, $accessToken, timeoutSeconds: $timeoutSeconds);
 
         $oauth = $this->oauth;
         $client->onUnauthorized(function () use ($conn, $oauth): ?string {

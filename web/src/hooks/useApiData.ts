@@ -369,7 +369,10 @@ export interface CoveragePlatformRow {
 }
 
 export interface CoverageDataset {
-  key: 'history' | 'campaigns' | 'creatives' | 'commerce';
+  // 'email'/'sessions' were already valid backend keys (BrandDataCoverageController's
+  // own 'tracked' list) that this union had drifted out of sync with; 'breakdowns' is
+  // new (M5, monthly-report-v2-mom.md §M5 — powers mom's S13-S16 backfill CTA).
+  key: 'history' | 'campaigns' | 'creatives' | 'commerce' | 'email' | 'sessions' | 'breakdowns';
   label: string;
   relevant: boolean;
   needsBackfill: boolean;

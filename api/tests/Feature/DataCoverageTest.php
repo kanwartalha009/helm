@@ -137,7 +137,10 @@ final class DataCoverageTest extends TestCase
         });
         Artisan::shouldReceive('output')->andReturn('ok');
 
-        (new BackfillBrandDatasetJob($this->brand, 'campaigns', $run->id))->handle();
+        // handle() takes a container-injected PlatformCredentialService — a
+        // direct ->handle() call (no queue worker in between) must resolve it
+        // the same way Laravel's worker does, via app()->call().
+        app()->call([new BackfillBrandDatasetJob($this->brand, 'campaigns', $run->id), 'handle']);
 
         $this->assertSame('done', $run->refresh()->status);
         $this->assertContains(

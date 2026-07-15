@@ -31,6 +31,10 @@ use Illuminate\Support\Facades\DB;
  *                (ads:backfill-campaigns + ads:backfill-adsets)
  *  - creatives — ad_creative_daily           (meta/tiktok:backfill-creatives)
  *  - commerce  — commerce_daily_metrics      (shopify:backfill-commerce)
+ *  - email     — email_daily_metrics         (klaviyo:backfill)
+ *  - sessions  — shopify_funnel_daily + session_traffic_daily (shopify:backfill-funnel + shopify:backfill-session-traffic)
+ *  - breakdowns — meta_breakdown_daily       (meta:backfill-breakdown --type=all) — M5
+ *                (monthly-report-v2-mom.md §M5), powers mom's S13-S16.
  */
 class BrandDataCoverageController extends Controller
 {
@@ -146,6 +150,17 @@ class BrandDataCoverageController extends Controller
                 'relevant' => in_array('shopify', $connected, true),
                 'tables'   => ['shopify_funnel_daily', 'session_traffic_daily'],
             ],
+            // M5 (monthly-report-v2-mom.md §M5) — "extend the job's dataset
+            // routing for breakdown backfills: NEW dataset key 'breakdowns'
+            // running meta:backfill-breakdown axes + coverage row." Powers
+            // mom's S13-S16 (audience/placement/gender/awareness-country) —
+            // relevant only for Meta-connected brands (the only platform with
+            // a breakdown backfill command wired into this job today).
+            'breakdowns' => [
+                'label'    => 'Meta audience/placement/gender breakdowns',
+                'relevant' => in_array('meta', $connected, true),
+                'tables'   => ['meta_breakdown_daily'],
+            ],
         ];
 
         foreach ($tracked as $key => $meta) {
@@ -182,9 +197,10 @@ class BrandDataCoverageController extends Controller
                     && ($earliest === null || $earliest > $targetStart->addDays(self::GRACE_DAYS)->toDateString()),
                 'running'       => $allActive || ($lastRun !== null && in_array($lastRun->status, ['queued', 'running'], true)),
                 'platforms'     => [['platform' => match ($key) {
-                    'commerce' => 'shopify',
-                    'email'    => 'klaviyo',
-                    default    => implode('+', $adPlatforms),
+                    'commerce'    => 'shopify',
+                    'email'       => 'klaviyo',
+                    'breakdowns'  => 'meta',
+                    default       => implode('+', $adPlatforms),
                 }, 'earliest' => $earliest, 'latest' => $latest, 'gap' => $earliest === null]],
                 'lastRun'       => $runPayload($lastRun ?? ($allRun && $allRun->status !== 'queued' ? $allRun : null)),
             ];
@@ -204,7 +220,7 @@ class BrandDataCoverageController extends Controller
         $this->authorize('view', $brand);
 
         $data = $request->validate([
-            'dataset' => ['required', 'in:all,history,campaigns,creatives,commerce,email,sessions'],
+            'dataset' => ['required', 'in:all,history,campaigns,creatives,commerce,email,sessions,breakdowns'],
         ]);
         $dataset = $data['dataset'];
 

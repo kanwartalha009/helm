@@ -23,6 +23,11 @@ final class ReportFilters
         public readonly ?string $month = null,    // Y-m — monthly report month selector
         public readonly ?string $week = null,     // Y-m-d Monday — weekly report week selector
         public readonly ?string $platform = null, // meta | google | tiktok — platform-scoped reports
+        // REV2 R3 (monthly-report-v2-mom.md): explicit second month for month-based
+        // comparisons — "Custom: pick ANY second month, e.g. Nov 2026 vs Nov 2024".
+        // When set it OVERRIDES the derived previous/last_year month below. Additive;
+        // v1/other report types never set this and are unaffected.
+        public readonly ?string $compareMonth = null, // Y-m
     ) {}
 
     /** @param array<string, mixed> $p query params */
@@ -39,6 +44,7 @@ final class ReportFilters
         if ($week !== null && CarbonImmutable::parse($week)->dayOfWeekIso !== 1) {
             $week = null;
         }
+        $ym = static fn ($v) => is_string($v) && preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $v) ? $v : null;
 
         return new self(
             period:  $period,
@@ -49,6 +55,7 @@ final class ReportFilters
             month:   $month,
             week:    $week,
             platform: in_array($p['platform'] ?? null, ['meta', 'google', 'tiktok'], true) ? (string) $p['platform'] : null,
+            compareMonth: $ym($p['compare_month'] ?? null),
         );
     }
 
@@ -146,6 +153,38 @@ final class ReportFilters
         $prevStart = $prevEnd->subDays($len - 1);
 
         return [$prevStart->toDateString(), $prevEnd->toDateString()];
+    }
+
+    /**
+     * REV2 R3: [first, last] day of the COMPARE month, resolved against `month`
+     * (the base month) — `compareMonth` explicit ('Custom') wins, else derived
+     * from `compare` (previous = month-1, last_year = month-12). Unlike
+     * monthWindow(), a compare month is allowed to be incomplete-in-the-future
+     * relative to "today" in the trivial sense (it's always <= the base month,
+     * and the base month is already validated complete by the caller), but it
+     * still must actually be a SYNCED month — that's a data question the caller
+     * answers (missing != zero: no data for the compare month means null
+     * deltas, not a fabricated comparison), not something this filter object
+     * can know.
+     *
+     * @return array{0: string, 1: string}|null null when there is no base month to compare against
+     */
+    public function compareMonthWindow(string $tz): ?array
+    {
+        if ($this->month === null) {
+            return null;
+        }
+
+        $base = CarbonImmutable::parse($this->month . '-01', $tz);
+
+        $target = $this->compareMonth !== null
+            ? CarbonImmutable::parse($this->compareMonth . '-01', $tz)
+            : ($this->compare === 'last_year' ? $base->subYear() : $base->subMonth());
+
+        $start = $target->startOfMonth()->startOfDay();
+        $end   = $start->endOfMonth()->startOfDay();
+
+        return [$start->toDateString(), $end->toDateString()];
     }
 
     public function periodLabel(): string

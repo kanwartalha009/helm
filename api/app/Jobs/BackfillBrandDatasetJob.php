@@ -47,9 +47,9 @@ class BackfillBrandDatasetJob implements ShouldQueue
         // so a big onboarding pull never starves the daily sync pools. Pure ads
         // datasets ride ads-sync; commerce rides shopify-sync.
         $this->onQueue(match ($dataset) {
-            'commerce', 'sessions'   => 'shopify-sync',
-            'campaigns', 'creatives' => 'ads-sync',
-            default                  => 'default', // history | all
+            'commerce', 'sessions'                => 'shopify-sync',
+            'campaigns', 'creatives', 'breakdowns' => 'ads-sync',
+            default                                => 'default', // history | all
         });
     }
 
@@ -120,6 +120,14 @@ class BackfillBrandDatasetJob implements ShouldQueue
         // 2023-06-01 data floor itself.
         if ($wants('email') && $credentials->has('klaviyo', 'private_key', (int) $this->brand->id)) {
             $commands[] = ['klaviyo:backfill', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+        }
+        // M5 (monthly-report-v2-mom.md §M5) — Meta breakdown axes (audience,
+        // placement, age_gender, country, ...) powering mom's S13-S16.
+        // --type=all pulls every axis MetaBackfillBreakdownCommand knows about
+        // in one click, same "one dataset, one job" contract as every other
+        // branch here.
+        if ($wants('breakdowns') && in_array('meta', $connected, true)) {
+            $commands[] = ['meta:backfill-breakdown', ['brand' => (string) $this->brand->slug, '--since' => $since, '--type' => 'all']];
         }
 
         try {

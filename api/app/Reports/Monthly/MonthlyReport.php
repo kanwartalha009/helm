@@ -50,6 +50,19 @@ final class MonthlyReport implements ReportType
     /** How many trailing calendar months the MoM heatmaps show. */
     private const TRAILING_MONTHS = 6;
 
+    /**
+     * M0 (2026-07-14): per-request memoization of monthMetrics() results.
+     * build() calls monthMetrics() for the same (brandId, start, end, usd)
+     * window repeatedly — twice directly for cur/mom, then again inside
+     * newVsExistingSection()'s per-month loop — each call re-running the same
+     * 1 + count(AD_PLATFORMS) aggregate queries. Cheap in-memory cache, keyed
+     * per single HTTP request (the report builder is not a singleton), so it
+     * never returns stale data across requests.
+     *
+     * @var array<string, array{revenue: float, totalSpend: float, roas: ?float}>
+     */
+    private array $monthMetricsCache = [];
+
     public function __construct(
         private readonly MonthlySeries $series,
         private readonly RevenueFetcher $revenue,
@@ -1142,6 +1155,11 @@ final class MonthlyReport implements ReportType
      */
     private function monthMetrics(int $brandId, string $start, string $end, bool $usd): array
     {
+        $cacheKey = "{$brandId}|{$start}|{$end}|" . ($usd ? '1' : '0');
+        if (isset($this->monthMetricsCache[$cacheKey])) {
+            return $this->monthMetricsCache[$cacheKey];
+        }
+
         $disp = static fn (string $col): string => $usd ? "{$col} * COALESCE(fx_rate_to_usd, 1)" : $col;
         $usdc = static fn (string $col): string => "{$col} * COALESCE(fx_rate_to_usd, 1)";
         $revCol = '(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))';
@@ -1169,7 +1187,7 @@ final class MonthlyReport implements ReportType
             $totalSpendUsd += (float) ($s->spend_usd ?? 0);
         }
 
-        return [
+        return $this->monthMetricsCache[$cacheKey] = [
             'revenue'    => round($revenue, 2),
             'totalSpend' => round($totalSpend, 2),
             'roas'       => $totalSpendUsd > 0.0 ? round($revenueUsd / $totalSpendUsd, 2) : null,

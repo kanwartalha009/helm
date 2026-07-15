@@ -55,7 +55,7 @@ final class ForecastTest extends TestCase
     }
 
     /** Seed a run of consecutive days. */
-    private function run(Brand $b, string $from, int $days, float $revenue): void
+    private function seedRun(Brand $b, string $from, int $days, float $revenue): void
     {
         $d = CarbonImmutable::parse($from);
         for ($i = 0; $i < $days; $i++) {
@@ -67,7 +67,7 @@ final class ForecastTest extends TestCase
     {
         // 30 days of history; the baseline needs 90. It must return NO numbers.
         $brand = $this->brand();
-        $this->run($brand, '2026-05-16', 30, 100);
+        $this->seedRun($brand, '2026-05-16', 30, 100);
 
         $f = app(Forecast::class)->forBrand($brand->fresh(), 30);
 
@@ -83,7 +83,7 @@ final class ForecastTest extends TestCase
         // Plenty of RECENT history (so gate 1 passes) but nothing a year ago → the
         // seasonal term has nothing to stand on. Refuse rather than invent.
         $brand = $this->brand();
-        $this->run($brand, '2026-01-01', 160, 100);   // ≥90 complete days, all this year
+        $this->seedRun($brand, '2026-01-01', 160, 100);   // ≥90 complete days, all this year
 
         $f = app(Forecast::class)->forBrand($brand->fresh(), 30);
 
@@ -97,10 +97,10 @@ final class ForecastTest extends TestCase
         $brand = $this->brand();
 
         // Gate 1: ≥90 complete days of history.
-        $this->run($brand, '2026-01-01', 150, 50);
+        $this->seedRun($brand, '2026-01-01', 150, 50);
 
         // Last year's window (2025-06-15 … 2025-06-24) = 10 days at 200/day.
-        $this->run($brand, '2025-06-15', 10, 200);
+        $this->seedRun($brand, '2025-06-15', 10, 200);
 
         // Trend windows: make this year's trailing 28d EQUAL last year's, so trend = 1.0
         // and the forecast is exactly the seasonal term. (Both windows already have
@@ -125,12 +125,12 @@ final class ForecastTest extends TestCase
         $brand = $this->brand();
 
         // Last year's trailing 28d (2025-05-18 … 2025-06-14): 100/day.
-        $this->run($brand, '2025-05-18', 28, 100);
+        $this->seedRun($brand, '2025-05-18', 28, 100);
         // This year's trailing 28d (2026-05-18 … 2026-06-14): 150/day → trend 1.5×.
-        $this->run($brand, '2026-05-18', 28, 150);
+        $this->seedRun($brand, '2026-05-18', 28, 150);
         // Gate 1 padding + last year's forecast window.
-        $this->run($brand, '2026-01-01', 120, 100);
-        $this->run($brand, '2025-06-15', 10, 200);
+        $this->seedRun($brand, '2026-01-01', 120, 100);
+        $this->seedRun($brand, '2025-06-15', 10, 200);
 
         $f = app(Forecast::class)->forBrand($brand->fresh(), 10);
 
@@ -148,10 +148,10 @@ final class ForecastTest extends TestCase
         // Last year's 28d was near-zero (1/day); this year 500/day → raw trend 500×.
         // That is an artefact of a tiny base, not momentum. It must be clamped to 2.0×
         // AND the payload must say it was clamped.
-        $this->run($brand, '2025-05-18', 28, 1);
-        $this->run($brand, '2026-05-18', 28, 500);
-        $this->run($brand, '2026-01-01', 120, 100);
-        $this->run($brand, '2025-06-15', 10, 200);
+        $this->seedRun($brand, '2025-05-18', 28, 1);
+        $this->seedRun($brand, '2026-05-18', 28, 500);
+        $this->seedRun($brand, '2026-01-01', 120, 100);
+        $this->seedRun($brand, '2025-06-15', 10, 200);
 
         $f = app(Forecast::class)->forBrand($brand->fresh(), 10);
 
@@ -164,12 +164,12 @@ final class ForecastTest extends TestCase
     public function test_gaps_in_last_year_are_missing_not_zero(): void
     {
         $brand = $this->brand();
-        $this->run($brand, '2026-01-01', 150, 100);
+        $this->seedRun($brand, '2026-01-01', 150, 100);
 
         // Last year's window has 8 of 10 days (two gaps). Coverage 80% ≥ 70% → forecast
         // proceeds, but the missing days contribute NOTHING and are reported as missing
         // rather than silently modelled as €0 revenue.
-        $this->run($brand, '2025-06-15', 8, 100);   // 2025-06-15 … 06-22; 06-23/24 absent
+        $this->seedRun($brand, '2025-06-15', 8, 100);   // 2025-06-15 … 06-22; 06-23/24 absent
 
         $f = app(Forecast::class)->forBrand($brand->fresh(), 10);
 
@@ -185,8 +185,8 @@ final class ForecastTest extends TestCase
     public function test_endpoint_ships_the_modeled_label(): void
     {
         $brand = $this->brand();
-        $this->run($brand, '2026-01-01', 150, 100);
-        $this->run($brand, '2025-06-15', 30, 200);
+        $this->seedRun($brand, '2026-01-01', 150, 100);
+        $this->seedRun($brand, '2025-06-15', 30, 200);
 
         Sanctum::actingAs(User::factory()->create(['role' => 'master_admin']));
         $res = $this->getJson("/api/brands/{$brand->slug}/forecast?horizon=30")->assertOk()->json();

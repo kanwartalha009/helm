@@ -70,6 +70,22 @@ Every section: (a) own endpoint, (b) commentary + To-Do editable blocks (stored 
 - Shared/public view: incomplete sections auto-hidden; freshness gate fail-closed as everywhere.
 - Performance budget: report shell < 1s; each section < 5s on the largest brand (measure on Nude Project — the M0 brand IS the benchmark); sections load in parallel, progressive render, per-section retry. Month selector reuses availableMonths.
 
+## REV 2 — team feedback (2026-07-12, Kanwar + report-prep team). Supersedes anything conflicting above.
+
+**R1. Visual-first design — reference: motionapp.com's reporting look.** Every section is a CARD with the chart as the hero and the table as the secondary view. Big stat tiles, generous whitespace, thumbnail-friendly, white-label clean. Charts in the report document = lightweight self-contained SVG/div components (same convention as existing report docs — they must render on public share links and print cleanly; do NOT import the app's Recharts into the shared document). Read the `dataviz` design discipline if available; otherwise: one accent palette, consistent axes, no chart junk. Every table section gets a chart twin: S1 financial matrix → monthly trend lines (Rev/Spend/ROAS) + small-multiple sparks per column; S4 tiers → stacked area of revenue share by tier; S5/S6 countries → ranked bar + heatmap matrix toggle; S7/S8 categories/sellers → donut + bars w/ YoY arrows; S13-S16 → donut/stacked bars as in the PDF's spirit.
+
+**R2. Per-section view options in the customizer.** Layout json entries become `{key, enabled, position, view: 'chart'|'table'|'both' (default per section), settings?}`. The customizer UI gains the view toggle per section. Shares snapshot view choices with the layout (already the rule).
+
+**R3. Comparison filter system (global, all sections).** Report-level filter bar: base month selector (availableMonths pattern) + compare mode: **Previous month** (default) | **Same month last year** | **Custom** (pick ANY second month, e.g. Nov 2026 vs Nov 2024 or vs Jul 2026). Every section endpoint accepts `month` + `compare_month` and returns base series, compare series, and deltas — the section components render both (dashed/ghost compare series, delta chips). ReportFilters gains `compareMonth` (Y-m, complete months only, same validation as `month`). Shares replay the full filter set. Missing compare-month data → deltas null + "not synced for {month}" note, never fake zeros.
+
+**R4. NEW S-EX "Executive overview" — the overall picture, ALWAYS first by default (before S1).** Motion-style stat-tile grid of every decision parameter: Revenue, Ad Spend, Blended ROAS, MER, AOV, Orders, CAC*, New vs Returning %*, Conversion Rate, Sessions, Email revenue* (*where data exists — honest omission otherwise). Each tile: value, compare delta (arrow + %), 12-month sparkline. One glance = the whole meeting's context. Slide 4's matrix (S1) follows as the detail behind it.
+
+**R5. NEW S-GOALS "Goals vs actual".** Pulls brand_targets (the goals feature from bosco-inputs-2026-07-12.md): revenue vs target bar, ROAS vs target, goal-hit badges — the meeting's accountability moment. Renders only when targets are set.
+
+**R6. PRESENTATION MODE (in-platform slideshow for client meetings).** A "Present" button on the report view (and on share links): renders the SAME resolved sections as full-screen slides — title slide (brand name, white-label agency branding, month — like the PDF's covers), then one slide per enabled section in layout order, commentary/To-Do rendered as a footer strip (toggleable), keyboard ←/→ + click zones + Esc, slide counter, progress dots. Implementation: same section components in a full-screen shell (CSS transform/scroll-snap; no new deps, no reveal.js). Print/PDF unaffected. This turns the report INTO the meeting deck — no more exporting to Slides.
+
+**R7. Confirmed:** current monthly report (v1) stays exactly as-is — Bosco keeps using it while `mom` is built; no v1 files touched by this program.
+
 ## Decisions made (don't re-ask)
 | Decision | Answer |
 |---|---|

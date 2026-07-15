@@ -7,6 +7,8 @@ import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { DataQualityCard } from '@/components/brands/DataQualityCard';
 import { KlaviyoKeyCard } from '@/components/brands/KlaviyoKeyCard';
 import { GoalsSection } from '@/components/brands/GoalsSection';
+import { CountryTiersSection } from '@/components/brands/CountryTiersSection';
+import { ReportFormatSection } from '@/components/brands/ReportFormatSection';
 import { PacingCards } from '@/components/brands/PacingCards';
 import { TruthPanel } from '@/components/brands/TruthPanel';
 import {
@@ -1790,6 +1792,17 @@ function SettingsTab({ brand }: { brand: Brand }) {
         submit the brand form instead. Admin/manager only, matching BrandPolicy::update. */}
     <div className="form-grid" style={{ marginTop: 24 }}>
       <GoalsSection slug={brand.slug} canEdit={canEditGoals} />
+    </div>
+
+    {/* M1 (monthly-report-v2-mom.md §M1) — country tiers, PRIMARY UI = brand
+        Settings. Same "outside the form" reasoning as GoalsSection above. */}
+    <div className="form-grid" style={{ marginTop: 24 }}>
+      <CountryTiersSection slug={brand.slug} canEdit={canEditGoals} />
+    </div>
+
+    {/* M1 + REV2 R2 — report format customizer for this brand's mom report. */}
+    <div className="form-grid" style={{ marginTop: 24 }}>
+      <ReportFormatSection slug={brand.slug} canEdit={canEditGoals} />
     </div>
     </div>
   );

@@ -26,6 +26,7 @@ import { BrandPlanningPage } from '@/routes/BrandPlanningPage';
 import { BrandAskPage } from '@/routes/BrandAskPage';
 import { ReportsPage } from '@/routes/ReportsPage';
 import { ReportViewPage } from '@/routes/ReportViewPage';
+import { MomReportPage } from '@/routes/MomReportPage';
 import { PublicReportPage } from '@/routes/PublicReportPage';
 import { InventoryPage } from '@/routes/InventoryPage';
 import { AdsPage } from '@/routes/AdsPage';
@@ -132,6 +133,12 @@ export function App() {
 
           {/* Reporting & Creative Intelligence (Phase 2, slice 2.0) */}
           <Route path="/reports" element={<Guarded><ReportsPage /></Guarded>} />
+          {/* REV2 (monthly-report-v2-mom.md) — mom is section-streamed (M0),
+              so it gets its own document component/route rather than
+              ReportViewPage's monolithic useReport() fetch. React Router v6
+              ranks this literal 'mom' segment above the ':type' route below
+              regardless of declaration order, so both coexist safely. */}
+          <Route path="/brands/:slug/reports/mom" element={<Guarded><MomReportPage /></Guarded>} />
           <Route path="/brands/:slug/reports/:type" element={<Guarded><ReportViewPage /></Guarded>} />
 
           {/* /add-brand legacy URLs redirect to dashboard — the drawer is the

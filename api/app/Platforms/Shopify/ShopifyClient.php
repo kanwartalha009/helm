@@ -52,10 +52,16 @@ final class ShopifyClient
         private readonly string $shopDomain,
         string $accessToken,
         ?Client $http = null,
+        ?int $timeoutSeconds = null,
     ) {
         $this->accessToken = $accessToken;
+        // M0 (2026-07-14): report-context callers (RevenueFetcher::customersByMonthRange)
+        // pass a bounded timeout via RevenueFetcher::REPORT_CONTEXT_TIMEOUT_SECS so a slow
+        // ShopifyQL response can't hold a report request open for Guzzle's full 30s default.
+        // That 30s wait (x2 across the report's two windows) was the confirmed root cause of
+        // the new-polinesia monthly report freeze — see growth-os-execution-tracker.md §M0.
         $this->http = $http ?? new Client([
-            'timeout'         => 30,
+            'timeout'         => $timeoutSeconds ?? 30,
             'connect_timeout' => 10,
         ]);
     }

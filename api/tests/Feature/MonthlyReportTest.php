@@ -101,6 +101,26 @@ class MonthlyReportTest extends TestCase
         ]);
     }
 
+    /** M0: one commerce_daily_metrics row for bulk-insert (mirrors seedCommerce's columns). */
+    private function commerceRow(int $brandId, string $date, string $dimensionType, string $key, float $totalSales): array
+    {
+        return [
+            'brand_id'        => $brandId,
+            'date'            => $date,
+            'dimension_type'  => $dimensionType,
+            'dimension_key'   => $key,
+            'dimension_label' => $key,
+            'orders'          => 3,
+            'total_sales'     => $totalSales,
+            'net_sales'       => $totalSales * 0.9,
+            'refunds_amount'  => 0,
+            'currency'        => 'EUR',
+            'fx_rate_to_usd'  => 1.0,
+            'is_complete'     => true,
+            'pulled_at'       => now(),
+        ];
+    }
+
     public function test_monthly_kpis_heatmap_d005_math_yoy_null_and_freshness(): void
     {
         $user  = User::factory()->create(['role' => 'master_admin']);
@@ -321,5 +341,105 @@ class MonthlyReportTest extends TestCase
         $this->assertSame('no_data', $res->json('sections.gender.status'));
         $this->assertSame('no_data', $res->json('sections.placement.status'));
         $this->assertNull($res->json('overall.blendedRoas.value'));
+    }
+
+    /**
+     * M0 regression guard. Root cause of the new-polinesia freeze was the ONE
+     * live external call in build() (customersByMonthRange) with no bounded
+     * timeout — covered separately below. This test guards the OTHER failure
+     * mode the same investigation surfaced: monthMetrics() was called twice
+     * directly (cur/mom) plus once per trailing month inside
+     * newVsExistingSection()'s loop — 2 of those 6 loop iterations are exact
+     * duplicates of the direct cur/mom windows (same brandId/start/end/usd),
+     * so 8 calls computed only 6 distinct windows. Also guards against the
+     * commerce sections (country/product/category, all high-cardinality —
+     * MonthlySeries' own doc comment cites "2,600+ products") degrading from
+     * GROUP BY aggregation into a per-row loop, which is exactly the "monolith
+     * payload that doesn't scale" M5 rules out.
+     *
+     * The 120-query / 400KB ceilings are generous order-of-magnitude backstops
+     * reasoned from the section list (13 sections + monthMetrics + freshness +
+     * availableMonths, each a small constant number of queries), NOT a tightly
+     * measured baseline — this environment cannot run `php artisan test`
+     * (composer/vendor unavailable). Kanwar: please run this once for real and
+     * tell me the actual query count so I can tighten these.
+     */
+    public function test_heavy_brand_query_count_and_payload_stay_bounded_by_row_cardinality(): void
+    {
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+
+        $monthStart = $this->monthStart();
+        // The 6 trailing Y-m windows MonthlyReport::TRAILING_MONTHS builds.
+        $trailingMonths = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $trailingMonths[] = $monthStart->subMonths($i);
+        }
+
+        foreach ($trailingMonths as $ms) {
+            $me = $ms->endOfMonth();
+            // Revenue + spend on every trailing month so sections read
+            // 'ok'/'ready', never 'no_data' — a no_data short-circuit would
+            // make the query-count assertion meaningless (too cheap to prove
+            // anything about the aggregation path).
+            $this->seedDaily($brand->id, 'shopify', $me->toDateString(), ['total_sales' => 1000, 'refunds_amount' => 50, 'orders' => 20]);
+            $this->seedDaily($brand->id, 'meta', $ms->addDays(3)->toDateString(), ['spend' => 300, 'conversions' => 10, 'conversion_value' => 600]);
+            $this->seedDaily($brand->id, 'google', $ms->addDays(4)->toDateString(), ['spend' => 200, 'conversions' => 8, 'conversion_value' => 400]);
+            $this->seedDaily($brand->id, 'tiktok', $ms->addDays(5)->toDateString(), ['spend' => 100, 'conversions' => 4, 'conversion_value' => 150]);
+
+            // High-cardinality commerce dimensions: 15 countries + 20 products +
+            // 6 categories per month = 246 rows/month, 1,476 total across 6
+            // months — bulk-inserted (not one row at a time) to keep the test fast.
+            $rows = [];
+            for ($c = 0; $c < 15; $c++) {
+                $rows[] = $this->commerceRow($brand->id, $ms->addDays(6)->toDateString(), 'country', "C{$c}", 50 + $c);
+            }
+            for ($p = 0; $p < 20; $p++) {
+                $rows[] = $this->commerceRow($brand->id, $ms->addDays(6)->toDateString(), 'product', "SKU-{$p}", 20 + $p);
+            }
+            for ($cat = 0; $cat < 6; $cat++) {
+                $rows[] = $this->commerceRow($brand->id, $ms->addDays(6)->toDateString(), 'category', "Cat-{$cat}", 80 + $cat);
+            }
+            DB::table('commerce_daily_metrics')->insert($rows);
+        }
+
+        Sanctum::actingAs($user);
+        DB::enableQueryLog();
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/monthly")->assertOk();
+        $queryCount = count(DB::getQueryLog());
+        DB::flushQueryLog();
+
+        $this->assertLessThan(
+            120,
+            $queryCount,
+            "Query count ({$queryCount}) for 1,476 commerce rows suggests a per-row loop, not GROUP BY aggregation."
+        );
+
+        // MonthlySeries::forDimension caps every commerce section at top-8 +
+        // one "other" rollup regardless of catalogue size, so payload size
+        // should not scale with the 1,476 seeded rows either.
+        $payloadBytes = strlen($res->getContent());
+        $this->assertLessThan(
+            400000,
+            $payloadBytes,
+            "Payload ({$payloadBytes} bytes) suggests section output isn't capped at top-N."
+        );
+    }
+
+    /**
+     * M0 root-cause regression guard. Pins the constant (not a live call — no
+     * Shopify connection is seeded, so this never hits the network) so a
+     * future edit that raises it back toward Guzzle's 30s default fails
+     * loudly here instead of silently reintroducing the report freeze on
+     * whichever brand has the slowest ShopifyQL response that day.
+     */
+    public function test_shopify_customer_pull_uses_a_bounded_report_context_timeout(): void
+    {
+        $timeout = (new \ReflectionClass(\App\Platforms\Shopify\RevenueFetcher::class))
+            ->getConstant('REPORT_CONTEXT_TIMEOUT_SECS');
+
+        $this->assertIsInt($timeout);
+        $this->assertGreaterThan(0, $timeout);
+        $this->assertLessThanOrEqual(15, $timeout);
     }
 }

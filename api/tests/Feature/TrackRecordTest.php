@@ -59,7 +59,7 @@ final class TrackRecordTest extends TestCase
         ]);
     }
 
-    private function run(Brand $b, string $range, float $spend, float $value = 0): void
+    private function seedRun(Brand $b, string $range, float $spend, float $value = 0): void
     {
         [$from, $days] = explode('|', $range);
         $d = CarbonImmutable::parse($from);
@@ -89,7 +89,7 @@ final class TrackRecordTest extends TestCase
     {
         $b = $this->brand();
         // 14 days of €100/day BEFORE the decision …
-        $this->run($b, '2026-04-17|14', 100);
+        $this->seedRun($b, '2026-04-17|14', 100);
         // … and the spend stops after it. The waste was avoided.
         $this->accepted($b, 'pause', 'spend_waste', 1400);
 
@@ -106,8 +106,8 @@ final class TrackRecordTest extends TestCase
         // The waste was NOT avoided, and Helm does not get to book a win for advice
         // nobody carried out.
         $b = $this->brand();
-        $this->run($b, '2026-04-17|14', 100);           // before: €100/day
-        $this->run($b, self::DECIDED . '|14', 100);     // after:  €100/day — unchanged
+        $this->seedRun($b, '2026-04-17|14', 100);           // before: €100/day
+        $this->seedRun($b, self::DECIDED . '|14', 100);     // after:  €100/day — unchanged
 
         $this->accepted($b, 'pause', 'spend_waste', 1400);
         app(OutcomeMeasurer::class)->run();
@@ -119,7 +119,7 @@ final class TrackRecordTest extends TestCase
     {
         $b = $this->brand();
         // Baseline ROAS 3.0×. After scaling, ROAS collapses to 1.0× — we were wrong.
-        $this->run($b, self::DECIDED . '|30', 200, 200);   // value/spend = 1.0×
+        $this->seedRun($b, self::DECIDED . '|30', 200, 200);   // value/spend = 1.0×
 
         $this->accepted($b, 'scale', 'roas', 3.0);
         app(OutcomeMeasurer::class)->run();
@@ -130,7 +130,7 @@ final class TrackRecordTest extends TestCase
     public function test_a_scale_that_held_roas_is_recorded_as_improved(): void
     {
         $b = $this->brand();
-        $this->run($b, self::DECIDED . '|30', 200, 800);   // 4.0× vs a 3.0× baseline
+        $this->seedRun($b, self::DECIDED . '|30', 200, 800);   // 4.0× vs a 3.0× baseline
 
         $this->accepted($b, 'scale', 'roas', 3.0);
         app(OutcomeMeasurer::class)->run();
@@ -143,7 +143,7 @@ final class TrackRecordTest extends TestCase
         // 3.15× vs a 3.0× baseline = +5%, inside the 10% material band. Claiming that as
         // a win would be noise dressed up as skill.
         $b = $this->brand();
-        $this->run($b, self::DECIDED . '|30', 100, 315);
+        $this->seedRun($b, self::DECIDED . '|30', 100, 315);
 
         $this->accepted($b, 'scale', 'roas', 3.0);
         app(OutcomeMeasurer::class)->run();
@@ -196,7 +196,7 @@ final class TrackRecordTest extends TestCase
         $user = User::factory()->create();
 
         $win = $this->accepted($b, 'scale', 'roas', 3.0);
-        $this->run($b, self::DECIDED . '|30', 100, 600);   // 6.0× → improved
+        $this->seedRun($b, self::DECIDED . '|30', 100, 600);   // 6.0× → improved
         $lose = $this->accepted($b, 'fix', 'roas', 3.0);
         $lose->update(['subject_id' => 'google']);          // no google rows → unmeasurable
 
@@ -235,7 +235,7 @@ final class TrackRecordTest extends TestCase
     public function test_an_outcome_is_never_regraded_on_a_second_run(): void
     {
         $b = $this->brand();
-        $this->run($b, '2026-04-17|14', 100);
+        $this->seedRun($b, '2026-04-17|14', 100);
         $this->accepted($b, 'pause', 'spend_waste', 1400);
 
         app(OutcomeMeasurer::class)->run();

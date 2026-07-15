@@ -21,18 +21,22 @@ use App\Http\Controllers\Api\CampaignPlanController;
 use App\Http\Controllers\Api\DataQualityController;
 use App\Http\Controllers\Api\DigestController;
 use App\Http\Controllers\Api\MarketCalendarController;
+use App\Http\Controllers\Api\MomSectionController;
 use App\Http\Controllers\Api\RecommendationController;
 use App\Http\Controllers\Api\SeasonalStaleController;
 use App\Http\Controllers\Api\BrandProductsController;
 use App\Http\Controllers\Api\BrandController;
 use App\Http\Controllers\Api\BrandDataCoverageController;
 use App\Http\Controllers\Api\ConnectionController;
+use App\Http\Controllers\Api\CountryTierController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\PlatformCredentialController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\ReportLayoutController;
 use App\Http\Controllers\Api\SyncStatusController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\WorkspaceNovedadesController;
 use App\Http\Controllers\Api\WorkspaceSettingController;
 use Illuminate\Support\Facades\Route;
 
@@ -84,6 +88,20 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
     Route::middleware('role:master_admin')->group(function (): void {
         Route::get('workspace-settings',   [WorkspaceSettingController::class, 'index']);
         Route::patch('workspace-settings', [WorkspaceSettingController::class, 'update']);
+
+        // M1 (monthly-report-v2-mom.md §M1) — the agency-wide DEFAULT tier set and
+        // DEFAULT report layout. The fallback/template every brand without its own
+        // override reads from; master_admin only, same gate as workspace-settings.
+        Route::get('workspace-country-tiers',  [CountryTierController::class, 'showAgencyDefault']);
+        Route::put('workspace-country-tiers',  [CountryTierController::class, 'storeAgencyDefault']);
+        Route::get('report-layouts/{reportType}/default', [ReportLayoutController::class, 'showAgencyDefault']);
+        Route::put('report-layouts/{reportType}/default', [ReportLayoutController::class, 'storeAgencyDefault']);
+
+        // M4 (monthly-report-v2-mom.md §M4) — S19 Novedades' agency-wide DEFAULT
+        // note per month, written once here, read by every brand's S19 that
+        // hasn't written its own copy (Novedades::resolve()'s fallback layer).
+        Route::get('workspace-novedades', [WorkspaceNovedadesController::class, 'showAgencyDefault']);
+        Route::put('workspace-novedades', [WorkspaceNovedadesController::class, 'storeAgencyDefault']);
     });
 
     // Dashboard
@@ -176,6 +194,22 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
             Route::delete('brands/{brand}/targets/{month}', [BrandTargetController::class, 'destroy']);
         });
 
+        // M1 (monthly-report-v2-mom.md §M1) — country tiers, this brand's own override
+        // set. Reading is brand-visible; writing shapes how the mom report groups
+        // countries for a client meeting -> admin/manager only, same split as targets.
+        Route::get('brands/{brand}/country-tiers', [CountryTierController::class, 'show']);
+        Route::middleware('role:master_admin,manager')->group(function (): void {
+            Route::put('brands/{brand}/country-tiers',    [CountryTierController::class, 'store']);
+            Route::delete('brands/{brand}/country-tiers', [CountryTierController::class, 'destroy']);
+        });
+
+        // M1 + REV2 R2 — report format customizer, this brand's own layout override.
+        Route::get('brands/{brand}/report-layouts/{reportType}', [ReportLayoutController::class, 'show']);
+        Route::middleware('role:master_admin,manager')->group(function (): void {
+            Route::put('brands/{brand}/report-layouts/{reportType}',    [ReportLayoutController::class, 'store']);
+            Route::delete('brands/{brand}/report-layouts/{reportType}', [ReportLayoutController::class, 'destroy']);
+        });
+
         // Forecast baseline (GO-2.3) — seasonal-naive + drift. REFUSES on thin history
         // rather than extrapolating; every number carries the `Modeled` label.
         Route::get('brands/{brand}/forecast', [BrandForecastController::class, 'show']);
@@ -248,6 +282,21 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         // share token. Report type is validated against the registry.
         Route::get('brands/{brand}/reports/{type}',         [ReportController::class, 'show']);
         Route::post('brands/{brand}/reports/{type}/shares', [ReportController::class, 'createShare']);
+
+        // M2 (monthly-report-v2-mom.md §M2) — one section per request, the
+        // section-streamed architecture M0 exists to teach. `mom` is fixed in
+        // the path (not a {type} param) — section-per-request is a mom-specific
+        // concept, not a generic ReportType capability.
+        Route::get('brands/{brand}/reports/mom/sections/{key}',             [MomSectionController::class, 'show']);
+        Route::get('brands/{brand}/reports/mom/sections/{key}/commentary',  [MomSectionController::class, 'showCommentary']);
+        Route::middleware('role:master_admin,manager')->group(function (): void {
+            Route::put('brands/{brand}/reports/mom/sections/{key}/commentary', [MomSectionController::class, 'saveCommentary']);
+            // M4 — S0 Next Steps checklist + S19 Novedades' per-brand copy.
+            // Fixed paths (not {key}) since each has its own request shape
+            // (items[] vs body), unlike the generic commentary endpoint above.
+            Route::put('brands/{brand}/reports/mom/next-steps', [MomSectionController::class, 'saveNextSteps']);
+            Route::put('brands/{brand}/reports/mom/novedades',  [MomSectionController::class, 'saveNovedades']);
+        });
         // LLM layer (D-016, ratified 2026-07-10). Generation/editing is
         // admin/manager-only — every generate call spends real tokens.
         Route::middleware('role:master_admin,manager')->group(function (): void {
