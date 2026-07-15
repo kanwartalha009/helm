@@ -67,6 +67,7 @@ final class SSalesEvolutionSection implements MomSection
         $cmp = $compareWindow !== null ? $this->dailyRevenue($brand->id, $compareWindow[0], $compareWindow[1]) : null;
 
         $total = round(array_sum(array_column($cur, 'revenue')), 2);
+        $split = $this->modeledCustomerSplit($brand, $start, $end, $total);
 
         return [
             'key'    => $this->key(),
@@ -79,10 +80,12 @@ final class SSalesEvolutionSection implements MomSection
             'total'   => $total,
             'compareTotal' => $cmp !== null ? round(array_sum(array_column($cmp, 'revenue')), 2) : null,
             // MODELED new-vs-returning sales split for THIS month (headline amounts).
-            'customerSalesSplit' => $this->modeledCustomerSplit($brand, $start, $end, $total),
-            // MODELED new-vs-returning sales TREND — trailing 6 months, so the
-            // split renders as a real graph (two lines), not a single bar.
-            'customerSalesSeries' => $this->modeledCustomerSeries($brand, $start),
+            'customerSalesSplit' => $split,
+            // MODELED new-vs-returning sales as a DAILY series across the month —
+            // same x-axis (days) as the sales line above it. Each day's real
+            // revenue is allocated by the MONTH's new/returning share (we have no
+            // daily customer-type data), so it sums to the monthly split.
+            'customerSalesDaily' => $this->modeledCustomerDaily($cur, $split),
         ];
     }
 
@@ -135,73 +138,42 @@ final class SSalesEvolutionSection implements MomSection
     }
 
     /**
-     * Trailing 6-month MODELED new-vs-returning sales trend (report month +
-     * 5 prior). One ShopifyQL call (CustomerMix::forRange) for the counts, one
-     * grouped SQL query for monthly revenue+orders, then the same new × AOV
-     * estimate per month. A month with no customer/order data lands as null so
-     * the line breaks honestly rather than dropping to a fake 0. Null (omitted)
-     * when the customer split isn't available at all.
+     * MODELED new-vs-returning sales as a DAILY series across the report month —
+     * so the graph shares the SAME x-axis (days of the month) as the total-sales
+     * line above it. We have no daily customer-type data (Shopify only reports
+     * monthly counts), so each day's REAL revenue is allocated by the MONTH's
+     * modeled new-share (from `$split`): new_day = day_rev × newShare, returning
+     * = day_rev − new_day. The daily values therefore sum exactly to the monthly
+     * split. Null when the month split isn't available.
      *
-     * @return array<int, array{month: string, label: string, new: ?float, returning: ?float}>|null
+     * @param array<int, array{day: int, revenue: float}> $daily
+     * @param array<string, mixed>|null $split  the month's modeledCustomerSplit
+     * @return array<int, array{day: int, new: float, returning: float}>|null
      */
-    private function modeledCustomerSeries(Brand $brand, string $start): ?array
+    private function modeledCustomerDaily(array $daily, ?array $split): ?array
     {
-        $tz         = $brand->timezone ?: 'UTC';
-        $monthStart = CarbonImmutable::parse($start, $tz)->startOfMonth();
-        $rangeStart = $monthStart->subMonths(5);
-
-        $rangeEnd = $monthStart->endOfMonth();
-
-        $counts = $this->customerMix->forRange($brand, $rangeStart->toDateString(), $rangeEnd->toDateString());
-        if ($counts === null) {
+        if ($split === null) {
             return null;
         }
 
-        // Per-DAY revenue + orders (grouped by the date column — driver-agnostic,
-        // works on MySQL/Postgres/sqlite), then bucketed into months in PHP so
-        // no DB-specific date function is used (D-005 revenue basis).
-        $revCol = '(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))';
-        $daily = DailyMetric::query()
-            ->where('brand_id', $brand->id)
-            ->where('platform', 'shopify')
-            ->whereBetween('date', [$rangeStart->toDateString(), $rangeEnd->toDateString()])
-            ->groupBy('date')
-            ->selectRaw("date, COALESCE(SUM({$revCol}), 0) AS revenue, COALESCE(SUM(orders), 0) AS orders")
-            ->get();
-
-        /** @var array<string, array{revenue: float, orders: int}> $monthly */
-        $monthly = [];
-        foreach ($daily as $d) {
-            $ym = CarbonImmutable::parse((string) $d->date)->format('Y-m');
-            $monthly[$ym]['revenue'] = ($monthly[$ym]['revenue'] ?? 0.0) + (float) $d->revenue;
-            $monthly[$ym]['orders']  = ($monthly[$ym]['orders'] ?? 0) + (int) $d->orders;
+        $newMonth = (float) $split['new']['sales'];
+        $retMonth = (float) $split['returning']['sales'];
+        $monthTotal = $newMonth + $retMonth;
+        if ($monthTotal <= 0.0) {
+            return null;
         }
+        $newShare = $newMonth / $monthTotal;
 
-        $series = [];
-        for ($i = 0; $i < 6; $i++) {
-            $m   = $rangeStart->addMonths($i);
-            $ym  = $m->format('Y-m');
-            $rev = $monthly[$ym]['revenue'] ?? null;
-            $ord = $monthly[$ym]['orders'] ?? null;
-            $mix = $counts[$ym] ?? null;
+        return array_map(static function (array $d) use ($newShare): array {
+            $rev = (float) $d['revenue'];
+            $new = round($rev * $newShare, 2);
 
-            $newSales = null;
-            $retSales = null;
-            if ($mix !== null && $rev !== null && $rev > 0.0 && $ord !== null && $ord > 0) {
-                $aov      = $rev / $ord;
-                $newSales = round(min($mix['new'] * $aov, $rev), 2);
-                $retSales = round($rev - $newSales, 2);
-            }
-
-            $series[] = [
-                'month'     => $ym,
-                'label'     => $m->isoFormat('MMM'),
-                'new'       => $newSales,
-                'returning' => $retSales,
+            return [
+                'day'       => (int) $d['day'],
+                'new'       => $new,
+                'returning' => round($rev - $new, 2),
             ];
-        }
-
-        return $series;
+        }, $daily);
     }
 
     /** @return array<int, array{day: int, revenue: float}>|null */

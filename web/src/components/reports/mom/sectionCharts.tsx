@@ -129,7 +129,7 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
           height={170}
         />
         {p.customerSalesSplit && (
-          <ModeledCustomerSplit split={p.customerSalesSplit} series={p.customerSalesSeries ?? null} currency={currency} />
+          <ModeledCustomerSplit split={p.customerSalesSplit} daily={p.customerSalesDaily ?? null} currency={currency} />
         )}
       </div>
     );
@@ -282,13 +282,14 @@ function monthName(ym: string | null | undefined): string | null {
 /**
  * Modeled new-vs-returning sales beneath S2's Total sales chart (Kanwar,
  * 2026-07-15). Amounts at the top, then a real GRAPH — two lines (New / Returning)
- * over the trailing 6 months on a SHARED scale so they're honestly comparable —
- * with the estimation method spelled out. Shopify can't split sales by customer
- * type, so this is v1's new × AOV estimate, clearly marked "Modeled".
+ * across the DAYS of the month (same x-axis as the sales line) on a shared scale
+ * — with the estimation method spelled out. Shopify can't split sales by customer
+ * type, so each day's revenue is allocated by the month's modeled new-share
+ * (v1's new × AOV basis), clearly marked "Modeled".
  */
 function ModeledCustomerSplit({
   split,
-  series,
+  daily,
   currency,
 }: {
   split: {
@@ -296,13 +297,17 @@ function ModeledCustomerSplit({
     new: { customers: number; sales: number; pct: number | null };
     returning: { customers: number; sales: number; pct: number | null };
   };
-  series: { month: string; label: string; new: number | null; returning: number | null }[] | null;
+  daily: { day: number; new: number; returning: number }[] | null;
   currency: string;
 }) {
   const n = split.new;
   const r = split.returning;
   const NEW = '#1f6f5c';
   const RET = '#c9a227';
+  // Same day-label thinning as the sales chart above: day 1, every 5th, last.
+  const dayLabels = (daily ?? []).map((d, i) =>
+    i === 0 || i === (daily?.length ?? 0) - 1 || d.day % 5 === 0 ? String(d.day) : '',
+  );
 
   return (
     <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
@@ -316,11 +321,11 @@ function ModeledCustomerSplit({
         <SplitAmount label="Returning customers" color={RET} sales={r.sales} customers={r.customers} pct={r.pct} currency={currency} />
       </div>
 
-      {series && series.length > 0 && (
+      {daily && daily.length > 0 && (
         <TrendLineChart
-          labels={series.map((s) => s.label)}
-          series={series.map((s) => s.new)}
-          compareSeries={series.map((s) => s.returning)}
+          labels={dayLabels}
+          series={daily.map((d) => d.new)}
+          compareSeries={daily.map((d) => d.returning)}
           valueFormatter={(v) => formatMoney(v, currency, { compact: true })}
           seriesLabel="New customer sales"
           compareLabel="Returning customer sales"
