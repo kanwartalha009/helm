@@ -87,12 +87,18 @@ export function TrendLineChart({
   compareSeries,
   height = 180,
   valueFormatter = fmtCompact,
+  seriesLabel,
+  compareLabel,
 }: {
   labels: string[];
   series: (number | null)[];
   compareSeries?: (number | null)[] | null;
   height?: number;
   valueFormatter?: (n: number) => string;
+  // When set, a small legend renders above the chart marking which line is
+  // which — solid = `series`, dashed/ghost = `compareSeries`.
+  seriesLabel?: string;
+  compareLabel?: string;
 }) {
   const width = Math.max(280, labels.length * 56);
   const padL = 40;
@@ -122,9 +128,27 @@ export function TrendLineChart({
   };
 
   const gridY = [0, 0.5, 1].map((f) => padT + innerH * f);
+  const showLegend = !!seriesLabel || !!(compareSeries && compareLabel);
 
   return (
-    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMinYMid meet" role="img">
+    <div>
+      {showLegend && (
+        <div style={{ display: 'flex', gap: 14, marginBottom: 4, fontSize: 11 }} className="muted">
+          {seriesLabel && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 16, height: 0, borderTop: `2px solid ${ACCENT}` }} />
+              {seriesLabel}
+            </span>
+          )}
+          {compareSeries && compareLabel && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 16, height: 0, borderTop: `2px dashed ${ACCENT_GHOST}` }} />
+              {compareLabel}
+            </span>
+          )}
+        </div>
+      )}
+      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMinYMid meet" role="img">
       {gridY.map((y, i) => (
         <line key={i} x1={padL} y1={y} x2={width} y2={y} stroke={GRID} strokeWidth={1} />
       ))}
@@ -142,19 +166,22 @@ export function TrendLineChart({
         ),
       )}
 
-      {labels.map((l, i) => (
-        <text
-          key={l}
-          x={padL + i * step}
-          y={height - 4}
-          fontSize={10}
-          textAnchor="middle"
-          fill="var(--text-muted, #6b7280)"
-        >
-          {l}
-        </text>
-      ))}
-    </svg>
+      {labels.map((l, i) =>
+        l === '' ? null : (
+          <text
+            key={i}
+            x={padL + i * step}
+            y={height - 4}
+            fontSize={10}
+            textAnchor="middle"
+            fill="var(--text-muted, #6b7280)"
+          >
+            {l}
+          </text>
+        ),
+      )}
+      </svg>
+    </div>
   );
 }
 

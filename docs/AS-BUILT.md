@@ -676,3 +676,45 @@ competitor gap map · weekly digest.
 - ⛔ **KANWAR GATE (§7.3):** *"Kanwar reviews one plan personally before this phase is called done."* Run
   `php artisan migrate && php artisan calendar:seed 2026`, generate a real BFCM plan, and confirm every number
   traces to a table row or a config constant.
+
+## GO-4.4 — Moodboard / brand style (2026-07-15)
+
+- **`brand_styles`** (one row per brand): palette, tone words, do/don't and reference winners — the style GO-5
+  creative generation will be grounded in. Additive, `workspace_id` D-022 seam.
+- **The confirm gate is the point.** A style is `draft` (auto-suggestions) until an operator confirms it
+  (`status='confirmed'`, `confirmed_by`/`confirmed_at` set). `BrandStyleService::confirmed()` returns **null** for a
+  draft — GO-5 calls this and refuses to generate against an unconfirmed style. Auto-extracted colours and
+  LLM-drafted tone are **suggestions, never truth**, until a human signs off.
+- **Palette** — `PaletteExtractor`, pure-PHP GD dominant-colour binning (no new deps), from the brand's own
+  **winning-creative thumbnails** (top ads by USD ROAS, ≥$50 spend, trailing 90d). Best-effort, bounded fetch;
+  unreadable/missing images contribute nothing rather than a fabricated colour.
+- **Tone** — LLM prose over the brand's OWN product titles/types only (D-016, key-gated; empty + no call without a
+  key). No customer data ever leaves the building.
+- **Surfaces:** `GET/PUT brands/{brand}/style` + `POST .../style/suggest` (read brand-visible, write admin/manager);
+  `MoodboardCard` on the brand Settings tab — palette swatches, editable tone chips, do/don't, winner grid, and
+  Suggest / Save draft / Confirm.
+- **Deferred (logged):** palette from catalog PRODUCT images — the catalog stores no product image URL today
+  (only creative thumbnails), so a follow-up would add an `image_url` catalog column + sync to enrich palettes.
+- GO-4 is now 4.1–4.4 ☑; the phase's formal exit still waits on the §7.3 Kanwar plan review (GO-4.3).
+
+## GO-5.1 — Creative testing engine, text-only (2026-07-15)
+
+- **`creative_drafts`** (one row per generated-then-reviewed asset): modality (text now; image/video gated),
+  kind (copy | hook | ugc_script), modality-agnostic `content` json, lifecycle
+  `draft → approved → exported → launched`, `model` provenance, `launched_ad_id` for the GO-5.3 loop. Additive.
+- **A variation engine inside a human loop, never a turnkey ad-maker.** Everything starts as a `draft`; only an
+  operator advances it (forward-only). Nothing is auto-published.
+- **The generation seam** — `CreativeGenerator` interface; `TextCreativeGenerator` (LLM, D-016 key-gated) is the
+  only implementation. Image/video will implement the same interface behind the Kanwar provider gate.
+- **Refuses on an unconfirmed style.** `CreativeStudioService::generate()` calls `BrandStyleService::confirmed()`
+  (GO-4.4) and throws `UnconfirmedStyleException` — **making no LLM call** — when the brand's moodboard isn't
+  confirmed (422, `reason: unconfirmed_style`). Generic, ungrounded creative is the failure mode this prevents.
+- **The allowlist holds.** The model sees ONLY a scrubbed `CreativeBrief` whitelist (tone, palette, do/don't,
+  product **facts** name/type/stock, Verified hook benchmarks, moment) — the same PlanNarrator discipline; a
+  brand_id / handle / customer field on a product row can never leak into a prompt (asserted by test).
+- **Surfaces:** `GET brands/{brand}/creative/drafts` (read) + `POST .../creative/generate`, `PUT/DELETE
+  .../creative/drafts/{draft}` (admin/manager); `CreativeStudioCard` on the brand Settings tab — generate
+  (guarded until style confirmed), review/edit, approve/discard.
+- **Deferred (logged):** GO-5.2 export (CSV + copy-paste), GO-5.3 ledger loop (launched → 30d AI-vs-human
+  outcomes), proven-hook benchmark wiring (needs a tagged corpus), product **price** in the brief (no sale-price
+  column exists — only COGS). **GO-5b (Meta push) stays ⛔ on the `ads_management` ADR.**

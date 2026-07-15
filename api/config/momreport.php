@@ -25,7 +25,9 @@ return [
         ['key' => 'S-GOALS', 'label' => 'Goals vs actual',                'view' => 'chart', 'enabled' => true],
         ['key' => 'S1',      'label' => 'Financial matrix',               'view' => 'both',  'enabled' => true],
         ['key' => 'S2',      'label' => 'Total sales evolution',          'view' => 'chart', 'enabled' => true],
-        ['key' => 'S3',      'label' => 'New vs returning evolution',     'view' => 'chart', 'enabled' => true],
+        // S3 "New vs returning evolution" retired (Kanwar, 2026-07-15) — the
+        // new/returning percentage split lives in S-EX (Executive overview)
+        // instead of a standalone section.
         ['key' => 'S4',      'label' => 'Market revenue by tier',         'view' => 'both',  'enabled' => true],
         ['key' => 'S5',      'label' => 'Country revenue MoM',            'view' => 'table', 'enabled' => true],
         ['key' => 'S6',      'label' => 'ROAS by country',                'view' => 'both',  'enabled' => true],

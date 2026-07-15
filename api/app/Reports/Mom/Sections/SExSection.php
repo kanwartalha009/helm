@@ -98,10 +98,16 @@ final class SExSection implements MomSection
         }
 
         // New vs Returning % + CAC — shared live ShopifyQL customer counts.
+        // (Kanwar, 2026-07-15: the standalone S3 "New vs returning evolution"
+        // section was retired — the split lives here in the exec overview
+        // instead.) The tile value is the NEW-customer share; the RETURNING
+        // share (its complement) rides along as `returningPct` so the frontend
+        // shows the full split "New 60% · Returning 40%".
         $mixCur = $this->customerMix->forMonth($brand, $start, $end);
         $mixCmp = $compareWindow !== null ? $this->customerMix->forMonth($brand, $compareWindow[0], $compareWindow[1]) : null;
         if ($mixCur !== null) {
-            $tiles['newVsReturningPct'] = $this->tile($mixCur['newPct'], $mixCmp['newPct'] ?? null, 'pct');
+            $tiles['newVsReturningPct'] = $this->tile($mixCur['newPct'], $mixCmp['newPct'] ?? null, 'pct')
+                + ['returningPct' => $mixCur['retPct'], 'newCount' => $mixCur['new'], 'returningCount' => $mixCur['returning']];
             // CAC = total ad spend ÷ NEW customers. Null when there's no spend or
             // no new buyers in the month (missing != a fabricated 0).
             $cac = ($mixCur['new'] > 0 && $cur['spend'] > 0.0) ? round($cur['spend'] / $mixCur['new'], 2) : null;

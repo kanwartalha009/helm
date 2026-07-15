@@ -29,7 +29,9 @@ use App\Http\Controllers\Api\BrandProductsController;
 use App\Http\Controllers\Api\BrandController;
 use App\Http\Controllers\Api\BrandDataCoverageController;
 use App\Http\Controllers\Api\ConnectionController;
+use App\Http\Controllers\Api\BrandStyleController;
 use App\Http\Controllers\Api\CountryTierController;
+use App\Http\Controllers\Api\CreativeStudioController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\PlatformCredentialController;
@@ -216,6 +218,27 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         Route::middleware('role:master_admin,manager')->group(function (): void {
             Route::put('brands/{brand}/country-tiers',    [CountryTierController::class, 'store']);
             Route::delete('brands/{brand}/country-tiers', [CountryTierController::class, 'destroy']);
+        });
+
+        // GO-4.4 (master plan §7.4) — brand moodboard / style. Reading is
+        // brand-visible; suggest (LLM + palette extraction) and save/confirm
+        // shape what GO-5 will generate against -> admin/manager only, same
+        // split as tiers/targets. `confirm` is the §7.4 operator-review gate.
+        Route::get('brands/{brand}/style', [BrandStyleController::class, 'show']);
+        Route::middleware('role:master_admin,manager')->group(function (): void {
+            Route::post('brands/{brand}/style/suggest', [BrandStyleController::class, 'suggest']);
+            Route::put('brands/{brand}/style',          [BrandStyleController::class, 'store']);
+        });
+
+        // GO-5.1 (master plan §8) — creative testing engine, text-only. Reading
+        // drafts is brand-visible; generating (LLM, refuses on unconfirmed
+        // style) and editing/approving are admin/manager. Nothing here
+        // publishes — export is GO-5.2, Meta push is the gated GO-5b.
+        Route::get('brands/{brand}/creative/drafts', [CreativeStudioController::class, 'index']);
+        Route::middleware('role:master_admin,manager')->group(function (): void {
+            Route::post('brands/{brand}/creative/generate',          [CreativeStudioController::class, 'generate']);
+            Route::put('brands/{brand}/creative/drafts/{draft}',     [CreativeStudioController::class, 'update']);
+            Route::delete('brands/{brand}/creative/drafts/{draft}',  [CreativeStudioController::class, 'destroy']);
         });
 
         // M1 + REV2 R2 — report format customizer, this brand's own layout override.

@@ -13,9 +13,9 @@ import { StatTile, UnavailableTile } from './StatTile';
  * section's OWN actual payload shape (verified against each Sections/*.php
  * file, not guessed). A key with no entry here falls back to
  * MomSectionCard's generic table-only render — an honest "no chart twin yet"
- * rather than a fabricated one. Sections intentionally NOT chart-twinned this
- * pass: S0 (a checklist, not a metric), S19 (free text), S3 (an honest shell
- * with no real data to chart yet).
+ * rather than a fabricated one. Sections intentionally NOT chart-twinned:
+ * S0 (a checklist, not a metric), S19 (free text). (S3 "New vs returning
+ * evolution" was retired 2026-07-15 — its split now lives in the S-EX tiles.)
  */
 export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: string) => ReactNode> = {
   // REV2 R4 — the full executive stat-tile grid. Every tile the backend
@@ -34,7 +34,10 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
       { key: 'blendedRoas', label: 'Blended ROAS' },
       { key: 'aov', label: 'AOV' },
       { key: 'orders', label: 'Orders' },
-      { key: 'newVsReturningPct', label: 'New customers %' },
+      // New vs returning split (Kanwar, 2026-07-15) — the standalone S3 section
+      // was retired; the tile value is the NEW-customer share and the RETURNING
+      // share rides underneath (backend `returningPct`).
+      { key: 'newVsReturningPct', label: 'New vs returning' },
       { key: 'cac', label: 'CAC' },
       { key: 'conversionRate', label: 'Conversion rate' },
       { key: 'sessions', label: 'Sessions' },
@@ -43,30 +46,15 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
         {ORDER.map(({ key, label }) => {
-          if (tiles[key]) return <StatTile key={key} label={label} tile={tiles[key]} currency={currency} />;
+          if (tiles[key]) {
+            const t = tiles[key];
+            const benchmarkLabel =
+              key === 'newVsReturningPct' && t.returningPct != null ? `Returning ${Number(t.returningPct).toFixed(1)}%` : undefined;
+            return <StatTile key={key} label={label} tile={t} currency={currency} benchmarkLabel={benchmarkLabel} />;
+          }
           if (unavailable[key]) return <UnavailableTile key={key} label={label} reason={unavailable[key]} />;
           return null;
         })}
-      </div>
-    );
-  },
-
-  // S3 — new vs returning CUSTOMER COUNTS (Shopify can't split revenue by
-  // customer type; see the section's own docblock). Counts + new-share donut.
-  S3: (p) => {
-    if (p.new == null && p.returning == null) return null;
-    return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-        <StatTile label="New customers" tile={{ value: p.new ?? null, format: 'count' }} />
-        <StatTile label="Returning customers" tile={{ value: p.returning ?? null, format: 'count' }} />
-        <StatTile label="New %" tile={{ value: p.newPct?.value ?? null, deltaPct: p.newPct?.deltaPct ?? null, format: 'pct' }} />
-        <StatTile label="Returning %" tile={{ value: p.retPct?.value ?? null, deltaPct: p.retPct?.deltaPct ?? null, format: 'pct' }} />
-        <DonutChart
-          rows={[
-            { label: 'New', value: Number(p.new ?? 0), color: '#1f6f5c' },
-            { label: 'Returning', value: Number(p.returning ?? 0), color: '#c9a227' },
-          ]}
-        />
       </div>
     );
   },
@@ -85,33 +73,62 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
     );
   },
 
-  S1: (p) => {
+  // Revenue & spend and Blended ROAS side by side in ONE row (Kanwar,
+  // 2026-07-15), each with a legend marking which line is which metric.
+  S1: (p, currency) => {
     const rows: any[] = p.currentYearRows ?? [];
     const ok = rows.filter((r) => r.status === 'ok');
     const labels = ok.map((r) => r.label?.slice(0, 3) ?? r.month);
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
           <div className="muted text-sm" style={{ marginBottom: 4 }}>Revenue &amp; spend, {p.reportYear}</div>
-          <TrendLineChart labels={labels} series={ok.map((r) => r.revenue)} compareSeries={ok.map((r) => r.spend)} />
+          <TrendLineChart
+            labels={labels}
+            series={ok.map((r) => r.revenue)}
+            compareSeries={ok.map((r) => r.spend)}
+            valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
+            seriesLabel="Revenue"
+            compareLabel="Ad spend"
+          />
         </div>
-        <div>
+        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
           <div className="muted text-sm" style={{ marginBottom: 4 }}>Blended ROAS, {p.reportYear}</div>
-          <TrendLineChart labels={labels} series={ok.map((r) => r.roas)} valueFormatter={(n) => `${n.toFixed(1)}x`} height={120} />
+          <TrendLineChart labels={labels} series={ok.map((r) => r.roas)} valueFormatter={(n) => `${n.toFixed(1)}x`} seriesLabel="Blended ROAS" />
         </div>
       </div>
     );
   },
 
-  S2: (p) => {
+  // Total sales evolution — total revenue at the top, x-axis = days of the
+  // month, y-axis = sales (Kanwar, 2026-07-15). Below it, the MODELED new-vs-
+  // returning sales split (Shopify can't split sales by customer type; see the
+  // backend docblock — this uses v1's new × AOV estimate).
+  S2: (p, currency) => {
     const series: { day: number; revenue: number }[] = p.series ?? [];
     const compare: { day: number; revenue: number }[] | null = p.compareSeries ?? null;
+    // Thin the day labels so a 30-day month doesn't crowd: day 1, then every
+    // 5th, then the last day.
+    const dayLabels = series.map((s, i) =>
+      i === 0 || i === series.length - 1 || s.day % 5 === 0 ? String(s.day) : '',
+    );
     return (
-      <TrendLineChart
-        labels={series.map((s) => String(s.day))}
-        series={series.map((s) => s.revenue)}
-        compareSeries={compare ? compare.map((s) => s.revenue) : null}
-      />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <div className="muted text-sm">Total revenue</div>
+          <div style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.1 }}>{formatMoney(p.total, currency, { whole: true })}</div>
+        </div>
+        <TrendLineChart
+          labels={dayLabels}
+          series={series.map((s) => s.revenue)}
+          compareSeries={compare ? compare.map((s) => s.revenue) : null}
+          valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
+          seriesLabel="This month"
+          compareLabel={compare ? 'Comparison' : undefined}
+          height={200}
+        />
+        {p.customerSalesSplit && <ModeledCustomerSplit split={p.customerSalesSplit} currency={currency} />}
+      </div>
     );
   },
 
@@ -248,6 +265,84 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
 function fmt(v: number | null, currency: string | undefined, suffix: string | undefined): string {
   if (v === null) return '—';
   return suffix ? `${v.toFixed(2)}${suffix}` : formatMoney(v, currency, { whole: true });
+}
+
+/**
+ * Modeled new-vs-returning sales split shown beneath S2's Total sales chart
+ * (Kanwar, 2026-07-15). Amounts at the top, a single proportional split bar
+ * below, and the estimation method spelled out — Shopify can't split sales by
+ * customer type, so this is v1's new × AOV estimate, clearly marked "Modeled".
+ */
+function ModeledCustomerSplit({
+  split,
+  currency,
+}: {
+  split: {
+    method?: string;
+    new: { customers: number; sales: number; pct: number | null };
+    returning: { customers: number; sales: number; pct: number | null };
+  };
+  currency: string;
+}) {
+  const n = split.new;
+  const r = split.returning;
+  const totalSales = Math.max(0, n.sales) + Math.max(0, r.sales);
+  const newWidth = totalSales > 0 ? (Math.max(0, n.sales) / totalSales) * 100 : 50;
+  const NEW = '#1f6f5c';
+  const RET = '#c9a227';
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <div className="muted text-sm">New vs returning customer sales</div>
+        <span className="chip" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.4 }}>Modeled — estimate</span>
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, marginBottom: 8 }}>
+        <SplitAmount label="New customers" color={NEW} sales={n.sales} customers={n.customers} pct={n.pct} currency={currency} />
+        <SplitAmount label="Returning customers" color={RET} sales={r.sales} customers={r.customers} pct={r.pct} currency={currency} />
+      </div>
+
+      <div style={{ display: 'flex', height: 14, borderRadius: 6, overflow: 'hidden', background: '#E7E9F0' }} aria-hidden>
+        <div style={{ width: `${newWidth}%`, background: NEW }} />
+        <div style={{ width: `${100 - newWidth}%`, background: RET }} />
+      </div>
+
+      {split.method && (
+        <div className="muted" style={{ fontSize: 10, marginTop: 6, fontStyle: 'italic' }}>{split.method}</div>
+      )}
+    </div>
+  );
+}
+
+function SplitAmount({
+  label,
+  color,
+  sales,
+  customers,
+  pct,
+  currency,
+}: {
+  label: string;
+  color: string;
+  sales: number;
+  customers: number;
+  pct: number | null;
+  currency: string;
+}) {
+  return (
+    <div style={{ minWidth: 160 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
+        <span className="muted text-sm">{label}</span>
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.2 }}>~{formatMoney(sales, currency, { whole: true })}</div>
+      <div className="muted" style={{ fontSize: 11 }}>
+        {customers.toLocaleString()} {customers === 1 ? 'customer' : 'customers'}
+        {pct != null ? ` · ${pct.toFixed(1)}%` : ''}
+      </div>
+    </div>
+  );
 }
 
 function GoalBar({

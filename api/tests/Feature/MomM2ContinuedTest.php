@@ -92,9 +92,12 @@ class MomM2ContinuedTest extends TestCase
 
         $sections = collect($this->getJson("/api/brands/{$brand->slug}/reports/mom")->assertOk()->json('sections'))->keyBy('key');
 
-        foreach (['S2', 'S3', 'S4', 'S5', 'S6', 'S9', 'S10', 'S11', 'S12'] as $k) {
+        // S3 retired (Kanwar, 2026-07-15) — the new/returning split moved into
+        // S-EX; it no longer appears in the section manifest at all.
+        foreach (['S2', 'S4', 'S5', 'S6', 'S9', 'S10', 'S11', 'S12'] as $k) {
             $this->assertTrue($sections[$k]['ready'], "{$k} should be ready");
         }
+        $this->assertArrayNotHasKey('S3', $sections->all());
     }
 
     public function test_s2_sales_evolution_returns_a_daily_series_summing_to_the_month_total(): void
@@ -112,18 +115,17 @@ class MomM2ContinuedTest extends TestCase
         $this->assertCount(2, $res->json('series'));
     }
 
-    public function test_s3_new_vs_returning_is_an_honest_needs_source_shell(): void
+    public function test_s3_is_retired_and_degrades_honestly_not_a_500(): void
     {
+        // RETIRED (Kanwar, 2026-07-15): the standalone "New vs returning
+        // evolution" section is gone — its split lives in S-EX now. Requesting
+        // the old key must degrade honestly (unregistered → not_built_yet),
+        // never a 404 or 500.
         $this->actingMasterAdmin();
         $brand = $this->makeBrand();
 
-        // UPDATED (end-to-end completion, 2026-07-15): S3 now reads real
-        // new/returning counts via CustomerMix — with no active Shopify
-        // connection it degrades honestly to needs_source (the "connect
-        // Shopify" state), never a fabricated split. A month is passed because
-        // the section guards on a selected month first, like every other.
         $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S3?month={$this->monthStart()->format('Y-m')}")
-            ->assertOk()->assertJsonPath('status', 'needs_source');
+            ->assertOk()->assertJsonPath('status', 'not_built_yet');
     }
 
     public function test_s4_s5_s6_country_and_tier_join_reconciles_and_flags_alarm(): void

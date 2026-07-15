@@ -10,6 +10,8 @@ import { GoalsDrawer } from '@/components/brands/GoalsDrawer';
 import { GoalsSummary } from '@/components/brands/GoalsSummary';
 import { CountryTierDrawer } from '@/components/brands/CountryTierDrawer';
 import { CountryTiersSummary } from '@/components/brands/CountryTiersSummary';
+import { MoodboardCard } from '@/components/brands/MoodboardCard';
+import { CreativeStudioCard } from '@/components/brands/CreativeStudioCard';
 import { ReportFormatSection } from '@/components/brands/ReportFormatSection';
 import { PacingCards } from '@/components/brands/PacingCards';
 import { TruthPanel } from '@/components/brands/TruthPanel';
@@ -1822,6 +1824,16 @@ function SettingsTab({ brand }: { brand: Brand }) {
     {/* M1 + REV2 R2 — report format customizer for this brand's mom report. */}
     <div className="form-grid" style={{ marginTop: 24 }}>
       <ReportFormatSection slug={brand.slug} canEdit={canEditGoals} />
+    </div>
+
+    {/* GO-4.4 (master plan §7.4) — brand moodboard / style. */}
+    <div className="form-grid" style={{ marginTop: 24 }}>
+      <MoodboardCard slug={brand.slug} canEdit={canEditGoals} />
+    </div>
+
+    {/* GO-5.1 (master plan §8) — creative testing engine, text-only. */}
+    <div className="form-grid" style={{ marginTop: 24 }}>
+      <CreativeStudioCard slug={brand.slug} canEdit={canEditGoals} />
     </div>
     </div>
   );

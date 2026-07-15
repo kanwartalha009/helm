@@ -19,7 +19,6 @@ use App\Reports\Mom\Sections\SGenderMixSection;
 use App\Reports\Mom\Sections\SGoalsSection;
 use App\Reports\Mom\Sections\SKlaviyoSection;
 use App\Reports\Mom\Sections\SLandingSpendVsSellersSection;
-use App\Reports\Mom\Sections\SNewVsReturningSection;
 use App\Reports\Mom\Sections\SNextStepsSection;
 use App\Reports\Mom\Sections\SNovedadesSection;
 use App\Reports\Mom\Sections\SPlacementMixSection;
@@ -48,7 +47,9 @@ final class MomSectionRegistry
         'S-GOALS' => SGoalsSection::class,
         // M2 continuation (money + market sections):
         'S2'  => SSalesEvolutionSection::class,
-        'S3'  => SNewVsReturningSection::class, // honest shell — customer_type probe not run
+        // S3 "New vs returning evolution" retired (Kanwar, 2026-07-15) — the
+        // split moved into S-EX's executive-overview tiles (new% + returning%),
+        // so there is no standalone section to resolve.
         'S4'  => STierRevenueSection::class,
         'S5'  => SCountryRevenueSection::class,
         'S6'  => SCountryRoasSection::class,
@@ -80,8 +81,8 @@ final class MomSectionRegistry
      * chips → same backfill-dataset endpoint (dataset mapped per section)."
      * Maps a section key to the `BrandDataCoverageController`/
      * `BackfillBrandDatasetJob` dataset key that would fill its gap — null
-     * for sections whose gap ISN'T a sync gap (S-GOALS/S3 need a target/probe,
-     * not a backfill; S0/S19 are pure editorial content). Read by
+     * for sections whose gap ISN'T a sync gap (S-GOALS needs a target set, not
+     * a backfill; S0/S19 are pure editorial content). Read by
      * `MomSectionController::show()` and attached to a 'needs_source'
      * response so the frontend can render the right CTA without its own copy
      * of this mapping.
