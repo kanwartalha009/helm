@@ -159,6 +159,31 @@ class MomM1Test extends TestCase
         $this->assertSame('S1', $sections[0]['key']);
     }
 
+    public function test_resolve_uses_catalog_labels_even_when_a_saved_layout_dropped_them(): void
+    {
+        // Regression (Kanwar, 2026-07-15 — "on reload headings change to S1/S2"):
+        // the customizer only persists key/enabled/position/view (no label), so a
+        // saved layout stores label==key. resolve() must re-derive the human label
+        // from the code catalog, or every heading reads as its raw key after a save.
+        $brand = $this->makeBrand();
+        $svc   = app(ReportLayouts::class);
+
+        // Simulate exactly what the customizer sends: NO label field at all.
+        $svc->save(null, 'mom', [
+            ['key' => 'S2', 'enabled' => true, 'position' => 0, 'view' => 'chart'],
+            ['key' => 'S1', 'enabled' => true, 'position' => 1, 'view' => 'both'],
+        ], null);
+
+        $sections = $svc->resolve($brand, 'mom');
+        $this->assertSame('S2', $sections[0]['key']);
+        $this->assertSame('Total sales evolution', $sections[0]['label']); // NOT "S2"
+        $this->assertSame('Financial matrix', $sections[1]['label']);      // NOT "S1"
+
+        // Agency-default read path resolves catalog labels too.
+        $agency = $svc->agencyDefaultLayout('mom');
+        $this->assertSame('Total sales evolution', $agency[0]['label']);
+    }
+
     public function test_report_layout_resolve_is_a_pure_value_snapshot_not_a_live_reference(): void
     {
         // The property share-safety depends on: capturing resolve()'s output, then

@@ -43,7 +43,7 @@ class ReportLayouts
 
         usort($sections, static fn (array $a, array $b): int => $a['position'] <=> $b['position']);
 
-        return $sections;
+        return $this->applyCatalogLabels($sections, $reportType);
     }
 
     /** True when this brand has its own saved layout (vs reading the agency default or code default). */
@@ -121,7 +121,37 @@ class ReportLayouts
         $sections = $row !== null ? $this->normalize(is_array($row->sections) ? $row->sections : []) : $this->codeDefault($reportType);
         usort($sections, static fn (array $a, array $b): int => $a['position'] <=> $b['position']);
 
-        return $sections;
+        return $this->applyCatalogLabels($sections, $reportType);
+    }
+
+    /**
+     * Section LABELS are a CODE concern, never user data. The customizer only
+     * ever edits order / enabled / view — ReportLayoutController::validateSections
+     * drops everything else — so a PERSISTED layout carries no real label, and
+     * normalize() backfills the missing label with the KEY. Re-deriving the label
+     * from the code catalog (config/momreport.php) on every read is what keeps a
+     * saved layout showing "Total sales evolution" instead of "S2", AND self-heals
+     * any layout row already stored with label == key (no migration needed).
+     * A key that isn't in the catalog (a future bespoke section) keeps whatever
+     * label it already carries.
+     *
+     * @param array<int, array{key: string, label: string, enabled: bool, position: int, view: string, settings: ?array}> $sections
+     * @return array<int, array{key: string, label: string, enabled: bool, position: int, view: string, settings: ?array}>
+     */
+    private function applyCatalogLabels(array $sections, string $reportType): array
+    {
+        $labels = [];
+        foreach ($this->codeDefault($reportType) as $s) {
+            $labels[$s['key']] = $s['label'];
+        }
+
+        return array_map(static function (array $s) use ($labels): array {
+            if (isset($labels[$s['key']])) {
+                $s['label'] = $labels[$s['key']];
+            }
+
+            return $s;
+        }, $sections);
     }
 
     /**
