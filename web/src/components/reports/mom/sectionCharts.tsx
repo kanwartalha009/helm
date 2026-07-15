@@ -281,11 +281,15 @@ function monthName(ym: string | null | undefined): string | null {
 
 /**
  * Modeled new-vs-returning sales beneath S2's Total sales chart (Kanwar,
- * 2026-07-15). Amounts at the top, then a real GRAPH — two lines (New / Returning)
- * across the DAYS of the month (same x-axis as the sales line) on a shared scale
- * — with the estimation method spelled out. Shopify can't split sales by customer
- * type, so each day's revenue is allocated by the month's modeled new-share
- * (v1's new × AOV basis), clearly marked "Modeled".
+ * 2026-07-15). Amounts at the top, then TWO SEPARATE graphs — one for New,
+ * one for Returning — each across the DAYS of the month (same x-axis as the
+ * sales line) but on its OWN independent y-axis, so the smaller "returning"
+ * series is readable instead of flattening against the larger one on a shared
+ * scale (Kanwar: "make 2 separate graphs so preview will be easy to see
+ * numbers against y-axis"). Both use the app's blue accent for consistency
+ * with the sales / revenue charts. Shopify can't split sales by customer type,
+ * so each day's revenue is allocated by the month's modeled new-share (v1's
+ * new × AOV basis), clearly marked "Modeled".
  */
 function ModeledCustomerSplit({
   split,
@@ -302,8 +306,8 @@ function ModeledCustomerSplit({
 }) {
   const n = split.new;
   const r = split.returning;
-  const NEW = '#1f6f5c';
-  const RET = '#c9a227';
+  const BLUE = '#3B5BFB'; // app accent — same as the sales / revenue charts
+  const hasDaily = daily != null && daily.length > 0;
   // Same day-label thinning as the sales chart above: day 1, every 5th, last.
   const dayLabels = (daily ?? []).map((d, i) =>
     i === 0 || i === (daily?.length ?? 0) - 1 || d.day % 5 === 0 ? String(d.day) : '',
@@ -316,25 +320,34 @@ function ModeledCustomerSplit({
         <span className="chip" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.4 }}>Modeled — estimate</span>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, marginBottom: 10 }}>
-        <SplitAmount label="New customers" color={NEW} sales={n.sales} customers={n.customers} pct={n.pct} currency={currency} />
-        <SplitAmount label="Returning customers" color={RET} sales={r.sales} customers={r.customers} pct={r.pct} currency={currency} />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+        <div style={{ flex: '1 1 45%', minWidth: 280 }}>
+          <SplitAmount label="New customer sales" color={BLUE} sales={n.sales} customers={n.customers} pct={n.pct} currency={currency} />
+          {hasDaily && (
+            <TrendLineChart
+              labels={dayLabels}
+              series={daily!.map((d) => d.new)}
+              valueFormatter={(v) => formatMoney(v, currency, { compact: true })}
+              seriesLabel="New customer sales"
+              seriesColor={BLUE}
+              height={150}
+            />
+          )}
+        </div>
+        <div style={{ flex: '1 1 45%', minWidth: 280 }}>
+          <SplitAmount label="Returning customer sales" color={BLUE} sales={r.sales} customers={r.customers} pct={r.pct} currency={currency} />
+          {hasDaily && (
+            <TrendLineChart
+              labels={dayLabels}
+              series={daily!.map((d) => d.returning)}
+              valueFormatter={(v) => formatMoney(v, currency, { compact: true })}
+              seriesLabel="Returning customer sales"
+              seriesColor={BLUE}
+              height={150}
+            />
+          )}
+        </div>
       </div>
-
-      {daily && daily.length > 0 && (
-        <TrendLineChart
-          labels={dayLabels}
-          series={daily.map((d) => d.new)}
-          compareSeries={daily.map((d) => d.returning)}
-          valueFormatter={(v) => formatMoney(v, currency, { compact: true })}
-          seriesLabel="New customer sales"
-          compareLabel="Returning customer sales"
-          seriesColor={NEW}
-          compareColor={RET}
-          compareDashed={false}
-          height={150}
-        />
-      )}
 
       {split.method && (
         <div className="muted" style={{ fontSize: 10, marginTop: 6, fontStyle: 'italic' }}>{split.method}</div>
