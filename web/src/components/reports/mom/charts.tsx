@@ -9,6 +9,7 @@
  * without pulling Recharts into that bundle. One shared accent palette, plain
  * axes, no chart junk — per R1's own instruction.
  */
+import { useEffect, useRef, useState } from 'react';
 
 const ACCENT = '#3B5BFB';
 const ACCENT_GHOST = '#B7C2FA'; // compare/prior-period series
@@ -92,7 +93,6 @@ export function TrendLineChart({
   seriesColor = ACCENT,
   compareColor = ACCENT_GHOST,
   compareDashed = true,
-  fill = false,
 }: {
   labels: string[];
   series: (number | null)[];
@@ -106,12 +106,25 @@ export function TrendLineChart({
   seriesColor?: string;
   compareColor?: string;
   compareDashed?: boolean;
-  // `fill` makes the SVG stretch to fill its container's width (height scales
-  // proportionally) instead of letterboxing — so a chart in a flex column has
-  // no empty space on the right.
-  fill?: boolean;
 }) {
-  const width = Math.max(280, labels.length * 56);
+  // Responsive: the chart draws at its CONTAINER's pixel width and a FIXED
+  // (compact) pixel height — so the line always spreads to fill the width with
+  // no right-side empty space AND never balloons in height when there are only
+  // a few points (the two failure modes of a fixed viewBox + preserveAspectRatio).
+  const ref = useRef<HTMLDivElement>(null);
+  const [measured, setMeasured] = useState(600);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setMeasured(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const width = Math.max(260, measured);
   const padL = 44;
   const padB = 20;
   const padT = 10;
@@ -143,7 +156,7 @@ export function TrendLineChart({
   const showLegend = !!seriesLabel || !!(compareSeries && compareLabel);
 
   return (
-    <div>
+    <div ref={ref}>
       {showLegend && (
         <div style={{ display: 'flex', gap: 14, marginBottom: 4, fontSize: 11 }} className="muted">
           {seriesLabel && (
@@ -160,15 +173,9 @@ export function TrendLineChart({
           )}
         </div>
       )}
-      {/* Fill: 100% width + auto height (no letterbox). Otherwise fixed height. */}
-      <svg
-        width="100%"
-        height={fill ? undefined : height}
-        style={fill ? { height: 'auto', display: 'block' } : undefined}
-        preserveAspectRatio={fill ? undefined : 'xMinYMid meet'}
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-      >
+      {/* viewBox matches the measured pixel size 1:1 → fills width, fixed
+          compact height, no letterbox and no distortion. */}
+      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }} role="img">
       {gridFracs.map((f, i) => {
         const y = padT + innerH * f;
         return <line key={`g${i}`} x1={padL} y1={y} x2={width} y2={y} stroke={GRID} strokeWidth={1} />;

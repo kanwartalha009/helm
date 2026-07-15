@@ -90,13 +90,12 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
             valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
             seriesLabel="Revenue"
             compareLabel="Ad spend"
-            height={200}
-            fill
+            height={150}
           />
         </div>
         <div style={{ flex: '1 1 45%', minWidth: 280 }}>
           <div className="muted text-sm" style={{ marginBottom: 4 }}>Blended ROAS, {p.reportYear}</div>
-          <TrendLineChart labels={labels} series={ok.map((r) => r.roas)} valueFormatter={(n) => `${n.toFixed(1)}x`} seriesLabel="Blended ROAS" height={200} fill />
+          <TrendLineChart labels={labels} series={ok.map((r) => r.roas)} valueFormatter={(n) => `${n.toFixed(1)}x`} seriesLabel="Blended ROAS" height={150} />
         </div>
       </div>
     );
@@ -127,8 +126,7 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
           valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
           seriesLabel={monthName(p.month) ?? 'This month'}
           compareLabel={compare ? monthName(p.compareMonth) ?? 'Comparison' : undefined}
-          height={200}
-          fill
+          height={170}
         />
         {p.customerSalesSplit && (
           <ModeledCustomerSplit split={p.customerSalesSplit} series={p.customerSalesSeries ?? null} currency={currency} />
@@ -329,8 +327,7 @@ function ModeledCustomerSplit({
           seriesColor={NEW}
           compareColor={RET}
           compareDashed={false}
-          height={170}
-          fill
+          height={150}
         />
       )}
 
