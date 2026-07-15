@@ -47,7 +47,10 @@ final class SGoalsSection implements MomSection
             return [
                 'key'    => $this->key(),
                 'status' => 'no_data',
-                'note'   => 'No goal set for this brand — set one in Settings to see this section.',
+                // M5 addendum (Kanwar, 2026-07-15) — copy updated: the
+                // frontend's SGoalsCard now shows a "Set a goal" button right
+                // here (GoalsDrawer), no longer just a Settings pointer.
+                'note'   => 'No goal set for this brand yet — set one below, or in brand Settings.',
             ];
         }
 

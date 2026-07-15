@@ -1,21 +1,34 @@
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui';
+import { Button, Drawer } from '@/components/ui';
 import { useBrandTargets, useSaveBrandTargets } from '@/hooks/useTargets';
 import { toast } from '@/stores/toastStore';
 
 /**
- * Brand goals (Bosco spec §A.2) — lives in the brand Settings tab, where Bosco asked
- * for it.
+ * M5 addendum (Kanwar, 2026-07-15 — "move goals from settings to sidebar as
+ * well... in report section of goals connect so it will be easier to
+ * manage"). Same slide-over pattern just built for country tiers
+ * (CountryTierDrawer) — SUPERSEDES the old always-rendered GoalsSection.tsx
+ * form on brand Settings (Bosco §A.2's original placement), which is now
+ * retired. Two entry points share this ONE component: a "Manage goals"
+ * button on brand Settings (GoalsSummary), and an "Edit goals" button
+ * directly on the mom report's S-GOALS card (SGoals.tsx) — the report is now
+ * the tighter loop: see the number, open the drawer, fix the target, close.
  *
- * v1 writes the STANDING DEFAULT only (month = null): one goal that applies to every
- * month until someone overrides a specific one. Per-month overrides are already possible
- * in the schema — GO-2 §5.1 will expose them — but shipping a month picker now would ask
- * the operator to re-enter the same number twelve times a year.
- *
- * Empty means unset, not zero: leaving a field blank hides that goal's tracking entirely
- * rather than rendering a 0% bar, which would read as failure rather than absence.
+ * Deliberately much simpler than CountryTierDrawer — goals are 3 scalar
+ * fields (STANDING DEFAULT only, month omitted, same as the original
+ * GoalsSection), not a list of rows needing add/remove/move semantics.
  */
-export function GoalsSection({ slug, canEdit }: { slug?: string; canEdit: boolean }) {
+export function GoalsDrawer({
+  slug,
+  canEdit,
+  open,
+  onClose,
+}: {
+  slug: string | undefined;
+  canEdit: boolean;
+  open: boolean;
+  onClose: () => void;
+}) {
   const { data } = useBrandTargets(slug);
   const save = useSaveBrandTargets(slug);
 
@@ -25,10 +38,11 @@ export function GoalsSection({ slug, canEdit }: { slug?: string; canEdit: boolea
 
   const t = data?.target;
   useEffect(() => {
+    if (!open) return; // re-seed fresh every time the drawer opens, never mid-edit
     setRevenue(t?.revenueTarget != null ? String(t.revenueTarget) : '');
     setRoas(t?.roasTarget != null ? String(t.roasTarget) : '');
     setSpendCap(t?.spendCap != null ? String(t.spendCap) : '');
-  }, [t?.revenueTarget, t?.roasTarget, t?.spendCap]);
+  }, [open, t?.revenueTarget, t?.roasTarget, t?.spendCap]);
 
   const num = (s: string): number | null => (s.trim() === '' ? null : Number(s));
 
@@ -40,26 +54,37 @@ export function GoalsSection({ slug, canEdit }: { slug?: string; canEdit: boolea
     }
 
     save.mutate(
-      // month omitted → the STANDING DEFAULT goal.
+      // month omitted → the STANDING DEFAULT goal, same contract as before.
       { revenue_target: num(revenue), roas_target: r, spend_cap: num(spendCap) },
       {
-        onSuccess: () => toast.success('Goals saved', 'Pacing now shows on the brand overview.'),
+        onSuccess: () => toast.success('Goals saved', 'Pacing and the report’s S-GOALS section pick this up immediately.'),
         onError: () => toast.error('Could not save goals', 'Admins and managers only.'),
       },
     );
   };
 
   return (
-    <>
-      <div className="field" style={{ marginTop: 8 }}>
-        <label className="field-label">Goals</label>
+    <Drawer
+      open={open}
+      onClose={onClose}
+      size="sm"
+      title="Goals"
+      footer={
+        canEdit ? (
+          <Button size="sm" variant="secondary" type="button" disabled={save.isPending} onClick={onSave}>
+            {save.isPending ? 'Saving…' : 'Save goals'}
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="field" style={{ marginBottom: 10 }}>
         <span className="field-hint">
-          Used for pacing on the brand overview and the dashboard. Leave a field empty to hide that goal’s
-          tracking — an empty goal is unset, not zero.
+          Used for pacing on the brand overview, the dashboard, and the mom report's S-GOALS section. Leave a field
+          empty to hide that goal's tracking — an empty goal is unset, not zero.
         </span>
       </div>
 
-      <div className="form-grid form-grid-2">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="field">
           <label className="field-label">Target monthly revenue</label>
           <input
@@ -72,7 +97,7 @@ export function GoalsSection({ slug, canEdit }: { slug?: string; canEdit: boolea
             placeholder="e.g. 30000"
             disabled={!canEdit}
           />
-          <span className="field-hint">In the brand’s own currency.</span>
+          <span className="field-hint">In the brand's own currency.</span>
         </div>
 
         <div className="field">
@@ -104,15 +129,7 @@ export function GoalsSection({ slug, canEdit }: { slug?: string; canEdit: boolea
             disabled={!canEdit}
           />
         </div>
-
-        {canEdit && (
-          <div className="field" style={{ alignSelf: 'end' }}>
-            <Button size="sm" variant="secondary" type="button" disabled={save.isPending} onClick={onSave}>
-              {save.isPending ? 'Saving…' : 'Save goals'}
-            </Button>
-          </div>
-        )}
       </div>
-    </>
+    </Drawer>
   );
 }

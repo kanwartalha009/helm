@@ -98,9 +98,21 @@ class MomM2Test extends TestCase
         $this->assertEquals(110.0, $res->json('tiles.aov.value')); // 1100 / 10 orders
         $this->assertEquals(10, $res->json('tiles.orders.value'));
 
-        // Honest omission — not fabricated, not silently dropped.
-        $this->assertArrayHasKey('mer', $res->json('unavailable'));
+        // UPDATED (end-to-end completion, 2026-07-15): MER is now a real tile
+        // (store revenue ÷ total ad spend = 1100/500 = 2.2, the TruthSpine
+        // spine) — no longer an "unavailable" placeholder.
+        $this->assertEquals(2.2, $res->json('tiles.mer.value'));
+
+        // Still honestly unavailable on THIS fixture (no Shopify connection →
+        // no live customer split; no funnel rows → no sessions), never faked.
         $this->assertArrayHasKey('cac', $res->json('unavailable'));
+        $this->assertArrayHasKey('newVsReturningPct', $res->json('unavailable'));
+        $this->assertArrayHasKey('sessions', $res->json('unavailable'));
+
+        // Email is OMITTED entirely (not connected → not in tiles OR
+        // unavailable) — Kanwar's "if Klaviyo not connected, don't show".
+        $this->assertNull($res->json('tiles.emailRevenue'));
+        $this->assertArrayNotHasKey('emailRevenue', $res->json('unavailable'));
     }
 
     public function test_sgoals_section_renders_only_when_a_target_is_set(): void

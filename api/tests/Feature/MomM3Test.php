@@ -146,7 +146,14 @@ class MomM3Test extends TestCase
         $month = $this->monthStart();
 
         Sanctum::actingAs($user);
-        // No Klaviyo rows at all -> honest "Connect Klaviyo" state, not a 0 block.
+        // UPDATED (end-to-end completion, 2026-07-15): with NO Klaviyo key
+        // configured, S18 is HIDDEN entirely (Kanwar: "if klaviyo not
+        // connected don't show") — not a Connect-Klaviyo placeholder.
+        $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S18?month={$month->format('Y-m')}")
+            ->assertOk()->assertJsonPath('status', 'hidden')->assertJsonPath('hidden', true);
+
+        // Connect Klaviyo (a private key exists) but no data yet -> needs_source.
+        app(\App\Services\PlatformCredentialService::class)->set('klaviyo', 'private_key', 'pk_test', brandId: (int) $brand->id);
         $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S18?month={$month->format('Y-m')}")
             ->assertOk()->assertJsonPath('status', 'needs_source');
 

@@ -9,6 +9,7 @@ use App\Models\DailyMetric;
 use App\Models\EmailDailyMetric;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
+use App\Services\PlatformCredentialService;
 use Carbon\CarbonImmutable;
 
 /**
@@ -33,12 +34,24 @@ use Carbon\CarbonImmutable;
  * genuinely IS unbuilt: no subscriber-count sync exists anywhere in this
  * codebase (only attributed-revenue rows) — logged unavailable, not faked.
  *
- * A brand with no Klaviyo key configured still gets the honest
- * 'needs_source' "Connect Klaviyo" state the spec asked for — that part of
- * the spec's intent is preserved, just not as this section's ONLY state.
+ * M5 end-to-end completion (Kanwar, 2026-07-15 — "if klaviyo not connected
+ * don't show"): a brand with NO Klaviyo private key configured now returns a
+ * `hidden` status so the section renders NOTHING (the frontend MomSectionCard
+ * drops it, and the public/share view already hides any non-'ok' section).
+ * The three states are now:
+ *   - no Klaviyo credential   → hidden  (don't show — Kanwar's rule)
+ *   - connected, no data yet  → needs_source ("run klaviyo:backfill")
+ *   - connected, has data     → ok
+ * This supersedes the old "always render a Connect-Klaviyo placeholder" state:
+ * an un-connected brand shouldn't carry an email section a client would ask
+ * about, and there's nothing to backfill until the key exists.
  */
 final class SKlaviyoSection implements MomSection
 {
+    public function __construct(private readonly PlatformCredentialService $credentials)
+    {
+    }
+
     public function key(): string
     {
         return 'S18';
@@ -46,6 +59,11 @@ final class SKlaviyoSection implements MomSection
 
     public function build(Brand $brand, ReportFilters $filters): array
     {
+        // Kanwar: hide entirely when Klaviyo isn't connected for this brand.
+        if (! $this->credentials->has('klaviyo', 'private_key', (int) $brand->id)) {
+            return ['key' => $this->key(), 'status' => 'hidden', 'hidden' => true];
+        }
+
         $tz = $brand->timezone ?: 'UTC';
         $window = $filters->monthWindow($tz);
         if ($window === null) {

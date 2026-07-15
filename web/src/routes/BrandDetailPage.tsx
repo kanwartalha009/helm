@@ -6,7 +6,8 @@ import { AnomalyStrip } from '@/components/brands/AnomalyStrip';
 import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { DataQualityCard } from '@/components/brands/DataQualityCard';
 import { KlaviyoKeyCard } from '@/components/brands/KlaviyoKeyCard';
-import { GoalsSection } from '@/components/brands/GoalsSection';
+import { GoalsDrawer } from '@/components/brands/GoalsDrawer';
+import { GoalsSummary } from '@/components/brands/GoalsSummary';
 import { CountryTierDrawer } from '@/components/brands/CountryTierDrawer';
 import { CountryTiersSummary } from '@/components/brands/CountryTiersSummary';
 import { ReportFormatSection } from '@/components/brands/ReportFormatSection';
@@ -1627,6 +1628,8 @@ function SettingsTab({ brand }: { brand: Brand }) {
   // M5 addendum (Kanwar, 2026-07-15) — the tier sidebar, opened from this
   // brand-level button (the report page has its own trigger, same drawer).
   const [tierDrawerOpen, setTierDrawerOpen] = useState(false);
+  // Same move for goals — the report's S-GOALS card opens this same drawer too.
+  const [goalsDrawerOpen, setGoalsDrawerOpen] = useState(false);
 
   const dirty =
     name !== brand.name ||
@@ -1795,8 +1798,9 @@ function SettingsTab({ brand }: { brand: Brand }) {
         endpoint, and the ui Button has no default type, so a nested save button would
         submit the brand form instead. Admin/manager only, matching BrandPolicy::update. */}
     <div className="form-grid" style={{ marginTop: 24 }}>
-      <GoalsSection slug={brand.slug} canEdit={canEditGoals} />
+      <GoalsSummary slug={brand.slug} currency={brand.baseCurrency} onManage={() => setGoalsDrawerOpen(true)} />
     </div>
+    <GoalsDrawer slug={brand.slug} canEdit={canEditGoals} open={goalsDrawerOpen} onClose={() => setGoalsDrawerOpen(false)} />
 
     {/* M5 addendum (Kanwar, 2026-07-15) — country tiers moved into the slide-
         over sidebar (CountryTierDrawer): this SUPERSEDES M1's "PRIMARY UI =

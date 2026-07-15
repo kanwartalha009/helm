@@ -8,6 +8,7 @@ import { SECTION_TABLE_RENDERERS } from './sectionTables';
 import { GenericKeyValue, GenericTable } from './GenericTable';
 import { SNextStepsCard } from './SNextSteps';
 import { SNovedadesCard } from './SNovedades';
+import { SGoalsCard } from './SGoals';
 
 // M5 addendum (Kanwar, 2026-07-15) — S1's own trailing-window control (last
 // 3/4/6/12 months vs the same months last year). Lives here, not on the
@@ -56,6 +57,9 @@ export function MomSectionCard({
   // don't go through useMomSection/SECTION_CHART_RENDERERS at all.
   if (section.key === 'S0') return <SNextStepsCard slug={slug} filters={filters} label={section.label} />;
   if (section.key === 'S19') return <SNovedadesCard slug={slug} filters={filters} label={section.label} />;
+  // M5 addendum (Kanwar, 2026-07-15) — S-GOALS gets its own "Edit goals"
+  // button wired to GoalsDrawer, the tightest management loop for the report.
+  if (section.key === 'S-GOALS') return <SGoalsCard slug={slug} filters={filters} label={section.label} currency={currency} />;
 
   return <MetricSectionCard slug={slug} section={section} filters={filters} currency={currency} />;
 }
@@ -86,6 +90,11 @@ function MetricSectionCard({
       </Card>
     );
   }
+
+  // M5 (Kanwar, 2026-07-15) — a section that reports `hidden` renders NOTHING
+  // (e.g. S18 Klaviyo when the brand has no Klaviyo connected). Distinct from
+  // an honest non-'ok' status, which still shows its note/backfill affordance.
+  if (data && (data as any).hidden === true) return null;
 
   return (
     <Card style={{ padding: 18 }}>

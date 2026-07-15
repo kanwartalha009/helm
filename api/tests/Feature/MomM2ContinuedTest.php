@@ -117,7 +117,12 @@ class MomM2ContinuedTest extends TestCase
         $this->actingMasterAdmin();
         $brand = $this->makeBrand();
 
-        $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S3")
+        // UPDATED (end-to-end completion, 2026-07-15): S3 now reads real
+        // new/returning counts via CustomerMix — with no active Shopify
+        // connection it degrades honestly to needs_source (the "connect
+        // Shopify" state), never a fabricated split. A month is passed because
+        // the section guards on a selected month first, like every other.
+        $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S3?month={$this->monthStart()->format('Y-m')}")
             ->assertOk()->assertJsonPath('status', 'needs_source');
     }
 

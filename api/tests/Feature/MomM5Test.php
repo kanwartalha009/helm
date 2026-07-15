@@ -121,7 +121,12 @@ final class MomM5Test extends TestCase
         $this->actingMasterAdmin();
         $brand = $this->makeBrand();
 
-        // S18 (Klaviyo) reads email_daily_metrics; nothing seeded → needs_source.
+        // S18 (Klaviyo) reads email_daily_metrics. UPDATED (end-to-end
+        // completion, 2026-07-15): S18 only reaches needs_source (and carries
+        // the backfill hint) when Klaviyo IS connected but unsynced — an
+        // unconnected brand is hidden instead. Connect a key, then nothing
+        // seeded → needs_source + 'email' hint.
+        app(\App\Services\PlatformCredentialService::class)->set('klaviyo', 'private_key', 'pk_test', brandId: (int) $brand->id);
         $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S18?month={$this->monthStart()->format('Y-m')}")
             ->assertOk();
         $this->assertSame('needs_source', $res->json('status'));

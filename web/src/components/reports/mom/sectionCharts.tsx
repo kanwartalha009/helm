@@ -18,19 +18,55 @@ import { StatTile, UnavailableTile } from './StatTile';
  * with no real data to chart yet).
  */
 export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: string) => ReactNode> = {
+  // REV2 R4 — the full executive stat-tile grid. Every tile the backend
+  // supplies renders in spec order; a tile the backend marks `unavailable`
+  // renders greyed with its reason; a tile it omits entirely (e.g. email when
+  // Klaviyo isn't connected — Kanwar 2026-07-15) simply doesn't appear.
+  // Data-driven off the payload's own `format`, so new tiles need no frontend
+  // change beyond this order list.
   'S-EX': (p, currency) => {
     const tiles: Record<string, any> = p.tiles ?? {};
     const unavailable: Record<string, string> = p.unavailable ?? {};
+    const ORDER: { key: string; label: string }[] = [
+      { key: 'revenue', label: 'Revenue' },
+      { key: 'adSpend', label: 'Ad spend' },
+      { key: 'mer', label: 'MER' },
+      { key: 'blendedRoas', label: 'Blended ROAS' },
+      { key: 'aov', label: 'AOV' },
+      { key: 'orders', label: 'Orders' },
+      { key: 'newVsReturningPct', label: 'New customers %' },
+      { key: 'cac', label: 'CAC' },
+      { key: 'conversionRate', label: 'Conversion rate' },
+      { key: 'sessions', label: 'Sessions' },
+      { key: 'emailRevenue', label: 'Email revenue' },
+    ];
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-        <StatTile label="Revenue" tile={{ ...tiles.revenue, format: 'money' }} currency={currency} />
-        <StatTile label="Ad spend" tile={{ ...tiles.adSpend, format: 'money' }} currency={currency} />
-        <StatTile label="Blended ROAS" tile={{ ...tiles.blendedRoas, format: 'ratio' }} />
-        <StatTile label="AOV" tile={{ ...tiles.aov, format: 'money' }} currency={currency} />
-        <StatTile label="Orders" tile={{ ...tiles.orders, format: 'count' }} />
-        {Object.entries(unavailable).map(([k, reason]) => (
-          <UnavailableTile key={k} label={k} reason={reason as string} />
-        ))}
+        {ORDER.map(({ key, label }) => {
+          if (tiles[key]) return <StatTile key={key} label={label} tile={tiles[key]} currency={currency} />;
+          if (unavailable[key]) return <UnavailableTile key={key} label={label} reason={unavailable[key]} />;
+          return null;
+        })}
+      </div>
+    );
+  },
+
+  // S3 — new vs returning CUSTOMER COUNTS (Shopify can't split revenue by
+  // customer type; see the section's own docblock). Counts + new-share donut.
+  S3: (p) => {
+    if (p.new == null && p.returning == null) return null;
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+        <StatTile label="New customers" tile={{ value: p.new ?? null, format: 'count' }} />
+        <StatTile label="Returning customers" tile={{ value: p.returning ?? null, format: 'count' }} />
+        <StatTile label="New %" tile={{ value: p.newPct?.value ?? null, deltaPct: p.newPct?.deltaPct ?? null, format: 'pct' }} />
+        <StatTile label="Returning %" tile={{ value: p.retPct?.value ?? null, deltaPct: p.retPct?.deltaPct ?? null, format: 'pct' }} />
+        <DonutChart
+          rows={[
+            { label: 'New', value: Number(p.new ?? 0), color: '#1f6f5c' },
+            { label: 'Returning', value: Number(p.returning ?? 0), color: '#c9a227' },
+          ]}
+        />
       </div>
     );
   },
