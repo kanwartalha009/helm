@@ -6,7 +6,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Brand;
+use App\Reports\Mom\Support\CountryRevenueSpend;
 use App\Services\CountryTiers;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -20,6 +22,15 @@ use Illuminate\Support\Facades\Auth;
  *                                              without its own override reads from
  *                                              (Settings -> General, master_admin only,
  *                                              same gate as workspace-settings).
+ *  - availableCountries()                    — M5 addendum (Kanwar, 2026-07-15 — "tier
+ *                                              sidebar... show list of countries against
+ *                                              the brand to group them"). This explicitly
+ *                                              SUPERSEDES the "PRIMARY UI = brand Settings"
+ *                                              framing above: the sidebar becomes the real
+ *                                              editing surface (brand-level button AND a
+ *                                              button on the mom report itself), Settings
+ *                                              keeps working unmodified as a second entry
+ *                                              point onto the exact same CRUD routes below.
  *
  * Reading is brand-visible (any accessible-brand viewer sees which tier a country is
  * in); writing shapes what the mom report groups countries into for a client meeting,
@@ -29,6 +40,76 @@ class CountryTierController extends Controller
 {
     public function __construct(private readonly CountryTiers $tiers)
     {
+    }
+
+    /**
+     * The brand's ACTUAL countries — real Shopify-revenue/Meta-spend rows over
+     * a trailing 6-full-month window (`CountryRevenueSpend`, the SAME join S5/
+     * S6 use — never a second country list), so the sidebar shows countries
+     * this brand really sells/advertises into rather than a free-text field a
+     * user has to type ISO-2 codes into blind.
+     *
+     * Unioned with any ISO-2 already sitting in one of this brand's resolved
+     * tiers (`CountryTiers::resolve()`) even if that country has zero revenue
+     * in the trailing window — an existing assignment must never silently
+     * disappear from the picker just because the window rolled past it. Those
+     * revenue-less entries carry `revenue: null`/`spend: null` (honest
+     * "no recent data", never a fabricated 0) and sort after the real rows.
+     */
+    public function availableCountries(Brand $brand): JsonResponse
+    {
+        $this->authorize('view', $brand);
+
+        $tz  = $brand->timezone ?: 'UTC';
+        $end = CarbonImmutable::now($tz)->startOfMonth()->subDay()->endOfDay(); // last complete month end
+        $start = $end->startOfMonth()->subMonths(5)->startOfMonth(); // 6 full months back, inclusive
+
+        $joiner = new CountryRevenueSpend();
+        $rows   = $joiner->compute($brand->id, $start->toDateString(), $end->toDateString());
+
+        $resolved = $this->tiers->resolve($brand);
+
+        $out = [];
+        foreach ($rows as $key => $row) {
+            if ($row['iso2'] === '') {
+                continue; // '__unmatched_*' commerce rows — can't be assigned a tier without a resolvable ISO-2
+            }
+            $out[$row['iso2']] = [
+                'iso2'    => $row['iso2'],
+                'label'   => $row['label'],
+                'revenue' => $row['revenue'],
+                'spend'   => $row['spend'],
+                'tierKey' => $resolved[$row['iso2']]['tierKey'] ?? null,
+            ];
+        }
+
+        // Union in already-assigned countries this window's revenue/spend join
+        // didn't surface (e.g. a market the brand exited, or a manually-typed
+        // ISO-2 from before this sidebar existed) — honest null figures, not 0.
+        foreach ($resolved as $iso2 => $tier) {
+            if (! isset($out[$iso2])) {
+                $out[$iso2] = ['iso2' => $iso2, 'label' => $iso2, 'revenue' => null, 'spend' => null, 'tierKey' => $tier['tierKey']];
+            }
+        }
+
+        $list = array_values($out);
+        usort($list, static function (array $a, array $b): int {
+            // Real revenue rows first (highest revenue first), then the
+            // revenue-less unioned-in rows alphabetically by ISO-2.
+            if ($a['revenue'] === null && $b['revenue'] === null) {
+                return $a['iso2'] <=> $b['iso2'];
+            }
+            if ($a['revenue'] === null) {
+                return 1;
+            }
+            if ($b['revenue'] === null) {
+                return -1;
+            }
+
+            return $b['revenue'] <=> $a['revenue'];
+        });
+
+        return response()->json(['countries' => $list, 'windowMonths' => 6]);
     }
 
     public function show(Brand $brand): JsonResponse

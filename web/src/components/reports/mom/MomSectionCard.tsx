@@ -172,7 +172,10 @@ function statusNote(data: { status: string }): string {
   }
 }
 
-function SectionBody({
+// Exported so PublicMomSectionCard (the share-link view, M5 addendum) can
+// reuse the exact same chart/table twin lookup for a section — one render
+// path, not a second copy that could quietly drift from this one.
+export function SectionBody({
   payload,
   sectionKey,
   view,

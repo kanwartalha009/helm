@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { toast } from '@/stores/toastStore';
 
 /**
  * M2 (monthly-report-v2-mom.md §M2) + REV2 R3 — the frontend half of the
@@ -38,7 +39,10 @@ export interface MomReportShell {
   freshness: { upToDate: boolean; lastSynced: string | null; staleDays: number; windowEnd: string; note?: string };
 }
 
-function toQuery(filters: MomFiltersInput): Record<string, string> {
+// Exported so the Share button (MomReportDocument, M5 addendum) can send the
+// exact same filter shape into POST .../reports/mom/shares that every
+// section fetch already uses — one place computes this, never two.
+export function toQuery(filters: MomFiltersInput): Record<string, string> {
   const q: Record<string, string> = { compare: filters.compare };
   if (filters.month) q.month = filters.month;
   if (filters.compareMonth) q.compare_month = filters.compareMonth;
@@ -131,6 +135,66 @@ export function useSaveMomNextSteps(slug: string | undefined) {
       return data;
     },
     onSuccess: () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === 'mom-section' && q.queryKey[2] === 'S0' }),
+  });
+}
+
+/**
+ * M5 addendum (Kanwar, 2026-07-15 — public share links) — mom's own share
+ * flow, mirroring useReports.ts's useCreateShare/usePublicReport but against
+ * MomShareController's dedicated routes (mom's section-streamed shape has no
+ * equivalent of v1's single-payload ReportRegistry->build(), see that
+ * controller's docblock). `usePublicMomShell` + `usePublicMomSection` are
+ * called the same "one shell fetch + one fetch per section" way the
+ * authenticated useMomReport/useMomSection pair works — just against the
+ * token-gated public routes, no Sanctum auth.
+ */
+export function useCreateMomShare(slug: string | undefined) {
+  return useMutation({
+    mutationFn: async (payload: { filters: Record<string, string>; expiresInDays?: number }) => {
+      const { data } = await api.post<{ token: string; url: string }>(`/brands/${slug}/reports/mom/shares`, payload);
+      return data;
+    },
+    onError: (err: any) => {
+      toast.error('Couldn’t create share link', err?.response?.data?.message ?? err?.message ?? 'Unknown error');
+    },
+  });
+}
+
+export interface PublicMomShell {
+  reportType: 'mom';
+  brand: { name: string; slug: string; baseCurrency: string };
+  currency: string;
+  month: { label: string; start: string; end: string };
+  sections: MomSectionManifestEntry[];
+  // Per-agency white-label theme (MomShareController::branding(), same source
+  // v1's public report payload carries) — used by MomPublicReportPage's
+  // PresentationMode title slide instead of useAuth() since this route has
+  // no authenticated session.
+  branding: { agency_name: string; accent: string; footer_text: string };
+  shared: true;
+}
+
+export function usePublicMomShell(token: string | undefined) {
+  return useQuery({
+    queryKey: ['public-mom-shell', token],
+    enabled: !!token,
+    retry: false,
+    queryFn: async (): Promise<PublicMomShell> => {
+      const { data } = await api.get<PublicMomShell>(`/mom/r/${token}`);
+      return data;
+    },
+  });
+}
+
+export function usePublicMomSection<T = Record<string, unknown>>(token: string | undefined, key: string) {
+  return useQuery({
+    queryKey: ['public-mom-section', token, key],
+    enabled: !!token,
+    retry: false,
+    queryFn: async (): Promise<T & { key: string; status: string }> => {
+      const { data } = await api.get(`/mom/r/${token}/sections/${key}`);
+      return data;
+    },
   });
 }
 

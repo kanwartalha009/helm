@@ -28,6 +28,7 @@ import { ReportsPage } from '@/routes/ReportsPage';
 import { ReportViewPage } from '@/routes/ReportViewPage';
 import { MomReportPage } from '@/routes/MomReportPage';
 import { PublicReportPage } from '@/routes/PublicReportPage';
+import { MomPublicReportPage } from '@/routes/MomPublicReportPage';
 import { InventoryPage } from '@/routes/InventoryPage';
 import { AdsPage } from '@/routes/AdsPage';
 import { ProductsPage } from '@/routes/ProductsPage';
@@ -96,6 +97,12 @@ export function App() {
 
           {/* Public shared report — token-gated, no auth (a client opens the link Bosco sent) */}
           <Route path="/r/:token" element={<PublicReportPage />} />
+
+          {/* M5 addendum (Kanwar, 2026-07-15) — mom's own public share link,
+              a distinct route from /r/:token since mom's section-streamed
+              shell/section split has no equivalent in v1's payload shape
+              (see MomShareController's docblock). */}
+          <Route path="/mom/r/:token" element={<MomPublicReportPage />} />
 
           {/* Onboarding — gated separately because the gate redirects to/from it */}
           <Route

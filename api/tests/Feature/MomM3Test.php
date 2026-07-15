@@ -19,9 +19,12 @@ use Tests\TestCase;
  * built with REAL data this pass, correcting the spec's stale "GO-1 pending"
  * premise; GO-1 shipped 2026-07-12, before this session).
  *
- * S16/S17 are NOT tested here — they're deliberately unregistered (real schema
- * gaps, see MomSectionRegistry's docblock), covered by MomM2Test's existing
- * "unregistered key degrades honestly" assertion pattern generically.
+ * CORRECTED (M5 S1/HeatTable pass, 2026-07-15) — this test's own
+ * "should not be ready" assertion for S16/S17 had gone stale: S17 was
+ * unblocked in the M2/M3 final slice (well before this correction), and S16
+ * is unblocked as of this pass (see SAwarenessCountrySection + the objective
+ * column). Both are registered and ready now — see MomS16Test.php for S16's
+ * own build-logic coverage.
  */
 class MomM3Test extends TestCase
 {
@@ -66,11 +69,8 @@ class MomM3Test extends TestCase
         Sanctum::actingAs($user);
         $sections = collect($this->getJson("/api/brands/{$brand->slug}/reports/mom")->assertOk()->json('sections'))->keyBy('key');
 
-        foreach (['S13', 'S14', 'S15', 'S18'] as $k) {
+        foreach (['S13', 'S14', 'S15', 'S16', 'S17', 'S18'] as $k) {
             $this->assertTrue($sections[$k]['ready'], "{$k} should be ready");
-        }
-        foreach (['S16', 'S17'] as $k) {
-            $this->assertFalse($sections[$k]['ready'], "{$k} should not be ready — real schema gap");
         }
     }
 

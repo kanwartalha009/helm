@@ -79,8 +79,13 @@ class MomM2ContinuedTest extends TestCase
         ], $cols));
     }
 
-    public function test_shell_reports_the_nine_new_sections_ready_and_s1_still_not(): void
+    public function test_shell_reports_the_nine_new_sections_ready(): void
     {
+        // CORRECTED (M5 S1/HeatTable pass, 2026-07-15): this test originally
+        // also asserted S1 was NOT ready, a snapshot of the registry at the
+        // time this test was written — S1 has been built (and colour-coded)
+        // for several passes now. See MomM2FinalSectionsTest for S1's own
+        // build-logic coverage.
         $this->actingMasterAdmin();
         $brand = $this->makeBrand();
         $this->seedShopifyDaily($brand->id, $this->monthStart()->addDays(2)->toDateString(), 100);
@@ -90,7 +95,6 @@ class MomM2ContinuedTest extends TestCase
         foreach (['S2', 'S3', 'S4', 'S5', 'S6', 'S9', 'S10', 'S11', 'S12'] as $k) {
             $this->assertTrue($sections[$k]['ready'], "{$k} should be ready");
         }
-        $this->assertFalse($sections['S1']['ready'], 'S1 should not be ready yet');
     }
 
     public function test_s2_sales_evolution_returns_a_daily_series_summing_to_the_month_total(): void
@@ -131,8 +135,15 @@ class MomM2ContinuedTest extends TestCase
         $this->seedCommerceCountry($brand->id, $date, 'Germany', 3000, 20);
         $this->seedMetaCountrySpend($brand->id, $date, 'DE', 500);
 
+        // CORRECTED (M5 S1/HeatTable pass, 2026-07-15): a brand-scoped override
+        // row, not an agency-default (brand_id null) row — the seed migration
+        // (2026_07_14_000003_seed_agency_default_country_tiers) already inserts
+        // an agency-default T1, so inserting a second brand_id=null/tier_key=T1
+        // row here was a unique-constraint collision (pre-existing, unrelated to
+        // this pass, just found while re-running the suite). A brand override
+        // exercises the exact same resolution path this section reads.
         DB::table('country_tiers')->insert([
-            'brand_id' => null, 'tier_key' => 'T1', 'label' => 'Tier 1', 'color' => '#111111',
+            'brand_id' => $brand->id, 'tier_key' => 'T1', 'label' => 'Tier 1', 'color' => '#111111',
             'countries' => json_encode(['ES', 'DE']), 'position' => 0, 'created_at' => now(), 'updated_at' => now(),
         ]);
 

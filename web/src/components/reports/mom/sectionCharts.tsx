@@ -188,6 +188,25 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
       valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
     />
   ),
+
+  // M5 addendum — S16 unblocked this pass (see MomSectionRegistry); donut of
+  // awareness spend by country, matching R1's "S13-S16 -> donut/stacked bars".
+  S16: (p, currency) => (
+    <RankedBarChart
+      rows={(p.rows ?? []).slice(0, 10).map((r: any) => ({ label: r.label, value: r.spend }))}
+      valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
+    />
+  ),
+
+  // M5 addendum — S18 Klaviyo attribution: flow vs campaign split.
+  S18: (p) => (
+    <DonutChart
+      rows={[
+        { label: 'Flow', value: p.splits?.flow?.revenue ?? 0, color: '#3B5BFB' },
+        { label: 'Campaign', value: p.splits?.campaign?.revenue ?? 0, color: '#F59E0B' },
+      ]}
+    />
+  ),
 };
 
 function fmt(v: number | null, currency: string | undefined, suffix: string | undefined): string {

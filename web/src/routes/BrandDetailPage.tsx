@@ -7,7 +7,8 @@ import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
 import { DataQualityCard } from '@/components/brands/DataQualityCard';
 import { KlaviyoKeyCard } from '@/components/brands/KlaviyoKeyCard';
 import { GoalsSection } from '@/components/brands/GoalsSection';
-import { CountryTiersSection } from '@/components/brands/CountryTiersSection';
+import { CountryTierDrawer } from '@/components/brands/CountryTierDrawer';
+import { CountryTiersSummary } from '@/components/brands/CountryTiersSummary';
 import { ReportFormatSection } from '@/components/brands/ReportFormatSection';
 import { PacingCards } from '@/components/brands/PacingCards';
 import { TruthPanel } from '@/components/brands/TruthPanel';
@@ -1623,6 +1624,9 @@ function SettingsTab({ brand }: { brand: Brand }) {
   const updateBrand = useUpdateBrand();
   const { data: settingsUser } = useCurrentUser();
   const canEditGoals = settingsUser?.role === 'master_admin' || settingsUser?.role === 'manager';
+  // M5 addendum (Kanwar, 2026-07-15) — the tier sidebar, opened from this
+  // brand-level button (the report page has its own trigger, same drawer).
+  const [tierDrawerOpen, setTierDrawerOpen] = useState(false);
 
   const dirty =
     name !== brand.name ||
@@ -1794,11 +1798,22 @@ function SettingsTab({ brand }: { brand: Brand }) {
       <GoalsSection slug={brand.slug} canEdit={canEditGoals} />
     </div>
 
-    {/* M1 (monthly-report-v2-mom.md §M1) — country tiers, PRIMARY UI = brand
-        Settings. Same "outside the form" reasoning as GoalsSection above. */}
+    {/* M5 addendum (Kanwar, 2026-07-15) — country tiers moved into the slide-
+        over sidebar (CountryTierDrawer): this SUPERSEDES M1's "PRIMARY UI =
+        brand Settings" decision (still noted for the record in
+        CountryTierController.php's docblock). Settings now shows a compact
+        read-only summary + a "Manage tiers" button, same "outside the form"
+        reasoning as GoalsSection above. */}
     <div className="form-grid" style={{ marginTop: 24 }}>
-      <CountryTiersSection slug={brand.slug} canEdit={canEditGoals} />
+      <CountryTiersSummary slug={brand.slug} onManage={() => setTierDrawerOpen(true)} />
     </div>
+    <CountryTierDrawer
+      slug={brand.slug}
+      canEdit={canEditGoals}
+      open={tierDrawerOpen}
+      onClose={() => setTierDrawerOpen(false)}
+      currency={brand.baseCurrency}
+    />
 
     {/* M1 + REV2 R2 — report format customizer for this brand's mom report. */}
     <div className="form-grid" style={{ marginTop: 24 }}>

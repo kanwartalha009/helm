@@ -11,6 +11,7 @@ use App\Models\PlatformConnection;
 use App\Platforms\Google\ReportsFetcher;
 use App\Platforms\Meta\AdProductFetcher;
 use App\Platforms\Meta\InsightsFetcher;
+use App\Platforms\Meta\MetaObjectives;
 use App\Platforms\TikTok\ReportsFetcher as TikTokReportsFetcher;
 use App\Services\Currency\FxService;
 use Carbon\CarbonImmutable;
@@ -90,6 +91,9 @@ class CampaignSync
                 // their rows keep null (missing, not zero).
                 'status'           => isset($r['status']) ? mb_substr((string) $r['status'], 0, 16) : null,
                 'channel_type'     => isset($r['channel_type']) ? mb_substr((string) $r['channel_type'], 0, 32) : null,
+                // mom S16 — Meta-only (see MetaObjectives); Google/TikTok fetchers
+                // never emit this key, so their rows keep null, never a guess.
+                'objective'        => isset($r['objective']) ? mb_substr((string) $r['objective'], 0, 64) : null,
                 'spend'            => (float) ($r['spend'] ?? 0),
                 'impressions'      => (int) ($r['impressions'] ?? 0),
                 'clicks'           => (int) ($r['clicks'] ?? 0),
@@ -110,11 +114,56 @@ class CampaignSync
             AdCampaignDailyMetric::upsert(
                 $chunk,
                 ['brand_id', 'platform', 'date', 'campaign_id'],
-                ['campaign_name', 'status', 'channel_type', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'all_conversions', 'view_through_conversions', 'search_impression_share', 'search_budget_lost_is', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
+                ['campaign_name', 'status', 'channel_type', 'objective', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value', 'all_conversions', 'view_through_conversions', 'search_impression_share', 'search_budget_lost_is', 'currency', 'fx_rate_to_usd', 'is_complete', 'pulled_at'],
             );
         }
 
         return count($records);
+    }
+
+    /**
+     * mom S16 (monthly-report-v2-mom.md §M3) — country spend WITHIN this
+     * brand's awareness-objective Meta campaigns for one day. Reads the
+     * campaign IDs from ad_campaign_daily_metrics (already written by
+     * syncDay(), which must run first — see the docblock on the objective
+     * column's migration), not from a fresh API call, so this never fetches
+     * anything Meta hasn't already told us about the campaign's objective.
+     * Zero awareness campaigns that day is a normal, silent no-op — not every
+     * brand runs awareness spend every day. Best-effort, mirrors
+     * syncMetaBreakdown exactly: a failure is logged and swallowed so it can
+     * never fail the day's main sync.
+     */
+    public function syncMetaAwarenessCountry(PlatformConnection $conn, CarbonImmutable $date): int
+    {
+        if ($conn->platform !== 'meta') {
+            return 0;
+        }
+
+        $campaignIds = AdCampaignDailyMetric::query()
+            ->where('brand_id', $conn->brand_id)
+            ->where('platform', 'meta')
+            ->where('date', $date->toDateString())
+            ->whereIn('objective', MetaObjectives::awarenessValues())
+            ->pluck('campaign_id')
+            ->all();
+
+        if ($campaignIds === []) {
+            return 0;
+        }
+
+        try {
+            $rows = $this->meta->fetchCampaignsCountryBreakdown($conn, $campaignIds, $date, $date);
+        } catch (Throwable $e) {
+            Log::warning('sync.meta_awareness_country.failed', [
+                'brand_id' => $conn->brand_id,
+                'date'     => $date->toDateString(),
+                'error'    => $e->getMessage(),
+            ]);
+
+            return 0;
+        }
+
+        return $this->storeBreakdown($conn, 'meta', $date, 'awareness_country', $rows);
     }
 
     /**

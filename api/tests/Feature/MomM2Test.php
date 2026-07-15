@@ -63,8 +63,6 @@ class MomM2Test extends TestCase
         $this->assertSame('S-EX', $res->json('sections.0.key'));
         $this->assertTrue($sections['S-EX']['ready']);
         $this->assertTrue($sections['S-GOALS']['ready']);
-        // A section in the catalog this pass didn't build reads honestly as not-ready.
-        $this->assertFalse($sections['S1']['ready']);
 
         // v1 is untouched and unaffected by mom existing in the registry.
         $this->getJson("/api/brands/{$brand->slug}/reports/monthly")->assertOk()->assertJsonPath('reportType', 'monthly');
@@ -129,11 +127,17 @@ class MomM2Test extends TestCase
 
     public function test_unregistered_section_key_degrades_honestly_not_a_404_or_500(): void
     {
+        // CORRECTED (M5 S1/HeatTable pass, 2026-07-15): every key in the
+        // momreport.php catalog is now registered (S16 was the last gap,
+        // closed this pass) — this test now uses a synthetic key that will
+        // never be a real section, so it keeps testing the SAME code path
+        // (MomSectionRegistry::has() === false) without depending on some
+        // section staying permanently unbuilt.
         $user  = User::factory()->create(['role' => 'master_admin']);
         $brand = $this->makeBrand();
         Sanctum::actingAs($user);
 
-        $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S1")
+        $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S999")
             ->assertOk()
             ->assertJsonPath('status', 'not_built_yet');
     }

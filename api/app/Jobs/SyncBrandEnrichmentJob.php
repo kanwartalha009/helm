@@ -97,6 +97,10 @@ class SyncBrandEnrichmentJob implements ShouldQueue
             // Meta audience-segment spend (ASC new/engaged/existing/unknown) — dashboard Audience view.
             $campaignSync->syncMetaBreakdown($conn, $date);
 
+            // mom S16 — country spend within TODAY's awareness-objective campaigns
+            // (reads the objective just written by syncDay() above, same-request).
+            $campaignSync->syncMetaAwarenessCountry($conn, $date);
+
             // Meta spend attributed to Shopify products (ad_product_daily) — Inventory ROAS.
             $campaignSync->syncMetaAdProducts($conn, $date);
 

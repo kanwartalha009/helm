@@ -6,6 +6,7 @@ namespace App\Reports\Mom;
 
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Sections\SAudienceMixSection;
+use App\Reports\Mom\Sections\SAwarenessCountrySection;
 use App\Reports\Mom\Sections\SBestSellersSection;
 use App\Reports\Mom\Sections\SCategoriesSection;
 use App\Reports\Mom\Sections\SCountryRevenueSection;
@@ -64,14 +65,14 @@ final class MomSectionRegistry
         'S15' => SGenderMixSection::class,
         'S18' => SKlaviyoSection::class,
         'S17' => SLandingSpendVsSellersSection::class, // unblocked via the product_catalog handle<->title bridge
+        // M5 addendum — S16 unblocked: ad_campaign_daily_metrics gained an
+        // `objective` column, and meta_breakdown_daily gained a new
+        // 'awareness_country' axis (CampaignSync::syncMetaAwarenessCountry /
+        // meta:backfill-awareness-country) built specifically to unblock it.
+        'S16' => SAwarenessCountrySection::class,
         // M4 (editorial layer):
         'S0'  => SNextStepsSection::class,
         'S19' => SNovedadesSection::class,
-        // S16 (awareness country concentration) remains unregistered — a real
-        // schema gap: no campaign `objective` column exists anywhere in this
-        // codebase (verified — ad_campaign_daily_metrics has no objective/
-        // channel field for Meta rows). Stays `not_built_yet` until a real
-        // objective sync is scoped and built — see the tracker entry.
     ];
 
     /**
@@ -80,8 +81,7 @@ final class MomSectionRegistry
      * Maps a section key to the `BrandDataCoverageController`/
      * `BackfillBrandDatasetJob` dataset key that would fill its gap — null
      * for sections whose gap ISN'T a sync gap (S-GOALS/S3 need a target/probe,
-     * not a backfill; S0/S19 are pure editorial content; S16 is a genuine
-     * schema gap, not a missing backfill). Read by
+     * not a backfill; S0/S19 are pure editorial content). Read by
      * `MomSectionController::show()` and attached to a 'needs_source'
      * response so the frontend can render the right CTA without its own copy
      * of this mapping.
@@ -106,6 +106,7 @@ final class MomSectionRegistry
         'S15'  => 'breakdowns',
         'S17'  => 'campaigns', // ad_product_daily rides the 'campaigns' dataset (see BackfillBrandDatasetJob)
         'S18'  => 'email',
+        'S16'  => 'campaigns', // needs ad_campaign_daily_metrics.objective, which the campaigns dataset backfills first (see BackfillBrandDatasetJob ordering)
     ];
 
     public function __construct(private readonly Container $app)

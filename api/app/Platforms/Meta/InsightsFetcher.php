@@ -289,7 +289,12 @@ final class InsightsFetcher
         foreach ($accountIds as $accountId) {
             $rows = $this->client->paged(self::normalizeAccountId($accountId) . '/insights', [
                 'level'                           => 'campaign',
-                'fields'                          => 'campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,account_currency',
+                // 'objective' — mom S16 (see MetaObjectives docblock for the
+                // live-verification caveat). Meta/Google/TikTok all share this
+                // call shape via ReportsFetcher's matching interface, but only
+                // Meta's row actually carries an objective; Google/TikTok rows
+                // simply never set the key below, so CampaignSync stores null.
+                'fields'                          => 'campaign_id,campaign_name,objective,spend,impressions,clicks,actions,action_values,account_currency',
                 'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
                 'time_range'                       => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
                 'time_increment'                  => 1,
@@ -307,9 +312,81 @@ final class InsightsFetcher
                     'date'             => $day,
                     'campaign_id'      => $cid,
                     'campaign_name'    => (string) ($row['campaign_name'] ?? ''),
+                    'objective'        => isset($row['objective']) && $row['objective'] !== '' ? (string) $row['objective'] : null,
                     'spend'            => isset($row['spend']) ? round((float) $row['spend'], 2) : 0.0,
                     'impressions'      => (int) ($row['impressions'] ?? 0),
                     'clicks'           => (int) ($row['clicks'] ?? 0),
+                    'conversions'      => (int) round(self::attributedTotal($row['actions'] ?? [], self::PURCHASE_ACTION_TYPES)),
+                    'conversion_value' => round(self::attributedTotal($row['action_values'] ?? [], self::PURCHASE_ACTION_TYPES), 2),
+                    'currency'         => strtoupper((string) ($row['account_currency'] ?? $fallbackCcy)),
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * mom S16 — country spend for a SPECIFIC set of already-known campaign
+     * IDs (the brand's current awareness-objective campaigns, resolved by the
+     * caller from ad_campaign_daily_metrics.objective). One account-level
+     * insights call per account, `breakdowns=['country']` +
+     * `filtering=[{field:'campaign.id', operator:'IN', value:$campaignIds}]`
+     * — filtering by campaign.id is a standard, documented Insights capability
+     * (unlike the `objective` field itself — see MetaObjectives' caveat), so
+     * this narrows the account's country breakdown down to just those
+     * campaigns' spend without a per-campaign×country row explosion. Rows are
+     * per (country, day), same shape as fetchBreakdownRange, so the caller can
+     * store them via the same storeBreakdown() path under a new
+     * breakdown_type ('awareness_country').
+     *
+     * @param array<int, string> $campaignIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchCampaignsCountryBreakdown(PlatformConnection $conn, array $campaignIds, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $accountIds = $this->accountIdsFor($conn);
+        if ($accountIds === [] || $campaignIds === []) {
+            return [];
+        }
+
+        $fallbackCcy = strtoupper((string) ($conn->brand?->base_currency ?: 'USD'));
+        $filtering   = json_encode([[
+            'field'    => 'campaign.id',
+            'operator' => 'IN',
+            'value'    => array_values($campaignIds),
+        ]]);
+
+        $out = [];
+        foreach ($accountIds as $accountId) {
+            $rows = $this->client->paged(self::normalizeAccountId($accountId) . '/insights', [
+                'level'                           => 'account',
+                'fields'                          => 'spend,impressions,clicks,reach,actions,action_values,account_currency',
+                'breakdowns'                      => 'country',
+                'filtering'                       => $filtering,
+                'action_attribution_windows'      => json_encode([self::ATTRIBUTION_WINDOW]),
+                'time_range'                      => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
+                'time_increment'                  => 1,
+                'use_account_attribution_setting' => 'false',
+                'limit'                           => 200,
+            ]);
+
+            foreach ($rows as $row) {
+                $day = (string) ($row['date_start'] ?? '');
+                if ($day === '') {
+                    continue;
+                }
+                $country = (string) ($row['country'] ?? '');
+                $segment = $country !== '' ? $country : 'unknown';
+
+                $out[] = [
+                    'date'             => $day,
+                    'segment_key'      => $segment,
+                    'segment_label'    => $segment,
+                    'spend'            => isset($row['spend']) ? round((float) $row['spend'], 2) : 0.0,
+                    'impressions'      => (int) ($row['impressions'] ?? 0),
+                    'clicks'           => (int) ($row['clicks'] ?? 0),
+                    'reach'            => (int) ($row['reach'] ?? 0),
                     'conversions'      => (int) round(self::attributedTotal($row['actions'] ?? [], self::PURCHASE_ACTION_TYPES)),
                     'conversion_value' => round(self::attributedTotal($row['action_values'] ?? [], self::PURCHASE_ACTION_TYPES), 2),
                     'currency'         => strtoupper((string) ($row['account_currency'] ?? $fallbackCcy)),

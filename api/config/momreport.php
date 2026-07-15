@@ -57,5 +57,8 @@ return [
         'klaviyo_revenue_pct_benchmark' => 50.0,
         // S5/S6 country ROAS status thresholds — [HELM DEFAULT], not from the PDF.
         'roas_alarm_floor' => 1.5,
+        // S16 awareness country concentration — [HELM DEFAULT], not from the PDF.
+        // Flag when one country carries more than this share of awareness spend.
+        'awareness_country_concentration_pct' => 50.0,
     ],
 ];

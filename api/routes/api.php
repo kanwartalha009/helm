@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\DataQualityController;
 use App\Http\Controllers\Api\DigestController;
 use App\Http\Controllers\Api\MarketCalendarController;
 use App\Http\Controllers\Api\MomSectionController;
+use App\Http\Controllers\Api\MomShareController;
 use App\Http\Controllers\Api\RecommendationController;
 use App\Http\Controllers\Api\SeasonalStaleController;
 use App\Http\Controllers\Api\BrandProductsController;
@@ -64,6 +65,14 @@ Route::prefix('auth')->group(function (): void {
 // Public, read-only shared report — gated by an unguessable token, not auth.
 // This is how a client opens a report link Bosco sent them.
 Route::get('r/{token}', [ReportController::class, 'publicShow'])->middleware('throttle:60,1');
+
+// M5 addendum (2026-07-15) — mom's OWN public share routes, deliberately
+// separate from r/{token} above: mom is section-streamed (M0), so its public
+// view needs a shell endpoint (the snapshotted manifest) PLUS a per-section
+// endpoint, not one ReportRegistry->build() call — see MomShareController's
+// own docblock for the full reasoning.
+Route::get('mom/r/{token}',                [MomShareController::class, 'publicShell'])->middleware('throttle:60,1');
+Route::get('mom/r/{token}/sections/{key}', [MomShareController::class, 'publicSection'])->middleware('throttle:60,1');
 
 Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
 
@@ -198,6 +207,12 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         // set. Reading is brand-visible; writing shapes how the mom report groups
         // countries for a client meeting -> admin/manager only, same split as targets.
         Route::get('brands/{brand}/country-tiers', [CountryTierController::class, 'show']);
+        // M5 addendum (Kanwar, 2026-07-15) — the tier sidebar's real-country
+        // picker, MUST be registered before nothing generic here would
+        // collide with it (no {key}-style wildcard on this prefix, unlike the
+        // mom-share route-order bug), but co-located with the show() route
+        // since it's the same "brand-visible read" gate.
+        Route::get('brands/{brand}/country-tiers/available-countries', [CountryTierController::class, 'availableCountries']);
         Route::middleware('role:master_admin,manager')->group(function (): void {
             Route::put('brands/{brand}/country-tiers',    [CountryTierController::class, 'store']);
             Route::delete('brands/{brand}/country-tiers', [CountryTierController::class, 'destroy']);
@@ -277,6 +292,14 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         // Keyword+date rule; no model in the trigger path.
         Route::get('brands/{brand}/ads/seasonal-stale',       [SeasonalStaleController::class, 'index']);
         Route::get('brands/{brand}/ads/creatives/{ad}/video', [AdsController::class, 'creativeVideo']);
+
+        // M5 addendum — mom's own share-creation route (MomShareController,
+        // not ReportController::createShare — mom isn't in ReportRegistry).
+        // MUST be registered BEFORE the generic '{type}/shares' route below:
+        // Laravel matches in registration order, and '{type}' is just a
+        // string param that would otherwise swallow 'mom' too, silently
+        // routing mom's share requests into v1's monolithic-build flow.
+        Route::post('brands/{brand}/reports/mom/shares', [MomShareController::class, 'create']);
 
         // Reports — build a report for this brand, and snapshot it to a public
         // share token. Report type is validated against the registry.

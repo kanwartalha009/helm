@@ -46,6 +46,16 @@ class MomM1Test extends TestCase
 
     public function test_tier_resolution_falls_back_to_agency_default_then_prefers_brand_override(): void
     {
+        // CORRECTED (M5 S1/HeatTable pass, 2026-07-15): a later migration
+        // (2026_07_14_000003_seed_agency_default_country_tiers) ships a real
+        // agency-default T1/T2/T3/Other set unconditionally — "no rows
+        // anywhere yet" is no longer true on a fresh migrate, and reusing its
+        // own T1/T2 keys below collided with the seed's rows (unique
+        // constraint). Clearing the seeded agency defaults first restores
+        // this test's original premise so it keeps testing the SAME
+        // precedence logic in isolation from that seed.
+        CountryTier::query()->whereNull('brand_id')->delete();
+
         $brand = $this->makeBrand();
 
         // No rows anywhere yet -> resolve() is empty, never an error.

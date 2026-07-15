@@ -83,11 +83,12 @@ class MomM2FinalSectionsTest extends TestCase
         $brand = $this->makeBrand();
         $this->seedShopifyDaily($brand->id, $this->monthStart()->addDays(2)->toDateString(), 100, 1);
 
+        // CORRECTED (M5 S1/HeatTable pass, 2026-07-15): S16 was unregistered
+        // when this test was written; it's built now (see MomS16Test).
         $sections = collect($this->getJson("/api/brands/{$brand->slug}/reports/mom")->assertOk()->json('sections'))->keyBy('key');
         foreach (['S1', 'S7', 'S8', 'S17'] as $k) {
             $this->assertTrue($sections[$k]['ready'], "{$k} should be ready");
         }
-        $this->assertFalse($sections['S16']['ready'], 'S16 should still not be ready');
     }
 
     public function test_s1_financial_matrix_computes_mom_yoy_and_omits_customer_columns(): void

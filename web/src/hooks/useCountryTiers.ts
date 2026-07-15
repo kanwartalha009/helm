@@ -83,3 +83,32 @@ export function useSaveAgencyDefaultTiers() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workspace-country-tiers'] }),
   });
 }
+
+/**
+ * M5 addendum (Kanwar, 2026-07-15 — "show list of countries against the
+ * brand to group them"): the brand's ACTUAL countries (real Shopify revenue +
+ * Meta spend over a trailing 6-month window, CountryTierController::
+ * availableCountries) plus their CURRENT tier assignment. This is what the
+ * tier sidebar's picker reads instead of a free-text ISO-2 field — a country
+ * absent from the trailing window but still tier-assigned is unioned in with
+ * `revenue: null`/`spend: null` (honest "no recent data", never a fabricated
+ * 0), sorted after the real revenue rows server-side.
+ */
+export interface AvailableCountry {
+  iso2: string;
+  label: string;
+  revenue: number | null;
+  spend: number | null;
+  tierKey: string | null;
+}
+
+export function useAvailableCountries(slug: string | undefined) {
+  return useQuery({
+    queryKey: ['brand', slug, 'available-countries'],
+    enabled: !!slug,
+    queryFn: async (): Promise<{ countries: AvailableCountry[]; windowMonths: number }> => {
+      const { data } = await api.get(`/brands/${slug}/country-tiers/available-countries`);
+      return data;
+    },
+  });
+}

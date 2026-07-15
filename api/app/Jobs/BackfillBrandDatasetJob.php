@@ -91,6 +91,11 @@ class BackfillBrandDatasetJob implements ShouldQueue
             // Product-attributed Meta spend (ad_product_daily) rides the
             // campaigns dataset — powers the Inventory Intelligence report.
             $commands[] = ['meta:backfill-ad-products', ['brand' => (string) $this->brand->slug, '--since' => $since]];
+            // mom S16 — MUST run after ads:backfill-campaigns above in this same
+            // click: it reads ad_campaign_daily_metrics.objective (just backfilled)
+            // to know which campaigns were awareness-objective, then pulls their
+            // country breakdown. Ordering here is load-bearing.
+            $commands[] = ['meta:backfill-awareness-country', ['brand' => (string) $this->brand->slug, '--since' => $since]];
         }
         if ($wants('campaigns') && array_intersect(['google', 'tiktok'], $connected) !== []) {
             // Google + TikTok product-attributed spend (ad_product_daily, spec §4
