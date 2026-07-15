@@ -1471,3 +1471,15 @@ Kanwar: "keep the same blue color for new vs returning customers and make 2 sepr
 - Kept: day-of-month x-axis, per-series amount header (~sales + customers + %), "Modeled — estimate" chip and method footnote.
 - No backend change — `customerSalesDaily` already supplies `{day,new,returning}`; only presentation changed.
 - Proof: `npx tsc --noEmit` clean; `npm run build` green (319 modules).
+
+### Round F — Heading consistency across the S2 component (Kanwar, 2026-07-15)
+Kanwar: "make the design consistancy for headings use skills of design to keep design intact and professional when we have new design or componant in the report." (Applied design-system skill.)
+
+Audited the report's heading system: the canonical metric header is StatTile's **uppercase 11px muted eyebrow** over a **22px / 650 value** (the executive-tile grid). The S2 component had drifted — plain lowercase labels and mismatched value weights/sizes (18px/700, 22px/700).
+
+- `web/src/components/reports/mom/sectionCharts.tsx`:
+  - Added shared heading tokens `EYEBROW` + `METRIC_VALUE` (CSSProperties consts) documenting the one treatment, so new components can't silently drift.
+  - "Total revenue" hero: plain label → uppercase eyebrow; value 700 → 650 (matches tiles).
+  - `SplitAmount` (New / Returning headers): now uses the same eyebrow + 22/650 value (was 18/700). Removed the color swatch — both series are the same app blue now, so a swatch conveyed nothing; the chart legend beneath still ties label→line.
+  - Kept the "New vs returning customer sales" group label + method footnote as a plain `muted text-sm` CHART CAPTION — captions (label a chart) stay distinct from eyebrows (label a KPI) by design.
+- No backend change. Proof: `npx tsc --noEmit` clean; `npm run build` green.

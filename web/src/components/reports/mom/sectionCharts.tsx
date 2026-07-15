@@ -1,7 +1,22 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { formatMoney } from '@/lib/formatters';
 import { DonutChart, RankedBarChart, TrendLineChart } from './charts';
 import { StatTile, UnavailableTile } from './StatTile';
+
+/**
+ * Shared heading tokens so every metric header across the report reads as ONE
+ * system (design-system principle: consistency over creativity). This is the
+ * exact treatment StatTile uses for the executive tiles, lifted to a constant
+ * so a new section/component can't quietly drift from it:
+ *   EYEBROW      — a small uppercase muted label that sits directly OVER a
+ *                  headline number (Total revenue, New customer sales…).
+ *   METRIC_VALUE — that headline number (22px / 650, matching the tiles).
+ * A chart CAPTION (a label DESCRIBING a chart, e.g. "Revenue & spend, 2026")
+ * stays plain `muted text-sm` — captions and eyebrows are deliberately
+ * different so the eye can tell "this labels a chart" from "this labels a KPI".
+ */
+const EYEBROW: CSSProperties = { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 600 };
+const METRIC_VALUE: CSSProperties = { fontSize: 22, fontWeight: 650, lineHeight: 1.1 };
 
 /**
  * REV2 R1 (monthly-report-v2-mom.md) — "Every table section gets a chart
@@ -116,8 +131,8 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div>
-          <div className="muted text-sm">Total revenue</div>
-          <div style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.1 }}>{formatMoney(p.total, currency, { whole: true })}</div>
+          <div className="muted" style={EYEBROW}>Total revenue</div>
+          <div style={METRIC_VALUE}>{formatMoney(p.total, currency, { whole: true })}</div>
         </div>
         <TrendLineChart
           labels={dayLabels}
@@ -322,7 +337,7 @@ function ModeledCustomerSplit({
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
         <div style={{ flex: '1 1 45%', minWidth: 280 }}>
-          <SplitAmount label="New customer sales" color={BLUE} sales={n.sales} customers={n.customers} pct={n.pct} currency={currency} />
+          <SplitAmount label="New customer sales" sales={n.sales} customers={n.customers} pct={n.pct} currency={currency} />
           {hasDaily && (
             <TrendLineChart
               labels={dayLabels}
@@ -335,7 +350,7 @@ function ModeledCustomerSplit({
           )}
         </div>
         <div style={{ flex: '1 1 45%', minWidth: 280 }}>
-          <SplitAmount label="Returning customer sales" color={BLUE} sales={r.sales} customers={r.customers} pct={r.pct} currency={currency} />
+          <SplitAmount label="Returning customer sales" sales={r.sales} customers={r.customers} pct={r.pct} currency={currency} />
           {hasDaily && (
             <TrendLineChart
               labels={dayLabels}
@@ -356,28 +371,30 @@ function ModeledCustomerSplit({
   );
 }
 
+/**
+ * A metric header (eyebrow + headline + subline) matching the executive-tile
+ * treatment, so the New / Returning amounts read as the same kind of KPI the
+ * rest of the report uses. No color swatch: both series now share the app blue,
+ * so a swatch would carry no distinguishing meaning — the chart legend beneath
+ * already ties the label to its line.
+ */
 function SplitAmount({
   label,
-  color,
   sales,
   customers,
   pct,
   currency,
 }: {
   label: string;
-  color: string;
   sales: number;
   customers: number;
   pct: number | null;
   currency: string;
 }) {
   return (
-    <div style={{ minWidth: 160 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
-        <span className="muted text-sm">{label}</span>
-      </div>
-      <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.2 }}>~{formatMoney(sales, currency, { whole: true })}</div>
+    <div style={{ marginBottom: 8 }}>
+      <div className="muted" style={EYEBROW}>{label}</div>
+      <div style={METRIC_VALUE}>~{formatMoney(sales, currency, { whole: true })}</div>
       <div className="muted" style={{ fontSize: 11 }}>
         {customers.toLocaleString()} {customers === 1 ? 'customer' : 'customers'}
         {pct != null ? ` · ${pct.toFixed(1)}%` : ''}
