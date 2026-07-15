@@ -553,6 +553,30 @@ p {
   overflow: visible;
 }
 
+/* ══ THE CARD MUST GROW TO THE TABLE, OR ITS BACKGROUND STOPS SHORT ══
+   When a `.table-region` IS the card — i.e. it directly wraps the <table> and carries the border and
+   background — two forces fight:
+
+     · the global `:where(div):has(> table)` rule above sets `max-width: 100%`, clamping the card to
+       its container (roughly the viewport);
+     · but a 14-column table is WIDER than the viewport, and this card has `overflow: visible` (so the
+       sticky header can pin to the page). With the card clamped and overflow visible, the table
+       paints straight past the card's right edge — the dark header and the session bars sit outside
+       the white rounded background. That is the "content goes outside the table" bug, twice now.
+
+   So a card that wraps a table sizes to its CONTENT: `width: max-content` grows it to the full table
+   width; `min-width: 100%` keeps it full-width on a wide screen where the table is narrower; and
+   `max-width: none` beats the global clamp. The whole card then scrolls horizontally inside
+   `.page-scroll`, background and all.
+
+   `:has(> table)` scopes this to the card ONLY — a `.table-region` that wraps something else (the
+   dashboard wraps a <Card>, not a bare table) is untouched, so its layout does not move. */
+.table-region:has(> table) {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+}
+
 /* The header must be OPAQUE and above the rows it slides over, or the body shows through it. */
 .table-region thead th {
   position: sticky;
