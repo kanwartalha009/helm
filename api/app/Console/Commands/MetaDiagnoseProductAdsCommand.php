@@ -116,9 +116,15 @@ class MetaDiagnoseProductAdsCommand extends Command
         $matches   = [];   // ads whose RAW creative mentions the handle (should attribute to it)
         $liveSpend = 0.0;  // live spend our extractor DOES attribute to the handle
         $liveAds   = [];
+        $adsSeen   = 0;    // total distinct spending ads we actually examined
+        $truncated = [];   // days where the insights page hit the limit or had a next cursor
+
+        $this->line('ACCOUNTS queried: ' . implode(', ', $accountIds));
+        $this->newLine();
 
         foreach ($accountIds as $accountId) {
-            $spendByAd = $this->spendByAd($client, $accountId, $from, $to);
+            $spendByAd = $this->spendByAd($client, $accountId, $from, $to, $truncated);
+            $adsSeen  += count($spendByAd);
             if ($spendByAd === []) {
                 continue;
             }
@@ -158,8 +164,22 @@ class MetaDiagnoseProductAdsCommand extends Command
         }
 
         $this->line("LIVE from Meta, through AdProductFetcher's OWN extractor:");
+        $this->line('  total spending ads examined: ' . number_format($adsSeen));
         $this->line(sprintf('  ads whose landing URL we resolve to \'%s\': %d, spend %s', $wantHandle, count($liveAds), number_format($liveSpend, 2)));
         $this->line('  ads whose RAW creative mentions /products/' . $wantHandle . ': ' . count($matches));
+
+        // ══ THE TRUNCATION CHECK ══
+        // The fetcher pulls ad-level insights with limit:500, ONE page per day, no pagination. On a
+        // big account a single day has more than 500 spending ads, so the response is cut off — and
+        // the dropped tail is the LOW-SPEND ads, which is exactly where a €4 product like pip lives.
+        // A day that returns a full page (or a next cursor) is a day we did NOT see completely.
+        if ($truncated !== []) {
+            $this->newLine();
+            $this->error('  ⚠ TRUNCATED: ' . count($truncated) . ' day(s) returned a FULL page (limit hit) — '
+                . 'the insights call is paginated and we only read page 1:');
+            $this->line('     ' . implode(', ', $truncated));
+            $this->line('     Low-spend ads (like this product\'s) sit in the dropped tail and are never seen.');
+        }
         $this->newLine();
 
         if ($matches !== []) {
@@ -184,10 +204,17 @@ class MetaDiagnoseProductAdsCommand extends Command
         /* ── 3. THE VERDICT ────────────────────────────────────────────────────────────── */
 
         $this->line(str_repeat('─', 60));
-        if (count($matches) === 0) {
+        if (count($matches) === 0 && $truncated !== []) {
+            $this->error('VERDICT: TRUNCATED INSIGHTS. We did not see this product\'s ads at all — the day-level');
+            $this->line('  insights read stops at 500 ads (no pagination), and this account has more than that.');
+            $this->line('  The fix is in AdProductFetcher: follow Graph pagination instead of reading one page.');
+            $this->line('  Until then, low-spend products on big accounts show 0/— even while actively advertised.');
+        } elseif (count($matches) === 0) {
             $this->warn('VERDICT: no live Meta ad in this window points at /products/' . $wantHandle . '.');
-            $this->line('  Either the ads ran OUTSIDE this window (try --days=30), or the product is genuinely');
-            $this->line('  not being advertised right now. Helm showing 0 would then be CORRECT.');
+            $this->line('  We examined ' . number_format($adsSeen) . ' ad(s) and none pointed here, with no truncation.');
+            $this->line('  Either the ads ran OUTSIDE this window (try --days=30), the product is not being');
+            $this->line('  advertised right now (Helm showing 0 is then CORRECT), or its ads live in an ad');
+            $this->line('  account this connection has not selected (check ACCOUNTS queried, above).');
         } elseif (count($liveAds) === count($matches) && $storedRows === 0) {
             $this->warn('VERDICT: NOT SYNCED. We attribute these ads correctly, but ad_product_daily has no');
             $this->line('  rows for this handle in the window — the sync has not written them yet. Fix:');
@@ -205,10 +232,16 @@ class MetaDiagnoseProductAdsCommand extends Command
         return self::SUCCESS;
     }
 
-    /** @return array<string,float> adId => spend, over the window, day by day (mirrors the fetcher). */
-    private function spendByAd(MetaClient $client, string $accountId, CarbonImmutable $from, CarbonImmutable $to): array
+    /**
+     * @param  list<string>  $truncated  populated with "account day (N)" for any day that hit the page limit
+     * @return array<string,float> adId => spend, over the window, day by day (mirrors the fetcher EXACTLY,
+     *                              including its limit:500 single-page read, so truncation is reproduced not hidden)
+     */
+    private function spendByAd(MetaClient $client, string $accountId, CarbonImmutable $from, CarbonImmutable $to, array &$truncated): array
     {
-        $out = [];
+        $limit = 500;
+        $out   = [];
+
         for ($d = $from; $d->lessThanOrEqualTo($to); $d = $d->addDay()) {
             $day = $d->toDateString();
             try {
@@ -216,14 +249,22 @@ class MetaDiagnoseProductAdsCommand extends Command
                     'level'      => 'ad',
                     'fields'     => 'ad_id,spend',
                     'time_range' => json_encode(['since' => $day, 'until' => $day]),
-                    'limit'      => 500,
+                    'limit'      => $limit,
                 ]);
             } catch (Throwable $e) {
                 $this->warn("  {$accountId} {$day}: insights failed — {$e->getMessage()}");
                 usleep(400_000);
                 continue;
             }
-            foreach (($body['data'] ?? []) as $r) {
+
+            $data = $body['data'] ?? [];
+            // A full page, or a next cursor, means Meta had MORE rows than we read. The fetcher
+            // stops here — so those extra ads (the low-spend tail) never get attributed.
+            if (count($data) >= $limit || ! empty($body['paging']['next'])) {
+                $truncated[] = "{$accountId} {$day} (" . count($data) . '+ ads)';
+            }
+
+            foreach ($data as $r) {
                 $adId = (string) ($r['ad_id'] ?? '');
                 $s    = (float) ($r['spend'] ?? 0);
                 if ($adId !== '' && $s > 0) {
