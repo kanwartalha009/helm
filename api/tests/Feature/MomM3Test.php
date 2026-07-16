@@ -91,10 +91,14 @@ class MomM3Test extends TestCase
         $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S13?month={$month->format('Y-m')}")
             ->assertOk()->assertJsonPath('status', 'ok');
 
-        $this->assertEquals(20.0, $res->json('existingPct.value'));
+        $this->assertEquals(20.0, $res->json('existingPct')); // existing 200 / window total 1000
         $this->assertTrue($res->json('alarm'));
         $this->assertArrayHasKey('perCampaign', $res->json('unavailable'));
         $this->assertArrayHasKey('aov', $res->json('unavailable'));
+        // Now a month-by-month matrix: the Existing segment is a row with a spend total.
+        $existing = collect($res->json('rows'))->firstWhere('key', 'existing');
+        $this->assertEquals(200.0, $existing['spend']);
+        $this->assertIsArray($res->json('months'));
     }
 
     public function test_s14_placement_mix_computes_vertical_pct_and_goal_chip(): void
@@ -115,28 +119,38 @@ class MomM3Test extends TestCase
         $this->assertEqualsWithDelta(88.9, $res->json('verticalPct.value'), 0.2);
         $this->assertTrue($res->json('goalHit'));
         $this->assertEquals(80.0, $res->json('goal'));
+        // Kanwar, 2026-07-16: detailed metric columns per placement row.
+        $stories = collect($res->json('rows'))->firstWhere('key', 'instagram_stories');
+        $this->assertEqualsWithDelta(2.0, $stories['ctr'], 0.01);  // 200/10000*100
+        $this->assertEqualsWithDelta(80.0, $stories['cpm'], 0.01); // 800/10000*1000
+        $this->assertEqualsWithDelta(88.9, $stories['sharePct'], 0.2); // 800/900
     }
 
-    public function test_s15_gender_mix_folds_age_gender_segments_to_a_male_female_split(): void
+    public function test_s15_gender_mix_folds_age_gender_into_detailed_metric_rows(): void
     {
+        // Kanwar, 2026-07-16 — S15 is now a detailed per-gender metrics table
+        // (Cost/Reach/Freq/Clicks/CTR/CPM/Purch/ROAS/CPA/Share), age_gender folded
+        // to Male/Female/Unknown with every metric summed (not just spend).
         $user  = User::factory()->create(['role' => 'master_admin']);
         $brand = $this->makeBrand();
         $month = $this->monthStart();
         $date  = $month->addDays(3)->toDateString();
 
-        $this->seedBreakdown($brand->id, $date, 'age_gender', '25-34 · female', ['spend' => 300]);
-        $this->seedBreakdown($brand->id, $date, 'age_gender', '35-44 · male', ['spend' => 100]);
+        $this->seedBreakdown($brand->id, $date, 'age_gender', '25-34 · female', ['spend' => 300, 'impressions' => 10000, 'clicks' => 100, 'conversions' => 10, 'conversion_value' => 900]);
+        $this->seedBreakdown($brand->id, $date, 'age_gender', '35-44 · male', ['spend' => 100, 'impressions' => 5000, 'clicks' => 25, 'conversions' => 4, 'conversion_value' => 400]);
         $this->seedBreakdown($brand->id, $date, 'age_gender', 'unknown', ['spend' => 50]);
 
         Sanctum::actingAs($user);
         $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S15?month={$month->format('Y-m')}")
             ->assertOk()->assertJsonPath('status', 'ok');
 
-        $this->assertEquals(300.0, $res->json('female.spend'));
-        $this->assertEquals(100.0, $res->json('male.spend'));
-        $this->assertEquals(75.0, $res->json('female.pct'));  // 300 / (300+100)
-        $this->assertEquals(25.0, $res->json('male.pct'));
-        $this->assertNotNull($res->json('unavailable.note')); // the 50 unknown-gender spend is flagged, not silently dropped
+        $rows = collect($res->json('rows'))->keyBy('key');
+        $this->assertEquals(300.0, $rows['female']['spend']);
+        $this->assertEquals(100.0, $rows['male']['spend']);
+        $this->assertEqualsWithDelta(1.0, $rows['female']['ctr'], 0.01);   // 100/10000*100
+        $this->assertEqualsWithDelta(3.0, $rows['female']['roas'], 0.01);  // 900/300
+        $this->assertEqualsWithDelta(30.0, $rows['female']['cpa'], 0.01);  // 300/10 purchases
+        $this->assertEqualsWithDelta(66.7, $rows['female']['sharePct'], 0.2); // 300 / 450
     }
 
     public function test_s18_klaviyo_needs_source_then_real_attribution_never_summed_into_store_revenue(): void

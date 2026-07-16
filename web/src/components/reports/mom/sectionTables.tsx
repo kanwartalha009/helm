@@ -1,6 +1,91 @@
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import { HeatTable, type HeatColumn } from './HeatTable';
-import { heatFromDeltaPct, heatVsBenchmark } from './heat';
+import { heatFromDeltaPct, heatVsBenchmark, type HeatGrade } from './heat';
+
+/** % change a→b, null-safe (shared by the month-by-month matrices). */
+const pctChange = (a: number | null | undefined, b: number | null | undefined): number | null =>
+  a == null || b == null || b === 0 ? null : ((a - b) / b) * 100;
+
+/** A signed percent, e.g. +12.3% / −4.0% / — . */
+const deltaFmt = (v: number | null | undefined): string => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
+
+/**
+ * Build one column per month from a payload's `months`/`monthLabels`, reading
+ * `row.monthly[i]`. By default each cell is graded by its month-over-month
+ * change (green climbing / red dropping) so momentum reads down the row —
+ * pass `gradeCell` to grade differently (e.g. vs a benchmark).
+ */
+function monthColumns(
+  months: string[],
+  monthLabels: string[],
+  fmt: (v: number | null | undefined) => string,
+  gradeCell?: (row: any, i: number) => HeatGrade,
+): HeatColumn<any>[] {
+  return months.map((ym, i) => ({
+    key: `m_${ym}`,
+    label: monthLabels[i] ?? ym,
+    align: 'right',
+    render: (r) => fmt(r.monthly?.[i]),
+    gradeOf: (r) => (gradeCell ? gradeCell(r, i) : i === 0 ? '' : heatFromDeltaPct(pctChange(r.monthly?.[i], r.monthly?.[i - 1]))),
+  }));
+}
+
+/**
+ * Shared detailed ad-metrics table for the Meta breakdown sections (S14
+ * placement, S15 gender): Cost/Reach/Freq/Clicks/CTR/CPM/Purch/ROAS/CPA/Share,
+ * coloured like the reference (CTR/ROAS higher = greener; CPM/CPA lower = greener).
+ */
+function renderAdMetrics(p: any, currency: string, firstLabel: string, title: string): React.ReactNode {
+  const money = (v: number | null | undefined) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+  const num = (v: number | null | undefined) => (v == null ? '—' : Math.round(v).toLocaleString());
+  const rows: any[] = p.rows ?? [];
+  return (
+    <HeatTable
+      columns={[
+        { key: 'label', label: firstLabel, render: (r) => r.label },
+        { key: 'spend', label: 'Cost', align: 'right', render: (r) => money(r.spend) },
+        { key: 'reach', label: 'Reach', align: 'right', render: (r) => num(r.reach) },
+        { key: 'frequency', label: 'Freq', align: 'right', render: (r) => (r.frequency == null ? '—' : r.frequency.toFixed(2)) },
+        { key: 'clicks', label: 'Clicks', align: 'right', render: (r) => num(r.clicks) },
+        { key: 'ctr', label: 'CTR', align: 'right', render: (r) => (r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`), heat: { mode: 'column', dir: 'high', value: (r) => r.ctr } },
+        { key: 'cpm', label: 'CPM', align: 'right', render: (r) => money(r.cpm), heat: { mode: 'column', dir: 'low', value: (r) => r.cpm } },
+        { key: 'purchases', label: 'Purch.', align: 'right', render: (r) => num(r.purchases) },
+        { key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)), heat: { mode: 'column', dir: 'high', value: (r) => r.roas } },
+        { key: 'cpa', label: 'CPA', align: 'right', render: (r) => money(r.cpa), heat: { mode: 'column', dir: 'low', value: (r) => r.cpa } },
+        { key: 'sharePct', label: 'Share', align: 'right', render: (r) => (r.sharePct == null ? '—' : `${r.sharePct.toFixed(0)}%`) },
+      ]}
+      rows={rows}
+      rowKey={(r) => r.key ?? r.label}
+      title={p.platform === 'tiktok' ? `${title} · TikTok` : title}
+      previewRows={15}
+    />
+  );
+}
+
+/**
+ * Shared funnel table for S10/S11 — the stages (Add to cart / Checkout /
+ * Purchase) shown as % of sessions (Kanwar, 2026-07-16), higher = greener.
+ */
+function renderFunnel(p: any, firstLabel: string): React.ReactNode {
+  const rows: any[] = p.rows ?? [];
+  const pct = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(1)}%`);
+  return (
+    <HeatTable
+      columns={[
+        { key: 'label', label: firstLabel, render: (r) => r.label },
+        { key: 'sessions', label: 'Sessions', align: 'right', render: (r) => (r.sessions ?? 0).toLocaleString() },
+        { key: 'cartPct', label: 'Add to cart', align: 'right', render: (r) => pct(r.cartPct), heat: { mode: 'column', dir: 'high', value: (r) => r.cartPct } },
+        { key: 'checkoutPct', label: 'Checkout', align: 'right', render: (r) => pct(r.checkoutPct), heat: { mode: 'column', dir: 'high', value: (r) => r.checkoutPct } },
+        { key: 'purchasePct', label: 'Purchase', align: 'right', render: (r) => pct(r.purchasePct), heat: { mode: 'column', dir: 'high', value: (r) => r.purchasePct } },
+        { key: 'deltaPct', label: 'Δ CVR', align: 'right', render: (r) => deltaFmt(r.deltaPct), gradeOf: (r) => heatFromDeltaPct(r.deltaPct) },
+      ]}
+      rows={rows}
+      rowKey={(r) => r.key}
+      title={`Funnel by ${firstLabel.toLowerCase()}`}
+      previewRows={15}
+    />
+  );
+}
 
 /**
  * M5 addendum (Kanwar, 2026-07-15 — "basic tables of monthly report as we
@@ -227,132 +312,76 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     );
   },
 
-  // S7 — best categories, stock chip reused from the payload's own
-  // lowStock flag (a presence check, not a real cover figure — see the
-  // section's own docblock) rather than re-deriving anything client-side.
+  // S7 — best categories MONTH-BY-MONTH (Kanwar, 2026-07-16): per-month revenue
+  // (coloured by MoM) + Total / Share / ΔYoY / ΔMoM + stock.
   S7: (p, currency) => {
     const money = (v: number | null) => formatMoney(v, currency, { whole: true });
-    const rows: any[] = p.rows ?? [];
-    return (
-      <HeatTable
-        columns={[
-          { key: 'label', label: 'Category', render: (r) => r.label },
-          { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
-          // share is stored as a 0-1 fraction (CommerceBreakdown::forDimension) — ×100 for display.
-          { key: 'share', label: 'Share', align: 'right', render: (r) => (r.share == null ? '—' : `${(r.share * 100).toFixed(1)}%`) },
-          { key: 'deltaPct', label: 'Δ vs compare', align: 'right', render: (r) => (r.deltaPct == null ? '—' : `${r.deltaPct > 0 ? '+' : ''}${r.deltaPct.toFixed(1)}%`), gradeOf: (r) => heatFromDeltaPct(r.deltaPct) },
-          { key: 'stock', label: 'Stock', align: 'right', render: (r) => (r.stock == null ? '—' : r.stock.toLocaleString()), gradeOf: (r) => (r.lowStock ? 'r1' : '') },
-        ]}
-        rows={rows}
-        rowKey={(r) => r.key ?? r.label}
-        title="Best categories"
-      />
-    );
+    const compact = (v: number | null | undefined) => (v == null ? '—' : formatMoney(v, currency, { compact: true }));
+    const months: string[] = Array.isArray(p.months) ? p.months : [];
+    const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
+    const columns: HeatColumn<any>[] = [
+      { key: 'label', label: 'Category', render: (r) => r.label },
+      ...monthColumns(months, monthLabels, compact),
+      { key: 'revenue', label: 'Total', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
+      { key: 'share', label: 'Share', align: 'right', render: (r) => (r.share == null ? '—' : `${r.share.toFixed(1)}%`) },
+      { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => deltaFmt(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },
+      { key: 'deltaMoMPct', label: 'Δ MoM', align: 'right', render: (r) => deltaFmt(r.deltaMoMPct), gradeOf: (r) => heatFromDeltaPct(r.deltaMoMPct) },
+      { key: 'stock', label: 'Stock', align: 'right', render: (r) => (r.stock == null ? '—' : r.stock.toLocaleString()), gradeOf: (r) => (r.lowStock ? 'r1' : '') },
+    ];
+    return <HeatTable columns={columns} rows={p.rows ?? []} rowKey={(r) => r.key ?? r.label} title="Best categories MoM/YoY" previewRows={12} />;
   },
 
-  // S8 — best sellers, same stock-flag pattern as S7 but keyed on the
-  // section's own precomputed `stockFlag` ('red' | null) rather than a
-  // client-side threshold, since S8 uses a different LOW_STOCK_FLOOR than S7.
+  // S8 — best sellers MONTH-BY-MONTH (Kanwar, 2026-07-16): the "last-6-months"
+  // trend, now real — per-month revenue (coloured by MoM) + Total/Share/ΔYoY/ΔMoM
+  // + the stock flag.
   S8: (p, currency) => {
     const money = (v: number | null) => formatMoney(v, currency, { whole: true });
-    const rows: any[] = p.rows ?? [];
-    return (
-      <HeatTable
-        columns={[
-          { key: 'label', label: 'Product', render: (r) => r.label },
-          { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
-          // share is stored as a 0-1 fraction (CommerceBreakdown::forDimension) — ×100 for display.
-          { key: 'share', label: 'Share', align: 'right', render: (r) => (r.share == null ? '—' : `${(r.share * 100).toFixed(1)}%`) },
-          { key: 'deltaPct', label: 'Δ vs compare', align: 'right', render: (r) => (r.deltaPct == null ? '—' : `${r.deltaPct > 0 ? '+' : ''}${r.deltaPct.toFixed(1)}%`), gradeOf: (r) => heatFromDeltaPct(r.deltaPct) },
-          { key: 'stock', label: 'Stock', align: 'right', render: (r) => (r.stock == null ? '—' : r.stock.toLocaleString()), gradeOf: (r) => (r.stockFlag === 'red' ? 'r1' : '') },
-        ]}
-        rows={rows}
-        rowKey={(r) => r.key ?? r.label}
-        title="Best sellers"
-      />
-    );
+    const compact = (v: number | null | undefined) => (v == null ? '—' : formatMoney(v, currency, { compact: true }));
+    const months: string[] = Array.isArray(p.months) ? p.months : [];
+    const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
+    const columns: HeatColumn<any>[] = [
+      { key: 'label', label: 'Product', render: (r) => r.label },
+      ...monthColumns(months, monthLabels, compact),
+      { key: 'revenue', label: 'Total', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
+      { key: 'share', label: 'Share', align: 'right', render: (r) => (r.share == null ? '—' : `${r.share.toFixed(1)}%`) },
+      { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => deltaFmt(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },
+      { key: 'deltaMoMPct', label: 'Δ MoM', align: 'right', render: (r) => deltaFmt(r.deltaMoMPct), gradeOf: (r) => heatFromDeltaPct(r.deltaMoMPct) },
+      { key: 'stock', label: 'Stock', align: 'right', render: (r) => (r.stock == null ? '—' : r.stock.toLocaleString()), gradeOf: (r) => (r.stockFlag === 'red' ? 'r1' : '') },
+    ];
+    return <HeatTable columns={columns} rows={p.rows ?? []} rowKey={(r) => r.key ?? r.label} title="Best sellers MoM" previewRows={12} />;
   },
 
-  // S13 — audience mix (new vs existing spend). Row-graded, not column-graded:
-  // "Existing" spend above the benchmark is BAD, so a plain column-wide heat
-  // (which always paints the biggest number green) would mislead — instead
-  // only the 'existing' row is graded, red when the section's own `alarm`
-  // flag is set, green when it's comfortably under benchmark.
+  // S13 — audience new vs existing spend MONTH-BY-MONTH (Kanwar, 2026-07-16):
+  // segment × per-month spend (coloured by MoM) + Total/Share/ΔYoY/ΔMoM. The
+  // existing-vs-benchmark alarm rides in the footer.
   S13: (p, currency) => {
     const money = (v: number | null) => formatMoney(v, currency, { whole: true });
-    const rows: any[] = p.segments ?? [];
-    return (
-      <HeatTable
-        columns={[
-          { key: 'label', label: 'Segment', render: (r) => r.label },
-          { key: 'spend', label: 'Spend', align: 'right', render: (r) => money(r.spend) },
-          { key: 'share', label: 'Share', align: 'right', render: (r) => (r.share == null ? '—' : `${r.share.toFixed(1)}%`) },
-          {
-            key: 'flag', label: `vs ${p.benchmark}% benchmark`, align: 'right',
-            render: (r) => (r.key === 'existing' ? (p.alarm ? 'Above benchmark' : 'Within benchmark') : '—'),
-            gradeOf: (r) => (r.key !== 'existing' ? '' : p.alarm ? 'r2' : 'g2'),
-          },
-        ]}
-        rows={rows}
-        rowKey={(r) => r.key}
-        title="Audience: new vs existing spend"
-      />
-    );
-  },
-
-  // S14 — placement mix. Vertical (Stories/Reels) rows graded green — they're
-  // the section's own goal metric (Goal >80% vertical) — everything else
-  // column-graded on CTR (engagement quality is the more useful read per row
-  // than raw spend rank here).
-  S14: (p, currency) => {
-    const money = (v: number | null) => formatMoney(v, currency, { whole: true });
-    const rows: any[] = p.rows ?? [];
-    return (
-      <HeatTable
-        columns={[
-          { key: 'label', label: 'Placement', render: (r) => r.label },
-          { key: 'spend', label: 'Spend', align: 'right', render: (r) => money(r.spend) },
-          { key: 'pctSpend', label: '% Spend', align: 'right', render: (r) => (r.pctSpend == null ? '—' : `${r.pctSpend.toFixed(1)}%`) },
-          { key: 'cpc', label: 'CPC', align: 'right', render: (r) => money(r.cpc) },
-          { key: 'ctr', label: 'CTR', align: 'right', render: (r) => (r.ctr == null ? '—' : `${r.ctr.toFixed(2)}%`), heat: { mode: 'column', dir: 'high', value: (r) => r.ctr } },
-          { key: 'cpm', label: 'CPM', align: 'right', render: (r) => money(r.cpm) },
-          {
-            key: 'isVertical', label: 'Vertical', align: 'right', render: (r) => (r.isVertical ? 'Yes' : '—'),
-            gradeOf: (r) => (r.isVertical ? 'g1' : ''),
-          },
-        ]}
-        rows={rows}
-        rowKey={(r) => r.key}
-        title="Placement mix"
-        footer={`Vertical (Stories + Reels): ${p.verticalPct?.value ?? '—'}% vs the ${p.goal}% goal — ${p.goalHit ? 'goal hit' : 'below goal'}`}
-      />
-    );
-  },
-
-  // S15 — gender mix. No `rows` array on this payload (just male/female
-  // summary objects) — synthesized into a 2-row table here so it gets the
-  // same HeatTable treatment (expand/heat) as every other section rather
-  // than a bespoke one-off layout.
-  S15: (p, currency) => {
-    const money = (v: number | null) => formatMoney(v, currency, { whole: true });
-    const rows = [
-      { key: 'female', label: 'Female', ...p.female },
-      { key: 'male', label: 'Male', ...p.male },
+    const compact = (v: number | null | undefined) => (v == null ? '—' : formatMoney(v, currency, { compact: true }));
+    const months: string[] = Array.isArray(p.months) ? p.months : [];
+    const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
+    const columns: HeatColumn<any>[] = [
+      { key: 'label', label: 'Segment', render: (r) => r.label },
+      ...monthColumns(months, monthLabels, compact),
+      { key: 'spend', label: 'Total', align: 'right', render: (r) => money(r.spend), heat: { mode: 'column', dir: 'high', value: (r) => r.spend } },
+      { key: 'share', label: 'Share', align: 'right', render: (r) => (r.share == null ? '—' : `${r.share.toFixed(1)}%`) },
+      { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => deltaFmt(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },
+      { key: 'deltaMoMPct', label: 'Δ MoM', align: 'right', render: (r) => deltaFmt(r.deltaMoMPct), gradeOf: (r) => heatFromDeltaPct(r.deltaMoMPct) },
     ];
-    return (
-      <HeatTable
-        columns={[
-          { key: 'label', label: 'Gender', render: (r) => r.label },
-          { key: 'spend', label: 'Spend', align: 'right', render: (r) => money(r.spend) },
-          { key: 'pct', label: 'Share', align: 'right', render: (r) => (r.pct == null ? '—' : `${r.pct.toFixed(1)}%`), heat: { mode: 'column', dir: 'high', value: (r) => r.pct } },
-        ]}
-        rows={rows}
-        rowKey={(r) => r.key}
-        title="Gender mix"
-        footer={p.unavailable?.note}
-      />
-    );
+    const existing = p.existingPct != null ? `Existing customers: ${p.existingPct}% of spend vs the ${p.benchmark}% benchmark${p.alarm ? ' — above benchmark' : ''}.` : undefined;
+    return <HeatTable columns={columns} rows={p.rows ?? []} rowKey={(r) => r.key} title="Audience: new vs existing spend MoM" footer={existing} />;
   },
+
+  // S14 — Ad spend by placement (Kanwar, 2026-07-16): detailed metrics table.
+  S14: (p, currency) => renderAdMetrics(p, currency, 'Placement', 'Ad spend by placement'),
+
+  // S15 — Ad spend by gender (Kanwar, 2026-07-16): same detailed metrics table.
+  S15: (p, currency) => renderAdMetrics(p, currency, 'Gender', 'Ad spend by gender'),
+
+  // S10 — Funnel by country: stages as % of sessions (Kanwar, 2026-07-16).
+  S10: (p) => renderFunnel(p, 'Country'),
+
+  // S11 — Funnel by landing path: same funnel-as-percentages table.
+  S11: (p) => renderFunnel(p, 'Landing path'),
 
   // S16 — awareness country concentration. The top-share row is graded
   // against the section's own concentration threshold (fixed-benchmark
@@ -382,24 +411,32 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     );
   },
 
-  // S17 — landing spend x best sellers. The mismatch row (highest-spend vs
-  // highest-revenue product) is called out via the footer, matching the
-  // PDF's own "spending on X, best seller is Y" framing.
+  // S17 — landing spend x best sellers, MONTH-BY-MONTH (Kanwar, 2026-07-16):
+  // per-month landing SPEND (coloured by MoM) + window spend total / revenue /
+  // stock / ΔYoY / ΔMoM. The mismatch (highest-spend vs highest-revenue product)
+  // rides in the footer, matching the PDF's "spending on X, best seller is Y".
   S17: (p, currency) => {
-    const money = (v: number | null) => formatMoney(v, currency, { whole: true });
-    const rows: any[] = p.rows ?? [];
+    const money = (v: number | null | undefined) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+    const compact = (v: number | null | undefined) => (v == null ? '—' : formatMoney(v, currency, { compact: true }));
+    const months: string[] = Array.isArray(p.months) ? p.months : [];
+    const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
+    const columns: HeatColumn<any>[] = [
+      { key: 'title', label: 'Product', render: (r) => r.title ?? (r.unattributed ? `Unattributed (${r.handle})` : r.handle) },
+      ...monthColumns(months, monthLabels, compact),
+      { key: 'spend', label: 'Ad spend', align: 'right', render: (r) => money(r.spend), heat: { mode: 'column', dir: 'high', value: (r) => r.spend } },
+      { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue) },
+      { key: 'stock', label: 'Stock', align: 'right', render: (r) => (r.stock == null ? '—' : r.stock.toLocaleString()), gradeOf: (r) => (r.stock === 0 ? 'r2' : '') },
+      { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => deltaFmt(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },
+      { key: 'deltaMoMPct', label: 'Δ MoM', align: 'right', render: (r) => deltaFmt(r.deltaMoMPct), gradeOf: (r) => heatFromDeltaPct(r.deltaMoMPct) },
+    ];
     return (
       <HeatTable
-        columns={[
-          { key: 'title', label: 'Product', render: (r) => r.title ?? (r.unattributed ? `Unattributed (${r.handle})` : r.handle) },
-          { key: 'spend', label: 'Ad spend', align: 'right', render: (r) => money(r.spend), heat: { mode: 'column', dir: 'high', value: (r) => r.spend } },
-          { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue) },
-          { key: 'stock', label: 'Stock', align: 'right', render: (r) => (r.stock == null ? '—' : r.stock.toLocaleString()), gradeOf: (r) => (r.stock === 0 ? 'r2' : '') },
-        ]}
-        rows={rows}
+        columns={columns}
+        rows={p.rows ?? []}
         rowKey={(r) => r.handle}
-        title="Landing spend x best sellers"
+        title="Landing spend x best sellers MoM"
         footer={p.mismatch ? `Spending on ${p.mismatch.spendingOn}, best seller is ${p.mismatch.bestSeller}.` : undefined}
+        previewRows={15}
       />
     );
   },

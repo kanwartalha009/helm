@@ -33,6 +33,12 @@ const BENCHMARK_OPTIONS: { value: string; label: string }[] = [
   { value: '5', label: '5×' },
 ];
 
+// S14/S15 ad-metrics platform toggle (Kanwar, 2026-07-16). '' = Meta (default).
+const PLATFORM_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'Meta' },
+  { value: 'tiktok', label: 'TikTok' },
+];
+
 /**
  * REV2 R1/R2 — one CARD per section: header (label + ready state), the
  * chart-as-hero + table-as-secondary view per the section's resolved `view`
@@ -89,16 +95,19 @@ function MetricSectionCard({
   // tables) — kept as a plain string so it drops cleanly out of extraParams.
   const [monthsWindow, setMonthsWindow] = useState('');
   const [benchmark, setBenchmark] = useState('');
+  const [platform, setPlatform] = useState('');
   // Sections with their own trailing month-window selector — the financial
-  // matrix (S1) and the month-by-month geo matrices (S4 tier, S5 country
-  // revenue, S6 country ROAS; Kanwar, 2026-07-16). S6 additionally gets a ROAS
-  // benchmark selector. Both ride on top of the shared filters via extraParams.
-  const hasMonthsControl = ['S1', 'S4', 'S5', 'S6'].includes(section.key);
+  // matrix (S1) and the month-by-month matrices (S4 tier, S5/S6 country, S7
+  // categories, S8 best sellers, S13 audience, S17 landing; Kanwar, 2026-07-16).
+  // S6 also gets a ROAS benchmark selector; S14/S15 get a Meta/TikTok toggle.
+  const hasMonthsControl = ['S1', 'S4', 'S5', 'S6', 'S7', 'S8', 'S13', 'S17'].includes(section.key);
   const hasBenchmarkControl = section.key === 'S6';
+  const hasPlatformControl = ['S14', 'S15'].includes(section.key);
   const extraParams = (() => {
     const p: Record<string, string> = {};
     if (hasMonthsControl && monthsWindow) p.months = monthsWindow;
     if (hasBenchmarkControl && benchmark) p.benchmark = benchmark;
+    if (hasPlatformControl && platform) p.platform = platform;
     return Object.keys(p).length ? p : undefined;
   })();
   const { data, isLoading, isError, refetch, isRefetching } = useMomSection(slug, section.key, filters, section.ready, extraParams);
@@ -122,7 +131,7 @@ function MetricSectionCard({
     <Card style={{ padding: 18 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <SectionHeader label={section.label} sub={data?.status && data.status !== 'ok' ? statusNote(data) : undefined} />
-        {(hasMonthsControl || hasBenchmarkControl) && (
+        {(hasMonthsControl || hasBenchmarkControl || hasPlatformControl) && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             {hasMonthsControl && <Segmented options={MONTHS_OPTIONS} value={monthsWindow} onChange={setMonthsWindow} />}
             {hasBenchmarkControl && (
@@ -131,6 +140,7 @@ function MetricSectionCard({
                 <Segmented options={BENCHMARK_OPTIONS} value={benchmark} onChange={setBenchmark} />
               </>
             )}
+            {hasPlatformControl && <Segmented options={PLATFORM_OPTIONS} value={platform} onChange={setPlatform} />}
           </div>
         )}
       </div>

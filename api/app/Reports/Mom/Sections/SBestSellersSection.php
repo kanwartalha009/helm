@@ -44,17 +44,18 @@ final class SBestSellersSection implements MomSection
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }
-        [$start, $end] = $window;
 
-        $compareWindow = $filters->compareMonthWindow($tz);
+        // Month-by-month matrix (Kanwar, 2026-07-16): product × the last N months
+        // (window control) — the "last-6-months" trend the original pass deferred,
+        // now real — with per-month revenue + Total/Share/ΔMoM/ΔYoY + stock.
+        $reportMonth = CarbonImmutable::parse($window[0], $tz)->startOfMonth();
+        $n = $filters->months === null ? 6 : max(1, min(12, $filters->months));
+        $months = [];
+        for ($i = $n - 1; $i >= 0; $i--) {
+            $months[] = $reportMonth->subMonths($i)->format('Y-m');
+        }
 
-        $breakdown = (new CommerceBreakdown())->forDimension(
-            $brand->id, 'product', $start, $end,
-            $compareWindow[0] ?? null, $compareWindow[1] ?? null,
-            $filters->usd,
-            10,
-        );
-
+        $breakdown = (new CommerceBreakdown())->monthlyMatrix($brand->id, 'product', $months, $filters->usd, 10);
         if ($breakdown === null) {
             return [
                 'key'    => $this->key(),
@@ -80,14 +81,14 @@ final class SBestSellersSection implements MomSection
         return [
             'key'    => $this->key(),
             'status' => 'ok',
-            'month'  => CarbonImmutable::parse($start)->format('Y-m'),
-            'compareMonth' => $compareWindow !== null ? CarbonImmutable::parse($compareWindow[0])->format('Y-m') : null,
+            'month'  => $reportMonth->format('Y-m'),
+            'months' => $months,
+            'monthLabels' => array_map(static fn (string $ym): string => CarbonImmutable::createFromFormat('Y-m-d', $ym . '-01')->isoFormat('MMM YY'), $months),
+            'monthsWindow' => $n,
             'rows'   => $rows,
             'other'  => $breakdown['other'],
             'total'  => $breakdown['total'],
-            'unavailable' => [
-                'last6Months' => 'Needs a rolling multi-month series — CommerceBreakdown only returns one comparison window, not built this pass.',
-            ],
+            'unavailable' => [],
         ];
     }
 }

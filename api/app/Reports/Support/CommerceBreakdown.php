@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Reports\Support;
 
 use App\Models\CommerceDailyMetric;
+use Carbon\CarbonImmutable;
 
 /**
  * Turns commerce_daily_metrics (slice 2.1) into a render-ready top-N breakdown
@@ -107,6 +108,94 @@ final class CommerceBreakdown
             // drives the region status matrix. Null when there's no comparison
             // (every row would be "new", which says nothing).
             'matrix' => $hasCompare ? $this->matrix($cur) : null,
+        ];
+    }
+
+    /**
+     * MONTH-BY-MONTH top-N breakdown for a dimension (Kanwar, 2026-07-16) — the
+     * backbone of S7/S8's monthly matrices. One revenue column per month over the
+     * ordered `$months`, plus each top row's window total, share, ΔMoM (last month
+     * vs previous) and ΔYoY (window total vs the same window one year earlier).
+     * Ranked by window total; the tail folds into `other`. Reuses aggregate() per
+     * month so revenue math (D-005, fx) stays identical to the single-window path.
+     *
+     * @param array<int, string> $months ordered 'Y-m'
+     * @return array<string, mixed>|null null when the dimension has no rows at all
+     */
+    public function monthlyMatrix(int $brandId, string $dimensionType, array $months, bool $usd, int $limit = 10): ?array
+    {
+        if ($months === []) {
+            return null;
+        }
+
+        $byKey = [];
+        foreach ($months as $ym) {
+            $start = CarbonImmutable::createFromFormat('Y-m-d', $ym . '-01')->startOfMonth();
+            $end   = $start->endOfMonth();
+            foreach ($this->aggregate($brandId, $dimensionType, $start->toDateString(), $end->toDateString(), $usd) as $key => $row) {
+                $byKey[$key] ??= ['key' => $key, 'label' => $row['label'], 'months' => [], 'total' => 0.0, 'orders' => 0];
+                if ($row['label'] !== '') {
+                    $byKey[$key]['label'] = $row['label'];
+                }
+                $byKey[$key]['months'][$ym] = $row['revenue'];
+                $byKey[$key]['total']  += $row['revenue'];
+                $byKey[$key]['orders'] += $row['orders'];
+            }
+        }
+        if ($byKey === []) {
+            return null;
+        }
+
+        // Same window one year earlier, per key, for ΔYoY.
+        $first = CarbonImmutable::createFromFormat('Y-m-d', $months[0] . '-01')->subYear()->startOfMonth();
+        $last  = CarbonImmutable::createFromFormat('Y-m-d', end($months) . '-01')->subYear()->endOfMonth();
+        $prior = $this->aggregate($brandId, $dimensionType, $first->toDateString(), $last->toDateString(), $usd);
+
+        $totalRev = 0.0;
+        foreach ($byKey as $k) {
+            $totalRev += $k['total'];
+        }
+
+        usort($byKey, static fn (array $a, array $b): int => $b['total'] <=> $a['total']);
+        $top  = array_slice($byKey, 0, $limit);
+        $tail = array_slice($byKey, $limit);
+
+        $n = count($months);
+        $rows = [];
+        foreach ($top as $row) {
+            $monthly = [];
+            foreach ($months as $ym) {
+                $monthly[] = array_key_exists($ym, $row['months']) ? round((float) $row['months'][$ym], 2) : null;
+            }
+            $lastM = $monthly[$n - 1] ?? null;
+            $prevM = $n >= 2 ? ($monthly[$n - 2] ?? null) : null;
+            $priorTotal = $prior[$row['key']]['revenue'] ?? null;
+
+            $rows[] = [
+                'key'      => $row['key'],
+                'label'    => $row['label'],
+                'monthly'  => $monthly,
+                'revenue'  => round($row['total'], 2),
+                'orders'   => $row['orders'],
+                'share'    => $totalRev > 0.0 ? round($row['total'] / $totalRev * 100, 1) : null,
+                'deltaMoMPct' => $this->pct($lastM, $prevM),
+                'deltaYoYPct' => $this->pct($row['total'], $priorTotal),
+            ];
+        }
+
+        $other = null;
+        if ($tail !== []) {
+            $otherTotal = 0.0;
+            foreach ($tail as $t) {
+                $otherTotal += $t['total'];
+            }
+            $other = ['revenue' => round($otherTotal, 2), 'count' => count($tail), 'share' => $totalRev > 0.0 ? round($otherTotal / $totalRev * 100, 1) : null];
+        }
+
+        return [
+            'rows'   => $rows,
+            'other'  => $other,
+            'total'  => round($totalRev, 2),
         ];
     }
 

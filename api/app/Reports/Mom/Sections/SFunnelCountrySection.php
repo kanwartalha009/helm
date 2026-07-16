@@ -94,14 +94,21 @@ final class SFunnelCountrySection implements MomSection
         $out = [];
         foreach ($rows as $r) {
             $sessions = (int) $r->sessions;
+            $cart     = (int) $r->cart_additions;
+            $checkout = (int) $r->reached_checkout;
             $purchase = (int) $r->completed_checkout;
             $out[] = [
                 'key'      => (string) $r->segment_key,
                 'label'    => (string) ($r->label ?: $r->segment_key),
                 'sessions' => $sessions,
-                'cart'     => (int) $r->cart_additions,
-                'checkout' => (int) $r->reached_checkout,
+                // Kanwar, 2026-07-16: funnel stages shown as % OF SESSIONS, not raw
+                // counts. Raw counts kept too (for tooltips/exports), % is the render.
+                'cart'     => $cart,
+                'checkout' => $checkout,
                 'purchase' => $purchase,
+                'cartPct'     => $sessions > 0 ? round($cart / $sessions * 100, 2) : null,
+                'checkoutPct' => $sessions > 0 ? round($checkout / $sessions * 100, 2) : null,
+                'purchasePct' => $sessions > 0 ? round($purchase / $sessions * 100, 2) : null,
                 'cvr'      => $sessions > 0 ? round($purchase / $sessions * 100, 2) : null,
             ];
         }

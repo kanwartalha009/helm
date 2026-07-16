@@ -45,16 +45,17 @@ final class SCategoriesSection implements MomSection
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }
-        [$start, $end] = $window;
 
-        $compareWindow = $filters->compareMonthWindow($tz);
+        // Month-by-month matrix (Kanwar, 2026-07-16): category × the last N months
+        // (window control), with per-month revenue + Total/Share/ΔMoM/ΔYoY.
+        $reportMonth = CarbonImmutable::parse($window[0], $tz)->startOfMonth();
+        $n = $filters->months === null ? 6 : max(1, min(12, $filters->months));
+        $months = [];
+        for ($i = $n - 1; $i >= 0; $i--) {
+            $months[] = $reportMonth->subMonths($i)->format('Y-m');
+        }
 
-        $breakdown = (new CommerceBreakdown())->forDimension(
-            $brand->id, 'category', $start, $end,
-            $compareWindow[0] ?? null, $compareWindow[1] ?? null,
-            $filters->usd,
-        );
-
+        $breakdown = (new CommerceBreakdown())->monthlyMatrix($brand->id, 'category', $months, $filters->usd, 8);
         if ($breakdown === null) {
             return [
                 'key'    => $this->key(),
@@ -81,12 +82,13 @@ final class SCategoriesSection implements MomSection
         return [
             'key'    => $this->key(),
             'status' => 'ok',
-            'month'  => CarbonImmutable::parse($start)->format('Y-m'),
-            'compareMonth' => $compareWindow !== null ? CarbonImmutable::parse($compareWindow[0])->format('Y-m') : null,
+            'month'  => $reportMonth->format('Y-m'),
+            'months' => $months,
+            'monthLabels' => array_map(static fn (string $ym): string => CarbonImmutable::createFromFormat('Y-m-d', $ym . '-01')->isoFormat('MMM YY'), $months),
+            'monthsWindow' => $n,
             'rows'   => $rows,
             'other'  => $breakdown['other'],
             'total'  => $breakdown['total'],
-            'matrix' => $breakdown['matrix'],
             'unavailable' => [
                 'stockCoverWeeks' => 'Stock is a simple on-hand PRESENCE check (<= 20 units flags lowStock), not a real weeks-of-cover figure — that needs sell-through velocity math not computed this pass.',
             ],

@@ -8,6 +8,7 @@ use App\Models\Brand;
 use App\Models\MetaBreakdownDaily;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
+use App\Reports\Mom\Support\MetaBreakdownMetrics;
 use Carbon\CarbonImmutable;
 
 /**
@@ -42,96 +43,56 @@ final class SPlacementMixSection implements MomSection
         }
         [$start, $end] = $window;
 
-        $cur = $this->metrics($brand->id, $start, $end);
-        if ($cur === null) {
+        // Detailed per-placement ad metrics (Kanwar, 2026-07-16 — "should look
+        // like this detailed columns"): Cost/Reach/Freq/Clicks/CTR/CPM/Purch/
+        // ROAS/CPA/Share, via the shared MetaBreakdownMetrics. Platform-switchable
+        // (Meta default; TikTok when its breakdown is synced).
+        $platform = in_array($filters->platform, ['meta', 'tiktok'], true) ? $filters->platform : 'meta';
+        $svc = new MetaBreakdownMetrics();
+        $raw = $svc->rawSegments($brand->id, $platform, 'placement', $start, $end);
+        if ($raw === null) {
             return [
                 'key'    => $this->key(),
                 'status' => 'needs_source',
-                'note'   => 'No Meta placement-breakdown data synced for this brand/month yet (meta:backfill-breakdown --type=placement).',
+                'note'   => "No {$platform} placement-breakdown data synced for this brand/month yet (meta:backfill-breakdown --type=placement).",
+                'platform' => $platform,
             ];
         }
 
-        $compareWindow = $filters->compareMonthWindow($tz);
-        $cmp = $compareWindow !== null ? $this->metrics($brand->id, $compareWindow[0], $compareWindow[1]) : null;
+        $total = 0.0;
+        foreach ($raw as $s) {
+            $total += $s['spend'];
+        }
+
+        $vertical = 0.0;
+        $feed = 0.0;
+        $rows = [];
+        foreach ($raw as $key => $s) {
+            if ($this->isVertical($key) || $this->isVertical($s['label'])) {
+                $vertical += $s['spend'];
+            } elseif ($this->isFeed($key) || $this->isFeed($s['label'])) {
+                $feed += $s['spend'];
+            }
+            $rows[] = ['key' => $key, 'label' => $s['label']] + $svc->metrics($s, $total);
+        }
+        usort($rows, static fn (array $a, array $b): int => $b['spend'] <=> $a['spend']);
 
         $goal = (float) config('momreport.benchmarks.vertical_placement_pct_goal', 80.0);
+        $verticalPct = $total > 0.0 ? round($vertical / $total * 100, 1) : null;
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
             'month'  => CarbonImmutable::parse($start)->format('Y-m'),
-            'compareMonth' => $compareWindow !== null ? CarbonImmutable::parse($compareWindow[0])->format('Y-m') : null,
-            'verticalPct' => [
-                'value'    => $cur['verticalPct'],
-                'compare'  => $cmp['verticalPct'] ?? null,
-                'deltaPct' => $this->delta($cur['verticalPct'], $cmp['verticalPct'] ?? null),
-            ],
+            'platform' => $platform,
+            'verticalPct' => ['value' => $verticalPct],
             'goal' => $goal,
-            'goalHit' => $cur['verticalPct'] !== null ? $cur['verticalPct'] >= $goal : null,
-            // Feed vs Stories/Reels delta mini-table (REV2 R1's "delta mini-table").
+            'goalHit' => $verticalPct !== null ? $verticalPct >= $goal : null,
             'feedVsVertical' => [
-                'feedPct'     => $cur['feedPct'],
-                'verticalPct' => $cur['verticalPct'],
+                'feedPct'     => $total > 0.0 ? round($feed / $total * 100, 1) : null,
+                'verticalPct' => $verticalPct,
             ],
-            'rows' => $cur['rows'],
-        ];
-    }
-
-    /** @return array{verticalPct: ?float, feedPct: ?float, rows: array<int, array<string, mixed>>}|null */
-    private function metrics(int $brandId, string $start, string $end): ?array
-    {
-        $rows = MetaBreakdownDaily::query()
-            ->where('brand_id', $brandId)
-            ->where('platform', 'meta')
-            ->where('breakdown_type', 'placement')
-            ->whereBetween('date', [$start, $end])
-            ->groupBy('segment_key', 'segment_label')
-            ->selectRaw('segment_key, MAX(segment_label) AS label,
-                COALESCE(SUM(spend), 0) AS spend,
-                COALESCE(SUM(impressions), 0) AS impressions,
-                COALESCE(SUM(clicks), 0) AS clicks')
-            ->get();
-
-        if ($rows->isEmpty()) {
-            return null;
-        }
-
-        $total = (float) $rows->sum('spend');
-        $sorted = $rows->sortByDesc('spend')->values();
-
-        $out = [];
-        $vertical = 0.0;
-        $feed = 0.0;
-        $cumSpend = 0.0;
-        foreach ($sorted as $r) {
-            $key    = (string) $r->segment_key;
-            $label  = (string) ($r->label ?: $key);
-            $spend  = round((float) $r->spend, 2);
-            $clicks = (int) $r->clicks;
-            $imps   = (int) $r->impressions;
-            $isVertical = $this->isVertical($key) || $this->isVertical($label);
-            if ($isVertical) {
-                $vertical += (float) $r->spend;
-            } elseif ($this->isFeed($key) || $this->isFeed($label)) {
-                $feed += (float) $r->spend;
-            }
-            $cumSpend += (float) $r->spend;
-
-            $out[] = [
-                'key' => $key, 'label' => $label, 'spend' => $spend,
-                'cpc' => $clicks > 0 ? round((float) $r->spend / $clicks, 2) : null,
-                'ctr' => $imps > 0 ? round($clicks / $imps * 100, 2) : null,
-                'cpm' => $imps > 0 ? round((float) $r->spend / $imps * 1000, 2) : null,
-                'pctSpend' => $total > 0.0 ? round((float) $r->spend / $total * 100, 1) : null,
-                'accPct'   => $total > 0.0 ? round($cumSpend / $total * 100, 1) : null,
-                'isVertical' => $isVertical,
-            ];
-        }
-
-        return [
-            'verticalPct' => $total > 0.0 ? round($vertical / $total * 100, 1) : null,
-            'feedPct'     => $total > 0.0 ? round($feed / $total * 100, 1) : null,
-            'rows'        => $out,
+            'rows' => $rows,
         ];
     }
 

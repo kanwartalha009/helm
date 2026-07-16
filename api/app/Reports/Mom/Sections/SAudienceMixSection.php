@@ -56,10 +56,26 @@ final class SAudienceMixSection implements MomSection
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }
-        [$start, $end] = $window;
 
-        $cur = $this->metrics($brand->id, $start, $end);
-        if ($cur === null) {
+        // Month-by-month matrix (Kanwar, 2026-07-16): audience segment × the last N
+        // months (window control) of Meta spend, + Total/Share/ΔMoM/ΔYoY per segment.
+        $reportMonth = CarbonImmutable::parse($window[0], $tz)->startOfMonth();
+        $n = $filters->months === null ? 6 : max(1, min(12, $filters->months));
+        $months = [];
+        for ($i = $n - 1; $i >= 0; $i--) {
+            $months[] = $reportMonth->subMonths($i)->format('Y-m');
+        }
+
+        // Per-month segment split (reuses the single-window metrics()).
+        $monthData = [];
+        $any = false;
+        foreach ($months as $ym) {
+            $mStart = CarbonImmutable::createFromFormat('Y-m-d', $ym . '-01')->startOfMonth();
+            $md = $this->metrics($brand->id, $mStart->toDateString(), $mStart->endOfMonth()->toDateString());
+            $monthData[$ym] = $md;
+            $any = $any || $md !== null;
+        }
+        if (! $any) {
             return [
                 'key'    => $this->key(),
                 'status' => 'needs_source',
@@ -67,29 +83,83 @@ final class SAudienceMixSection implements MomSection
             ];
         }
 
-        $compareWindow = $filters->compareMonthWindow($tz);
-        $cmp = $compareWindow !== null ? $this->metrics($brand->id, $compareWindow[0], $compareWindow[1]) : null;
+        // Prior-year window (same N months) for ΔYoY, per segment.
+        $priorStart = $reportMonth->subMonths($n - 1)->subYear()->startOfMonth();
+        $priorEnd   = $reportMonth->subYear()->endOfMonth();
+        $prior = $this->metrics($brand->id, $priorStart->toDateString(), $priorEnd->toDateString());
+        $priorBySeg = [];
+        foreach ($prior['segments'] ?? [] as $s) {
+            $priorBySeg[$s['key']] = $s['spend'];
+        }
+
+        // Assemble segment → monthly spend + window total; brand window total.
+        $segMap = [];
+        $monthTotals = [];
+        $windowTotal = 0.0;
+        foreach ($months as $ym) {
+            $md = $monthData[$ym];
+            $monthTotals[$ym] = $md['total'] ?? 0.0;
+            $windowTotal += $md['total'] ?? 0.0;
+            foreach ($md['segments'] ?? [] as $s) {
+                $segMap[$s['key']] ??= ['key' => $s['key'], 'label' => $s['label'], 'months' => [], 'total' => 0.0];
+                $segMap[$s['key']]['months'][$ym] = $s['spend'];
+                $segMap[$s['key']]['total'] += $s['spend'];
+            }
+        }
+
+        $rows = [];
+        foreach ($segMap as $seg) {
+            $monthly = [];
+            foreach ($months as $ym) {
+                $monthly[] = array_key_exists($ym, $seg['months']) ? round((float) $seg['months'][$ym], 2) : null;
+            }
+            $lastM = $monthly[$n - 1] ?? null;
+            $prevM = $n >= 2 ? ($monthly[$n - 2] ?? null) : null;
+            $rows[] = [
+                'key'      => $seg['key'],
+                'label'    => $seg['label'],
+                'monthly'  => $monthly,
+                'spend'    => round($seg['total'], 2),
+                'share'    => $windowTotal > 0.0 ? round($seg['total'] / $windowTotal * 100, 1) : null,
+                'deltaMoMPct' => $this->delta($lastM, $prevM),
+                'deltaYoYPct' => $this->delta($seg['total'], $priorBySeg[$seg['key']] ?? null),
+            ];
+        }
+        usort($rows, static fn (array $a, array $b): int => $b['spend'] <=> $a['spend']);
 
         $benchmark = (float) config('momreport.benchmarks.existing_spend_pct_benchmark', 15.0);
+        $existingWindow = $segMap['existing']['total'] ?? 0.0;
+        $existingPct = $windowTotal > 0.0 ? round($existingWindow / $windowTotal * 100, 1) : null;
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
-            'month'  => CarbonImmutable::parse($start)->format('Y-m'),
-            'compareMonth' => $compareWindow !== null ? CarbonImmutable::parse($compareWindow[0])->format('Y-m') : null,
-            'totalSpend' => $this->tile($cur['total'], $cmp['total'] ?? null),
-            'existingPct' => $this->tile($cur['existingPct'], $cmp['existingPct'] ?? null),
+            'month'  => $reportMonth->format('Y-m'),
+            'months' => $months,
+            'monthLabels' => array_map(static fn (string $ym): string => CarbonImmutable::createFromFormat('Y-m-d', $ym . '-01')->isoFormat('MMM YY'), $months),
+            'monthsWindow' => $n,
+            'totalSpend' => round($windowTotal, 2),
+            'existingPct' => $existingPct,
             'benchmark' => $benchmark,
             // Alarm when MORE spend than the benchmark is going to already-existing
             // customers (prospecting budget should dominate) — null when there's no
             // spend to rate at all, never a false "pass".
-            'alarm' => $cur['existingPct'] !== null ? $cur['existingPct'] > $benchmark : null,
-            'segments' => $cur['segments'],
+            'alarm' => $existingPct !== null ? $existingPct > $benchmark : null,
+            'rows'   => $rows,
             'unavailable' => [
                 'perCampaign' => 'meta_breakdown_daily has no campaign_id — this split is brand-level, not per-campaign (schema gap, see class docblock).',
                 'aov'         => 'No order-to-audience-segment link exists in this schema.',
             ],
         ];
+    }
+
+    private function delta(?float $value, ?float $compare): ?float
+    {
+        if ($value === null || $compare === null || $compare === 0.0) {
+            return null;
+        }
+
+        return round(($value - $compare) / $compare * 100, 1);
     }
 
     /** @return array{total: float, existingPct: ?float, segments: array<int, array<string, mixed>>}|null */

@@ -241,6 +241,11 @@ class MomM2ContinuedTest extends TestCase
         $s10 = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S10?month={$month->format('Y-m')}")
             ->assertOk()->assertJsonPath('status', 'ok');
         $this->assertEquals('ES', $s10->json('rows.0.key'));
+        // Kanwar, 2026-07-16: funnel stages as % of sessions. ES: cart 100/1000=10%,
+        // checkout 50/1000=5%, purchase 20/1000=2%.
+        $this->assertEquals(10.0, $s10->json('rows.0.cartPct'));
+        $this->assertEquals(5.0, $s10->json('rows.0.checkoutPct'));
+        $this->assertEquals(2.0, $s10->json('rows.0.purchasePct'));
 
         $s11 = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S11?month={$month->format('Y-m')}")
             ->assertOk()->assertJsonPath('status', 'ok');

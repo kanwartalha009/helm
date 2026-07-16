@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Reports\Mom\Sections;
 
 use App\Models\Brand;
-use App\Models\MetaBreakdownDaily;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
+use App\Reports\Mom\Support\MetaBreakdownMetrics;
 use Carbon\CarbonImmutable;
 
 /**
@@ -38,76 +38,52 @@ final class SGenderMixSection implements MomSection
         }
         [$start, $end] = $window;
 
-        $cur = $this->metrics($brand->id, $start, $end);
-        if ($cur === null) {
+        // Detailed per-gender ad metrics (Kanwar, 2026-07-16 — "should look like
+        // this"): Cost/Reach/Freq/Clicks/CTR/CPM/Purch/ROAS/CPA/Share. Folds the
+        // age_gender axis to Male/Female/Unknown, summing EVERY metric (not just
+        // spend), then derives the rates via the shared MetaBreakdownMetrics.
+        $platform = in_array($filters->platform, ['meta', 'tiktok'], true) ? $filters->platform : 'meta';
+        $svc = new MetaBreakdownMetrics();
+        $raw = $svc->rawSegments($brand->id, $platform, 'age_gender', $start, $end);
+        if ($raw === null) {
             return [
                 'key'    => $this->key(),
                 'status' => 'needs_source',
-                'note'   => 'No Meta age/gender-breakdown data synced for this brand/month yet (meta:backfill-breakdown --type=age_gender).',
+                'note'   => "No {$platform} age/gender-breakdown data synced for this brand/month yet (meta:backfill-breakdown --type=age_gender).",
+                'platform' => $platform,
             ];
         }
 
-        $compareWindow = $filters->compareMonthWindow($tz);
-        $cmp = $compareWindow !== null ? $this->metrics($brand->id, $compareWindow[0], $compareWindow[1]) : null;
+        // Fold every segment into a gender bucket, summing all raw metrics.
+        $buckets = [];
+        $total = 0.0;
+        foreach ($raw as $key => $s) {
+            $k = strtolower($key . ' ' . $s['label']);
+            $bucket = str_contains($k, 'female') ? 'female' : (str_contains($k, 'male') ? 'male' : 'unknown');
+            $buckets[$bucket] ??= ['label' => ucfirst($bucket), 'spend' => 0.0, 'impressions' => 0, 'clicks' => 0, 'reach' => null, 'purchases' => 0, 'convValue' => 0.0];
+            $buckets[$bucket]['spend']       += $s['spend'];
+            $buckets[$bucket]['impressions'] += $s['impressions'];
+            $buckets[$bucket]['clicks']      += $s['clicks'];
+            $buckets[$bucket]['purchases']   += $s['purchases'];
+            $buckets[$bucket]['convValue']   += $s['convValue'];
+            if ($s['reach'] !== null) {
+                $buckets[$bucket]['reach'] = ($buckets[$bucket]['reach'] ?? 0) + $s['reach'];
+            }
+            $total += $s['spend'];
+        }
+
+        $rows = [];
+        foreach ($buckets as $key => $b) {
+            $rows[] = ['key' => $key, 'label' => $b['label']] + $svc->metrics($b, $total);
+        }
+        usort($rows, static fn (array $a, array $b): int => $b['spend'] <=> $a['spend']);
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
             'month'  => CarbonImmutable::parse($start)->format('Y-m'),
-            'compareMonth' => $compareWindow !== null ? CarbonImmutable::parse($compareWindow[0])->format('Y-m') : null,
-            'male' => [
-                'spend' => $cur['male'], 'pct' => $cur['malePct'],
-                'compare' => $cmp['male'] ?? null, 'comparePct' => $cmp['malePct'] ?? null,
-            ],
-            'female' => [
-                'spend' => $cur['female'], 'pct' => $cur['femalePct'],
-                'compare' => $cmp['female'] ?? null, 'comparePct' => $cmp['femalePct'] ?? null,
-            ],
-            'unavailable' => $cur['unknown'] > 0.0 ? [
-                'note' => round($cur['unknown'], 2) . ' spend on unknown-gender rows excluded from the split.',
-            ] : null,
-        ];
-    }
-
-    /** @return array{male: float, female: float, unknown: float, malePct: ?float, femalePct: ?float}|null */
-    private function metrics(int $brandId, string $start, string $end): ?array
-    {
-        $rows = MetaBreakdownDaily::query()
-            ->where('brand_id', $brandId)
-            ->where('platform', 'meta')
-            ->where('breakdown_type', 'age_gender')
-            ->whereBetween('date', [$start, $end])
-            ->groupBy('segment_key')
-            ->selectRaw('segment_key, COALESCE(SUM(spend), 0) AS spend')
-            ->get();
-
-        if ($rows->isEmpty()) {
-            return null;
-        }
-
-        $male = 0.0;
-        $female = 0.0;
-        $unknown = 0.0;
-        foreach ($rows as $r) {
-            $k = strtolower((string) $r->segment_key);
-            $spend = (float) $r->spend;
-            if (str_contains($k, 'female')) {
-                $female += $spend;
-            } elseif (str_contains($k, 'male')) {
-                $male += $spend;
-            } else {
-                $unknown += $spend;
-            }
-        }
-
-        $known = $male + $female;
-
-        return [
-            'male' => round($male, 2),
-            'female' => round($female, 2),
-            'unknown' => round($unknown, 2),
-            'malePct' => $known > 0.0 ? round($male / $known * 100, 1) : null,
-            'femalePct' => $known > 0.0 ? round($female / $known * 100, 1) : null,
+            'platform' => $platform,
+            'rows'   => $rows,
         ];
     }
 }

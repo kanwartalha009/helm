@@ -1571,3 +1571,28 @@ Frontend:
 
 Tests: api/tests/Feature/MomM2ContinuedTest.php — S5 monthly-matrix test (months window, aligned cells incl. a null gap, dMoM +100%, ROAS 5.0, share 100%); S6 assertions (ROAS-per-month cells, default benchmark 1.5, ES ALARM at 1.0<1.5, benchmark=5 echoed); S4 monthly shape.
 Proof: full Mom suite green (63 passed, 537 assertions); npx tsc --noEmit clean; npm run build green.
+
+### Round L — S7/S8/S13/S17 monthly matrices, S14/S15 detailed metrics, S10/S11 funnel % (Kanwar, 2026-07-16)
+Kanwar (four asks in one pass):
+- "Best categories / Best sellers / Audience new vs existing / Landing spend x best sellers should be month-on-month with MoM + YoY columns, as we did country sections."
+- "Add spend by gender should look like this detailed columns" (+ same for Placement) — Cost/Reach/Freq/Clicks/CTR/CPM/Purch/ROAS/CPA/Share, coloured.
+- "Funnel by country / Funnel by landing path: Add to cart, Checkout, Purchase as percentage rather than exact numbers."
+
+Month-by-month matrices (per-month cell coloured by MoM change; window total; ΔYoY = window vs same window last year; ΔMoM = last vs previous month; 3/4/6/12 month control, default 6):
+- CommerceBreakdown::monthlyMatrix() added (per-key per-month revenue, top-N + other, ΔMoM/ΔYoY) — used by S7 (category) and S8 (product; the deferred "last-6-months" trend, now real). Stock columns kept.
+- SAudienceMixSection (S13) — audience segment × per-month Meta spend + Total/Share/ΔMoM/ΔYoY; existing-vs-benchmark alarm in footer.
+- SLandingSpendVsSellersSection (S17) — product × per-month landing spend (bucketed in PHP, driver-agnostic) + window spend/revenue/stock/ΔMoM/ΔYoY; mismatch flag kept.
+
+Detailed ad-metrics tables (single window, coloured like the reference — CTR/ROAS higher=green, CPM/CPA lower=green):
+- New shared support MetaBreakdownMetrics (rawSegments + metrics: Cost/Reach/Freq(imps/reach)/Clicks/CTR/CPM/Purchases/ROAS/CPA/Share).
+- SPlacementMixSection (S14) — per-placement detailed row; kept vertical% goal chip.
+- SGenderMixSection (S15) — age_gender folded to Male/Female/Unknown, every metric summed (not just spend).
+- Both platform-switchable via ReportFilters::$platform (Meta default; TikTok when synced). config: S13/S14/S15 view -> 'table' (chart twins retired for these).
+
+Funnel as percentages:
+- SFunnelCountrySection (S10) + SFunnelLandingSection (S11) — added cartPct/checkoutPct/purchasePct (% of sessions); raw counts kept for exports.
+
+Frontend (web/src/components/reports/mom/sectionTables.tsx): shared monthColumns()/renderAdMetrics()/renderFunnel() helpers; S7/S8/S13/S17 monthly renderers; S14/S15 detailed tables; S10/S11 funnel-% tables (higher=green). MomSectionCard: month control now S1/S4/S5/S6/S7/S8/S13/S17; Meta/TikTok toggle for S14/S15.
+
+Tests (MomM2ContinuedTest, MomM3Test, MomM2FinalSectionsTest already green): S10 funnel % (cart 10 / checkout 5 / purchase 2), S14 detailed (ctr 2.0, cpm 80, share 88.9), S15 detailed gender rows (ctr/roas/cpa/share), S13 matrix rows.
+Proof: full Mom suite green (63 passed, 546 assertions); npx tsc --noEmit clean; npm run build green.

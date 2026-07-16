@@ -101,13 +101,19 @@ final class SFunnelLandingSection implements MomSection
                 continue; // no direct purchase attributed to this landing page — drop, don't pad the table
             }
             $sessions = (int) $r->sessions;
+            $cart     = (int) $r->cart_additions;
+            $checkout = (int) $r->reached_checkout;
             $out[] = [
                 'key'      => (string) $r->segment_key,
                 'label'    => (string) ($r->label ?: $r->segment_key),
                 'sessions' => $sessions,
-                'cart'     => (int) $r->cart_additions,
-                'checkout' => (int) $r->reached_checkout,
+                // Kanwar, 2026-07-16: funnel stages as % of sessions, not raw counts.
+                'cart'     => $cart,
+                'checkout' => $checkout,
                 'purchase' => $purchase,
+                'cartPct'     => $sessions > 0 ? round($cart / $sessions * 100, 2) : null,
+                'checkoutPct' => $sessions > 0 ? round($checkout / $sessions * 100, 2) : null,
+                'purchasePct' => $sessions > 0 ? round($purchase / $sessions * 100, 2) : null,
                 'cvr'      => $sessions > 0 ? round($purchase / $sessions * 100, 2) : null,
             ];
         }
