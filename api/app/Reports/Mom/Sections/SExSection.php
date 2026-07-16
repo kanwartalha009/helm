@@ -12,6 +12,7 @@ use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Support\CustomerMix;
 use App\Services\PlatformCredentialService;
+use App\Services\Rules\Pacing;
 use Carbon\CarbonImmutable;
 
 /**
@@ -50,6 +51,7 @@ final class SExSection implements MomSection
     public function __construct(
         private readonly CustomerMix $customerMix,
         private readonly PlatformCredentialService $credentials,
+        private readonly Pacing $pacing,
     ) {
     }
 
@@ -143,9 +145,52 @@ final class SExSection implements MomSection
             'month'  => CarbonImmutable::parse($start)->format('Y-m'),
             'compareMonth' => $compareWindow !== null ? CarbonImmutable::parse($compareWindow[0])->format('Y-m') : null,
             'tiles'  => $tiles,
+            // Goals vs actual now rides at the TOP of the executive overview
+            // (Kanwar, 2026-07-15 — "move it to Executive overview cards"): the
+            // standalone S-GOALS section was retired and its revenue/ROAS-vs-target
+            // progress is surfaced here as exec cards. Pure reuse of the SAME Pacing
+            // engine SGoalsSection used — null (omitted card) when no target is set.
+            'goals'  => $this->goals($brand, CarbonImmutable::parse($start)->format('Y-m')),
             // Honest omission, not silence — the SPA greys these out with the
             // reason so it stays visible that a real source is still to arrive.
             'unavailable' => $unavailable,
+        ];
+    }
+
+    /**
+     * Revenue- and ROAS-vs-target progress for the exec-overview goal cards —
+     * the SAME Pacing read the retired S-GOALS section used, mapped to a compact
+     * shape the tile renderer consumes. Null when the brand has no target for the
+     * month (and no standing default), so the cards simply don't render — never a
+     * fabricated 0%-of-goal (spec rule 9, missing != zero).
+     *
+     * @return array<string, mixed>|null
+     */
+    private function goals(Brand $brand, string $month): ?array
+    {
+        $p = $this->pacing->forBrand($brand, $month);
+        if ($p === null || ($p['revenue'] === null && $p['roas'] === null)) {
+            return null;
+        }
+
+        $revenue = $p['revenue'];
+        $roas    = $p['roas'];
+
+        return [
+            'currency' => $p['currency'],
+            'revenue'  => $revenue === null ? null : [
+                'actual'      => $revenue['actual'],
+                'target'      => $revenue['target'],
+                'pctOfTarget' => $revenue['pctOfTarget'],
+                'goalHit'     => $revenue['pctOfTarget'] !== null && $revenue['pctOfTarget'] >= 100,
+            ],
+            'roas' => $roas === null ? null : [
+                // Pacing's roas.actual is already null (not 0) when there's no ad
+                // spend — a ratio with no denominator is undefined, not zero.
+                'actual'  => $roas['actual'],
+                'target'  => $roas['target'],
+                'goalHit' => $roas['actual'] !== null && $roas['actual'] >= $roas['target'],
+            ],
         ];
     }
 

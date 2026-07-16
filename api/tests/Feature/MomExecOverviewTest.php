@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\Brand;
+use App\Models\BrandTarget;
 use App\Models\PlatformConnection;
 use App\Models\User;
 use App\Platforms\Shopify\RevenueFetcher;
@@ -158,6 +159,34 @@ class MomExecOverviewTest extends TestCase
         $this->assertEquals(40, $res->json('tiles.newVsReturningPct.returningCount'));
         // CAC = 600 spend / 60 new = 10.0
         $this->assertEquals(10.0, $res->json('tiles.cac.value'));
+    }
+
+    public function test_sex_carries_goals_vs_target_moved_from_the_retired_sgoals_section(): void
+    {
+        // Kanwar, 2026-07-15 — "Goals vs actual move it to Executive overview
+        // cards": the standalone S-GOALS section was retired and its revenue/ROAS
+        // vs-target progress now rides in the S-EX payload as `goals`. Same Pacing
+        // engine, so a target set for the brand lights up the exec goal cards.
+        $this->actingMasterAdmin();
+        $brand = $this->makeBrand();
+        $month = $this->monthStart()->format('Y-m');
+
+        // No target yet -> goals omitted entirely (never a fabricated 0%-of-goal).
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S-EX?month={$month}")->assertOk();
+        $this->assertNull($res->json('goals'));
+
+        // Standing default target + real revenue -> goals.revenue lights up.
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => null, 'revenue_target' => 1000, 'roas_target' => 3]);
+        DB::table('daily_metrics')->insert([
+            'brand_id' => $brand->id, 'platform' => 'shopify', 'date' => $this->monthStart()->addDays(2)->toDateString(),
+            'currency' => 'EUR', 'fx_rate_to_usd' => 1.0, 'is_complete' => true, 'pulled_at' => now(),
+            'total_sales' => 400, 'refunds_amount' => 0, 'orders' => 4,
+        ]);
+
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S-EX?month={$month}")
+            ->assertOk()->assertJsonPath('status', 'ok');
+        $this->assertEquals(1000.0, $res->json('goals.revenue.target'));
+        $this->assertFalse($res->json('goals.revenue.goalHit')); // 400 of 1000
     }
 
     public function test_sex_email_tile_only_appears_when_klaviyo_connected(): void

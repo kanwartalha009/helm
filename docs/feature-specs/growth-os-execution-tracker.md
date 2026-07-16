@@ -1483,3 +1483,24 @@ Audited the report's heading system: the canonical metric header is StatTile's *
   - `SplitAmount` (New / Returning headers): now uses the same eyebrow + 22/650 value (was 18/700). Removed the color swatch — both series are the same app blue now, so a swatch conveyed nothing; the chart legend beneath still ties label→line.
   - Kept the "New vs returning customer sales" group label + method footnote as a plain `muted text-sm` CHART CAPTION — captions (label a chart) stay distinct from eyebrows (label a KPI) by design.
 - No backend change. Proof: `npx tsc --noEmit` clean; `npm run build` green.
+
+### Round G — Section-label regression fix (Kanwar, 2026-07-15)
+Kanwar: "on refresh/reload headings of sections change to S1, S2 — should keep the original information headings."
+
+Root cause: the report customizer only persists key/enabled/position/view (ReportLayoutController::validateSections drops label), so the moment any brand/agency layout was SAVED, `ReportLayouts::normalize()` backfilled `label` with the KEY. After that, `resolve()` returned S1/S2/... as headings. Before any save (fresh code-default catalog) labels were correct — hence "fine until reload".
+
+- `api/app/Services/ReportLayouts.php` — added `applyCatalogLabels()`, called in `resolve()` and `agencyDefaultLayout()`: labels are now always re-derived from the code catalog (config/momreport.php) on read. Self-heals any layout row already stored with label==key; no migration. Keys not in the catalog keep their carried label.
+- `api/tests/Feature/MomM1Test.php` — regression test: a saved layout with NO label still resolves "Total sales evolution"/"Financial matrix", not "S2"/"S1". Full MomM1Test green (7 passed).
+
+### Round H — Goals vs actual moved into the Executive overview (Kanwar, 2026-07-15)
+Kanwar: "Goals vs actual move it to Executive overview cards." (Display: mixed — tile eyebrow + % of target AND the progress bar / actual-vs-target + hit badge.)
+
+- `api/app/Reports/Mom/Sections/SExSection.php` — injected `Pacing`; S-EX payload now carries a `goals` block (revenue + ROAS vs target), pure reuse of the same engine the retired S-GOALS section used. Null when no target (missing != fabricated 0%).
+- `api/config/momreport.php` — S-GOALS default `enabled => false` (kept in catalog for label resolution).
+- `web/src/components/reports/mom/sectionCharts.tsx` — S-EX renderer renders `GoalCardsRow`/`GoalTile` (bordered cards: EYEBROW label + big "% of target" value + slim progress bar + "actual of target" + ✓ hit) at the top of the exec grid.
+- `web/src/components/reports/mom/MomReportDocument.tsx` — added a "Goals" header button (next to Tiers) opening the same GoalsDrawer; hard-filters S-GOALS out of rendered/presented sections so a stale saved layout can't double-render it.
+- `web/src/routes/MomPublicReportPage.tsx` — same S-GOALS filter for shared links.
+- `api/tests/Feature/MomExecOverviewTest.php` — new test: S-EX omits `goals` with no target, and lights up revenue-vs-target when a target is set. S-EX + M2 suites green (10 passed).
+- Proof: `php artisan test` (MomExecOverview + MomM1 + MomM2) green; `npx tsc --noEmit` clean; `npm run build` green.
+
+Note (not a code change): report opening on May instead of the closed June is a server date/timezone issue on the deployment — the last-complete-month logic is correct on a July-dated server. Left as-is per Kanwar.

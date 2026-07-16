@@ -22,7 +22,12 @@ declare(strict_types=1);
 return [
     'sections' => [
         ['key' => 'S-EX',    'label' => 'Executive overview',            'view' => 'chart', 'enabled' => true],
-        ['key' => 'S-GOALS', 'label' => 'Goals vs actual',                'view' => 'chart', 'enabled' => true],
+        // S-GOALS "Goals vs actual" moved INTO the executive overview as goal
+        // cards (Kanwar, 2026-07-15 — "move it to Executive overview cards").
+        // Disabled by default so it no longer renders as its own section; the
+        // frontend also hard-filters it (MomReportDocument) so a stale saved
+        // layout can't resurrect it. Kept in the catalog for label resolution.
+        ['key' => 'S-GOALS', 'label' => 'Goals vs actual',                'view' => 'chart', 'enabled' => false],
         ['key' => 'S1',      'label' => 'Financial matrix',               'view' => 'both',  'enabled' => true],
         ['key' => 'S2',      'label' => 'Total sales evolution',          'view' => 'chart', 'enabled' => true],
         // S3 "New vs returning evolution" retired (Kanwar, 2026-07-15) — the

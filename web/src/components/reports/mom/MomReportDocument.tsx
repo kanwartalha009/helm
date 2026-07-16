@@ -5,6 +5,7 @@ import { useCurrentUser } from '@/hooks/useSettings';
 import { toQuery, useCreateMomShare, type MomFiltersInput, type MomReportShell } from '@/hooks/useMomReport';
 import { toast } from '@/stores/toastStore';
 import { CountryTierDrawer } from '@/components/brands/CountryTierDrawer';
+import { GoalsDrawer } from '@/components/brands/GoalsDrawer';
 import { MomSectionCard } from './MomSectionCard';
 import { PresentationMode } from './PresentationMode';
 
@@ -26,8 +27,13 @@ import { PresentationMode } from './PresentationMode';
  * mom's own dedicated share routes.
  */
 export function MomReportDocument({ slug, shell, filters }: { slug: string; shell: MomReportShell; filters: MomFiltersInput }) {
-  const enabled = shell.sections.filter((s) => s.enabled);
+  // S-GOALS was moved INTO the executive overview as goal cards (Kanwar,
+  // 2026-07-15 — "move it to Executive overview cards"), so it never renders as
+  // its own section anymore. Filtered here (not just disabled in config) so an
+  // older saved layout that still lists S-GOALS can't double-render it.
+  const enabled = shell.sections.filter((s) => s.enabled && s.key !== 'S-GOALS');
   const [presenting, setPresenting] = useState(false);
+  const [goalsOpen, setGoalsOpen] = useState(false);
   const { data: user } = useAuth();
   const createShare = useCreateMomShare(slug);
 
@@ -59,6 +65,9 @@ export function MomReportDocument({ slug, shell, filters }: { slug: string; shel
         </h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="muted text-sm">{shell.month.label}</span>
+          <Button size="sm" variant="ghost" type="button" onClick={() => setGoalsOpen(true)}>
+            Goals
+          </Button>
           <Button size="sm" variant="ghost" type="button" onClick={() => setTierDrawerOpen(true)}>
             Tiers
           </Button>
@@ -74,6 +83,13 @@ export function MomReportDocument({ slug, shell, filters }: { slug: string; shel
       {enabled.map((section) => (
         <MomSectionCard key={section.key} slug={slug} section={section} filters={filters} currency={shell.currency} />
       ))}
+
+      <GoalsDrawer
+        slug={slug}
+        canEdit={canEditTiers}
+        open={goalsOpen}
+        onClose={() => setGoalsOpen(false)}
+      />
 
       <CountryTierDrawer
         slug={slug}

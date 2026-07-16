@@ -59,17 +59,23 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
       { key: 'emailRevenue', label: 'Email revenue' },
     ];
     return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-        {ORDER.map(({ key, label }) => {
-          if (tiles[key]) {
-            const t = tiles[key];
-            const benchmarkLabel =
-              key === 'newVsReturningPct' && t.returningPct != null ? `Returning ${Number(t.returningPct).toFixed(1)}%` : undefined;
-            return <StatTile key={key} label={label} tile={t} currency={currency} benchmarkLabel={benchmarkLabel} />;
-          }
-          if (unavailable[key]) return <UnavailableTile key={key} label={label} reason={unavailable[key]} />;
-          return null;
-        })}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Goals vs actual, moved into the executive overview (Kanwar,
+            2026-07-15). Rendered as the first cards — revenue/ROAS vs target —
+            only when the backend supplies goals (a target is set). */}
+        <GoalCardsRow goals={p.goals} currency={currency} />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {ORDER.map(({ key, label }) => {
+            if (tiles[key]) {
+              const t = tiles[key];
+              const benchmarkLabel =
+                key === 'newVsReturningPct' && t.returningPct != null ? `Returning ${Number(t.returningPct).toFixed(1)}%` : undefined;
+              return <StatTile key={key} label={label} tile={t} currency={currency} benchmarkLabel={benchmarkLabel} />;
+            }
+            if (unavailable[key]) return <UnavailableTile key={key} label={label} reason={unavailable[key]} />;
+            return null;
+          })}
+        </div>
       </div>
     );
   },
@@ -399,6 +405,85 @@ function SplitAmount({
         {customers.toLocaleString()} {customers === 1 ? 'customer' : 'customers'}
         {pct != null ? ` · ${pct.toFixed(1)}%` : ''}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Goals vs actual, surfaced as executive-overview cards (Kanwar, 2026-07-15 —
+ * "move it to Executive overview cards"). A "mixed" card: the tile eyebrow +
+ * a big "% of target" value (matching the KPI tiles) AND the fuller goal detail
+ * — a progress bar plus actual-vs-target and a hit badge. Renders nothing when
+ * the backend omits goals (no target set), so it never fabricates a 0%-of-goal.
+ */
+function GoalCardsRow({ goals, currency }: { goals: any; currency: string }) {
+  if (!goals || (!goals.revenue && !goals.roas)) return null;
+  const goalCurrency: string = goals.currency ?? currency;
+  const rev = goals.revenue;
+  const roas = goals.roas;
+  const roasPct = roas && roas.actual != null && roas.target ? (roas.actual / roas.target) * 100 : null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+      {rev && (
+        <GoalTile
+          label="Revenue vs target"
+          pct={rev.pctOfTarget}
+          hit={rev.goalHit}
+          actualLabel={formatMoney(rev.actual, goalCurrency, { whole: true })}
+          targetLabel={formatMoney(rev.target, goalCurrency, { whole: true })}
+        />
+      )}
+      {roas && (
+        <GoalTile
+          label="ROAS vs target"
+          pct={roasPct}
+          hit={roas.goalHit}
+          actualLabel={roas.actual != null ? `${roas.actual.toFixed(1)}x` : '—'}
+          targetLabel={`${Number(roas.target).toFixed(1)}x`}
+        />
+      )}
+    </div>
+  );
+}
+
+function GoalTile({
+  label,
+  pct,
+  hit,
+  actualLabel,
+  targetLabel,
+}: {
+  label: string;
+  pct: number | null;
+  hit: boolean;
+  actualLabel: string;
+  targetLabel: string;
+}) {
+  const clamped = pct == null ? 0 : Math.min(100, Math.max(0, pct));
+  return (
+    <div
+      style={{
+        border: '1px solid var(--border, #E7E9F0)',
+        borderRadius: 10,
+        padding: '14px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        minWidth: 220,
+        flex: '1 1 240px',
+      }}
+    >
+      <span className="muted" style={EYEBROW}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span style={METRIC_VALUE}>{pct == null ? '—' : `${Math.round(pct)}%`}</span>
+        {hit && <span style={{ color: '#1F6F5C', fontSize: 11, fontWeight: 600 }}>✓ hit</span>}
+      </div>
+      <div style={{ background: '#E7E9F0', borderRadius: 6, height: 8, overflow: 'hidden' }}>
+        <div style={{ width: `${clamped}%`, height: '100%', background: hit ? '#1F6F5C' : '#3B5BFB' }} />
+      </div>
+      <span className="muted" style={{ fontSize: 11 }}>
+        {actualLabel} of {targetLabel}
+      </span>
     </div>
   );
 }

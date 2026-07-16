@@ -24,7 +24,10 @@ export function MomPublicReportPage() {
   const { data: shell, isLoading, isError } = usePublicMomShell(token);
   const [presenting, setPresenting] = useState(false);
 
-  const enabled = shell?.sections.filter((s) => s.enabled) ?? [];
+  // S-GOALS moved into the executive overview as goal cards (Kanwar,
+  // 2026-07-15) — never a standalone section, incl. on shared links whose
+  // snapshot layout may still list it.
+  const enabled = shell?.sections.filter((s) => s.enabled && s.key !== 'S-GOALS') ?? [];
 
   return (
     <div style={{ minHeight: '100vh', background: '#efeee9', padding: '28px 16px' }}>
