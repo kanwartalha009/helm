@@ -39,6 +39,16 @@ function stockColor(status: InventoryStatus): string {
   return status === 'pause' ? 'var(--danger)' : status === 'alert' ? 'var(--warning)' : 'var(--success)';
 }
 
+// ══ COMPACT ROWS (Bosco, 2026-07-15) ══
+// Vertical cell padding dropped 11px → 6px. On a 3,892-row table the row height is what decides how
+// many products fit on screen, and 11px top+bottom was ~22px of whitespace per row before any
+// content. Horizontal padding stays at 12px — that is spacing BETWEEN columns, not row height, and
+// tightening it would crowd the numbers without buying any density.
+//
+// Line-height is pinned to 1.25 here too: several cells stack two lines (Units + delta chip, the
+// Sessions bar + its two labels), and those — not the padding — are what actually set the row
+// height. Leaving line-height at the browser default (~1.5) would have let the tall cells eat back
+// most of the padding we just saved.
 const thBase: CSSProperties = {
   position: 'sticky',
   top: 0,
@@ -48,16 +58,17 @@ const thBase: CSSProperties = {
   textAlign: 'right',
   fontWeight: 500,
   fontSize: 11.5,
-  padding: '11px 12px',
+  padding: '7px 12px',
   whiteSpace: 'nowrap',
 };
 const thL: CSSProperties = { ...thBase, textAlign: 'left' };
 const tdBase: CSSProperties = {
-  padding: '11px 12px',
+  padding: '6px 12px',
   borderTop: '1px solid var(--border)',
   textAlign: 'right',
   whiteSpace: 'nowrap',
   verticalAlign: 'middle',
+  lineHeight: 1.25,
   fontVariantNumeric: 'tabular-nums',
 };
 const tdL: CSSProperties = { ...tdBase, textAlign: 'left' };

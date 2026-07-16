@@ -285,20 +285,22 @@ export function SessionCell({ total, split }: { total: number | null | undefined
   // container — the overflow you could see in the screenshot. A fixed box means the column is
   // predictable and the table's width is decided by the table, not by one long label.
   return (
-    <div style={{ width: 190, textAlign: 'left' }}>
-      <div style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 13 }}>{fmt(total)}</div>
+    <div style={{ width: 190, textAlign: 'left', lineHeight: 1.2 }}>
+      <div style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 12.5 }}>{fmt(total)}</div>
 
       {total > 0 ? (
         <>
           <div
             style={{
               display: 'flex',
-              height: 7,
+              height: 6,
               width: '100%',
               borderRadius: 4,
               overflow: 'hidden',
               background: 'var(--surface-subtle)',
-              margin: '4px 0 3px',
+              // Tighter than the old 4/3: this cell is the tallest in the row, so its internal
+              // spacing — not the cell padding — is what sets row height on rows that have sessions.
+              margin: '3px 0 2px',
             }}
           >
             {paid > 0 && <span style={{ width: `${paidPct}%`, background: PAID_COLOR }} />}
