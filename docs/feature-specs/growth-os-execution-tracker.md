@@ -1534,3 +1534,40 @@ Kanwar: "add basic backend conditions (if tiktok not connected don't show tiktok
   - Cell heat coloring (v1's gradeCol / heatFromDeltaPct, via HeatTable): column-relative green/red on Orders, AOV, Revenue, ROAS, New, Returning, Total, ROAS-nc (higher = greener); % Returns and CAC (lower = greener); delta-graded Goal / Captación / Ret Δ / Δ Revenue / Δ Budget. Spend, the ad-share %s, and % Ret left ungraded on purpose (no well-defined good/bad direction — colouring them would imply a value judgment). Footnote updated to MoM.
 - `api/tests/Feature/MomM2FinalSectionsTest.php` — MoM test (Captación +20% new 60 vs 50, Ret Δ +33.3%, Δ Revenue +25%, Δ Budget +25%); asserts adPlatforms = [google, meta] (tiktok hidden), hasGoals true/false, and no lingering YoY row field.
 - Proof: full Mom suite green (62 passed, 521 assertions); tsc clean; build green.
+
+### Round K — S4/S5/S6 rebuilt as month-by-month matrices (Kanwar, 2026-07-16)
+Kanwar: "Market revenue by tier / Country revenue MoM / ROAS by country — these should be month-by-month breakdown and YoY, add MoM growth, colour cells per the reference, and controls to customise the number of months or benchmarks." (Evolution beyond REV2 R1, which specced S5/S6 as ranked bars.)
+
+Shared engine:
+- `api/app/Reports/Mom/Support/CountryRevenueSpend.php` — added `computeMonths(brandId, months[])`: the same country name↔ISO2 / D-005 join broken out per month (one bounded windowed compute per month), reused by all three sections.
+- `api/app/Reports/Contracts/ReportFilters.php` — added `benchmark` (?float) param + parser, for the S6 ROAS benchmark control. Additive; other reports unaffected.
+
+Sections (each: last N months ending at the report month, N from ReportFilters::$months, default 6; month cells; window total; ΔYoY = window vs same window last year; ΔMoM = last month vs previous):
+- `SCountryRevenueSection` (S5) — per-month revenue cells (coloured by MoM change) + Total/Share/ROAS(vs blended)/ΔYoY/ΔMoM/TOP-CHECK-ALARM status.
+- `SCountryRoasSection` (S6) — per-month ROAS cells graded vs a configurable benchmark (green above / red below) + window ROAS/Revenue/Meta/tier/ΔYoY/ΔMoM/status. `benchmark` = ReportFilters::$benchmark ?? config floor (1.5); drives colouring AND ALARM/CHECK/TOP. Zero-spend-in-window countries omitted (ROAS undefined ≠ 0).
+- `STierRevenueSection` (S4) — countries rolled up to tiers per month; per-month revenue cells (coloured by MoM) + Total/Share/ROAS/ΔYoY/ΔMoM.
+
+Frontend:
+- `web/src/components/reports/mom/sectionTables.tsx` — S4/S5/S6 renderers rebuilt: dynamic month columns from `p.months`/`p.monthLabels`, MoM cell colouring (heatFromDeltaPct) for revenue matrices, benchmark grading (heatVsBenchmark) for S6 ROAS cells; horizontal scroll; previewRows 15 for the country tables.
+- `web/src/components/reports/mom/MomSectionCard.tsx` — the 3/4/6/12-month window control now serves S1/S4/S5/S6; S6 additionally gets a benchmark selector (Default/2×/3×/4×/5×). Both ride on extraParams (months, benchmark).
+
+Tests: `api/tests/Feature/MomM2ContinuedTest.php` — S5 monthly-matrix test (months window, aligned cells incl. a null gap, ΔMoM +100%, ROAS 5.0, share 100%); S6 assertions (ROAS-per-month cells, default benchmark 1.5, ES ALARM at 1.0<1.5, benchmark=5 echoed); S4 monthly shape.
+Proof: full Mom suite green (63 
+### Round K — S4/S5/S6 rebuilt as month-by-month matrices (Kanwar, 2026-07-16)
+Kanwar: "Market revenue by tier / Country revenue MoM / ROAS by country — these should be month-by-month breakdown and YoY, add MoM growth, colour cells per the reference, and controls to customise the number of months or benchmarks." (Evolution beyond REV2 R1, which specced S5/S6 as ranked bars.)
+
+Shared engine:
+- api/app/Reports/Mom/Support/CountryRevenueSpend.php — added computeMonths(brandId, months[]): the same country name<->ISO2 / D-005 join broken out per month (one bounded windowed compute per month), reused by all three sections.
+- api/app/Reports/Contracts/ReportFilters.php — added benchmark (?float) param + parser for the S6 ROAS benchmark control. Additive; other reports unaffected.
+
+Sections (each: last N months ending at the report month, N from ReportFilters::months, default 6; month cells; window total; dYoY = window vs same window last year; dMoM = last month vs previous):
+- SCountryRevenueSection (S5) — per-month revenue cells (coloured by MoM change) + Total/Share/ROAS(vs blended)/dYoY/dMoM/TOP-CHECK-ALARM status.
+- SCountryRoasSection (S6) — per-month ROAS cells graded vs a configurable benchmark (green above / red below) + window ROAS/Revenue/Meta/tier/dYoY/dMoM/status. benchmark = ReportFilters::benchmark ?? config floor (1.5); drives colouring AND ALARM/CHECK/TOP. Zero-spend-in-window countries omitted (ROAS undefined != 0).
+- STierRevenueSection (S4) — countries rolled up to tiers per month; per-month revenue cells (coloured by MoM) + Total/Share/ROAS/dYoY/dMoM.
+
+Frontend:
+- web/src/components/reports/mom/sectionTables.tsx — S4/S5/S6 renderers rebuilt: dynamic month columns from p.months/p.monthLabels, MoM cell colouring (heatFromDeltaPct) for revenue matrices, benchmark grading (heatVsBenchmark) for S6 ROAS cells; horizontal scroll; previewRows 15 for country tables.
+- web/src/components/reports/mom/MomSectionCard.tsx — 3/4/6/12-month window control now serves S1/S4/S5/S6; S6 additionally gets a benchmark selector (Default/2x/3x/4x/5x). Both ride on extraParams (months, benchmark).
+
+Tests: api/tests/Feature/MomM2ContinuedTest.php — S5 monthly-matrix test (months window, aligned cells incl. a null gap, dMoM +100%, ROAS 5.0, share 100%); S6 assertions (ROAS-per-month cells, default benchmark 1.5, ES ALARM at 1.0<1.5, benchmark=5 echoed); S4 monthly shape.
+Proof: full Mom suite green (63 passed, 537 assertions); npx tsc --noEmit clean; npm run build green.

@@ -45,11 +45,20 @@ final class SCountryRevenueSection implements MomSection
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }
-        [$start, $end] = $window;
+
+        // Month-by-month matrix (Kanwar, 2026-07-16): the last N months ending at
+        // the report month, N controlled by the section's own window selector
+        // (ReportFilters::$months, same control S1 uses); default 6.
+        $reportMonth = CarbonImmutable::parse($window[0], $tz)->startOfMonth();
+        $n = $this->windowLength($filters->months);
+        $months = [];
+        for ($i = $n - 1; $i >= 0; $i--) {
+            $months[] = $reportMonth->subMonths($i)->format('Y-m');
+        }
 
         $joiner = new CountryRevenueSpend();
-        $cur = $joiner->compute($brand->id, $start, $end);
-        if ($cur === []) {
+        $byCountry = $joiner->computeMonths($brand->id, $months);
+        if ($byCountry === []) {
             return [
                 'key'    => $this->key(),
                 'status' => 'needs_source',
@@ -57,36 +66,59 @@ final class SCountryRevenueSection implements MomSection
             ];
         }
 
-        $compareWindow = $filters->compareMonthWindow($tz);
-        $cmp = $compareWindow !== null ? $joiner->compute($brand->id, $compareWindow[0], $compareWindow[1]) : [];
+        // Same N months one year earlier — a single windowed compute per country
+        // for the ΔYoY column (window total vs the same window last year).
+        $priorStart = $reportMonth->subMonths($n - 1)->subYear()->startOfMonth();
+        $priorEnd   = $reportMonth->subYear()->endOfMonth();
+        $priorYear  = $joiner->compute($brand->id, $priorStart->toDateString(), $priorEnd->toDateString());
 
         $tiers = (new CountryTiers())->resolve($brand);
         $floor = (float) config('momreport.benchmarks.roas_alarm_floor', 1.5);
 
-        $totalSpend = array_sum(array_column($cur, 'spend'));
-        $totalRevenue = array_sum(array_column($cur, 'revenue'));
+        // Window totals (sum of the N months) per country, and brand-wide totals.
+        $totalRevenue = 0.0;
+        $totalSpend   = 0.0;
+        foreach ($byCountry as $c) {
+            foreach ($c['months'] as $m) {
+                $totalRevenue += $m['revenue'];
+                $totalSpend   += $m['spend'];
+            }
+        }
 
         $rows = [];
         $roasValues = [];
-        foreach ($cur as $key => $row) {
-            $roas = $row['spend'] > 0.0 ? round($row['revenue'] / $row['spend'], 2) : null;
-            if ($roas !== null && $row['spend'] >= $totalSpend * self::MIN_SPEND_SHARE_FOR_STATUS) {
+        foreach ($byCountry as $key => $c) {
+            $monthly = [];
+            $rev = 0.0;
+            $spend = 0.0;
+            foreach ($months as $ym) {
+                $mv = $c['months'][$ym] ?? null;
+                $monthly[] = $mv !== null ? round((float) $mv['revenue'], 2) : null;
+                $rev   += $mv['revenue'] ?? 0.0;
+                $spend += $mv['spend'] ?? 0.0;
+            }
+            $roas = $spend > 0.0 ? round($rev / $spend, 2) : null;
+            if ($roas !== null && $spend >= $totalSpend * self::MIN_SPEND_SHARE_FOR_STATUS) {
                 $roasValues[] = $roas;
             }
-            $prevRow = $cmp[$key] ?? null;
+
+            // ΔMoM = the last month vs the month before it (the momentum column).
+            $last = $monthly[$n - 1] ?? null;
+            $prev = $n >= 2 ? ($monthly[$n - 2] ?? null) : null;
+
             $rows[] = [
-                'iso2'     => $row['iso2'],
-                'label'    => $row['label'],
-                'tier'     => $tiers[$row['iso2']]['tierKey'] ?? null,
-                'tierLabel' => $tiers[$row['iso2']]['label'] ?? 'Other',
-                'revenue'  => $row['revenue'],
-                'orders'   => $row['orders'],
-                'spend'    => $row['spend'],
-                'spendPct' => $totalSpend > 0.0 ? round($row['spend'] / $totalSpend * 100, 1) : null,
-                'roas'     => $roas,
-                'compareRevenue' => $prevRow['revenue'] ?? null,
-                'deltaPct' => $this->delta($row['revenue'], $prevRow['revenue'] ?? null),
-                // status assigned below once the top-quartile threshold is known
+                'iso2'      => $c['iso2'],
+                'label'     => $c['label'],
+                'tier'      => $tiers[$c['iso2']]['tierKey'] ?? null,
+                'tierLabel' => $tiers[$c['iso2']]['label'] ?? 'Other',
+                'monthly'   => $monthly, // aligned to `months`, null where no data
+                'revenue'   => round($rev, 2),
+                'spend'     => round($spend, 2),
+                'sharePct'  => $totalRevenue > 0.0 ? round($rev / $totalRevenue * 100, 1) : null,
+                'spendPct'  => $totalSpend > 0.0 ? round($spend / $totalSpend * 100, 1) : null,
+                'roas'      => $roas,
+                'deltaYoYPct' => $this->delta($rev, $priorYear[$key]['revenue'] ?? null),
+                'deltaMoMPct' => $this->delta($last, $prev),
             ];
         }
 
@@ -117,8 +149,10 @@ final class SCountryRevenueSection implements MomSection
         return [
             'key'    => $this->key(),
             'status' => 'ok',
-            'month'  => CarbonImmutable::parse($start)->format('Y-m'),
-            'compareMonth' => $compareWindow !== null ? CarbonImmutable::parse($compareWindow[0])->format('Y-m') : null,
+            'month'  => $reportMonth->format('Y-m'),
+            'months' => $months,
+            'monthLabels' => array_map(static fn (string $ym): string => CarbonImmutable::createFromFormat('Y-m-d', $ym . '-01')->isoFormat('MMM YY'), $months),
+            'monthsWindow' => $n,
             'total' => ['revenue' => round($totalRevenue, 2), 'spend' => round($totalSpend, 2)],
             'rows'  => $rows,
             'suggestedTitle' => $topCountries !== [] ? 'Push ' . implode(', ', array_slice($topCountries, 0, 3)) : null,
@@ -127,6 +161,16 @@ final class SCountryRevenueSection implements MomSection
                 'breakevenRoas' => 'No per-brand margin/breakeven figure read this pass — status uses the HELM default floor (1.5) only.',
             ],
         ];
+    }
+
+    /** Clamp the section's month-window selector to a sane 1..12; default 6. */
+    private function windowLength(?int $months): int
+    {
+        if ($months === null) {
+            return 6;
+        }
+
+        return max(1, min(12, $months));
     }
 
     private function delta(?float $value, ?float $compare): ?float

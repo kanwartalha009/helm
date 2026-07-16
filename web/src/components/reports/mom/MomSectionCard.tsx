@@ -23,6 +23,16 @@ const MONTHS_OPTIONS: { value: string; label: string }[] = [
   { value: '12', label: '12mo' },
 ];
 
+// S6 ROAS-by-country benchmark selector (Kanwar, 2026-07-16) — the ROAS
+// threshold the matrix colours and flags against. '' = the config default floor.
+const BENCHMARK_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'Default' },
+  { value: '2', label: '2×' },
+  { value: '3', label: '3×' },
+  { value: '4', label: '4×' },
+  { value: '5', label: '5×' },
+];
+
 /**
  * REV2 R1/R2 — one CARD per section: header (label + ready state), the
  * chart-as-hero + table-as-secondary view per the section's resolved `view`
@@ -78,7 +88,19 @@ function MetricSectionCard({
   // S1-only trailing-window selector; '' means "unset" (the default full-year
   // tables) — kept as a plain string so it drops cleanly out of extraParams.
   const [monthsWindow, setMonthsWindow] = useState('');
-  const extraParams = section.key === 'S1' && monthsWindow ? { months: monthsWindow } : undefined;
+  const [benchmark, setBenchmark] = useState('');
+  // Sections with their own trailing month-window selector — the financial
+  // matrix (S1) and the month-by-month geo matrices (S4 tier, S5 country
+  // revenue, S6 country ROAS; Kanwar, 2026-07-16). S6 additionally gets a ROAS
+  // benchmark selector. Both ride on top of the shared filters via extraParams.
+  const hasMonthsControl = ['S1', 'S4', 'S5', 'S6'].includes(section.key);
+  const hasBenchmarkControl = section.key === 'S6';
+  const extraParams = (() => {
+    const p: Record<string, string> = {};
+    if (hasMonthsControl && monthsWindow) p.months = monthsWindow;
+    if (hasBenchmarkControl && benchmark) p.benchmark = benchmark;
+    return Object.keys(p).length ? p : undefined;
+  })();
   const { data, isLoading, isError, refetch, isRefetching } = useMomSection(slug, section.key, filters, section.ready, extraParams);
   const [showNotes, setShowNotes] = useState(false);
   const backfill = useTriggerBackfill(slug);
@@ -100,8 +122,16 @@ function MetricSectionCard({
     <Card style={{ padding: 18 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <SectionHeader label={section.label} sub={data?.status && data.status !== 'ok' ? statusNote(data) : undefined} />
-        {section.key === 'S1' && (
-          <Segmented options={MONTHS_OPTIONS} value={monthsWindow} onChange={setMonthsWindow} />
+        {(hasMonthsControl || hasBenchmarkControl) && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {hasMonthsControl && <Segmented options={MONTHS_OPTIONS} value={monthsWindow} onChange={setMonthsWindow} />}
+            {hasBenchmarkControl && (
+              <>
+                <span className="muted text-sm">Benchmark</span>
+                <Segmented options={BENCHMARK_OPTIONS} value={benchmark} onChange={setBenchmark} />
+              </>
+            )}
+          </div>
         )}
       </div>
 

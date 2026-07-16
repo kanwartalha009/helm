@@ -96,77 +96,133 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     );
   },
 
-  // S4 — market revenue by tier. One row per tier for the current month;
-  // ΔMoM graded per-row against its own delta (there's no month-series here,
-  // just one snapshot month, so column-wide grading on revenue/share reads
-  // more usefully than a fabricated row-delta).
+  // S4 — market revenue by tier, MONTH-BY-MONTH matrix (Kanwar, 2026-07-16):
+  // one revenue column per month (colored by MoM change), then Total / Share /
+  // ROAS / ΔYoY / ΔMoM. Month count set by the section's window control.
   S4: (p, currency) => {
     const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+    const compact = (v: number | null | undefined) => (v == null ? '—' : formatMoney(v, currency, { compact: true }));
+    const delta = (v: number | null) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
+    const pctChange = (a: number | null | undefined, b: number | null | undefined): number | null =>
+      a == null || b == null || b === 0 ? null : ((a - b) / b) * 100;
     const rows: any[] = p.rows ?? [];
-    return (
-      <HeatTable
-        columns={[
-          { key: 'label', label: 'Tier', render: (r) => r.label },
-          { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
-          { key: 'share', label: 'Share', align: 'right', render: (r) => (r.share == null ? '—' : `${r.share.toFixed(1)}%`) },
-          { key: 'spend', label: 'Spend', align: 'right', render: (r) => money(r.spend) },
-          { key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)), heat: { mode: 'column', dir: 'high', value: (r) => r.roas } },
-          { key: 'deltaMoMPct', label: 'Δ MoM', align: 'right', render: (r) => (r.deltaMoMPct == null ? '—' : `${r.deltaMoMPct > 0 ? '+' : ''}${r.deltaMoMPct.toFixed(1)}%`), gradeOf: (r) => heatFromDeltaPct(r.deltaMoMPct) },
-        ]}
-        rows={rows}
-        rowKey={(r) => r.tierKey}
-        title="Market revenue by tier"
-      />
+    const months: string[] = Array.isArray(p.months) ? p.months : [];
+    const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
+
+    const columns: HeatColumn<any>[] = [{ key: 'label', label: 'Tier', render: (r) => r.label }];
+    months.forEach((ym, i) => {
+      columns.push({
+        key: `m_${ym}`,
+        label: monthLabels[i] ?? ym,
+        align: 'right',
+        render: (r) => compact(r.monthly?.[i]),
+        gradeOf: (r) => (i === 0 ? '' : heatFromDeltaPct(pctChange(r.monthly?.[i], r.monthly?.[i - 1]))),
+      });
+    });
+    columns.push(
+      { key: 'revenue', label: 'Total', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
+      { key: 'share', label: 'Share', align: 'right', render: (r) => (r.share == null ? '—' : `${r.share.toFixed(1)}%`) },
+      { key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)), heat: { mode: 'column', dir: 'high', value: (r) => r.roas } },
+      { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => delta(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },
+      { key: 'deltaMoMPct', label: 'Δ MoM', align: 'right', render: (r) => delta(r.deltaMoMPct), gradeOf: (r) => heatFromDeltaPct(r.deltaMoMPct) },
     );
+
+    return <HeatTable columns={columns} rows={rows} rowKey={(r) => r.tierKey} title="Market revenue by tier" />;
   },
 
-  // S5 — country revenue, ROAS-graded against the brand's own blended ROAS
-  // (v1's roasHeat pattern) rather than a column-wide grade, since "good"
-  // here means "above what this brand's spend actually returns", not just
-  // "the best of this month's countries".
+  // S5 — country revenue MONTH-BY-MONTH matrix (Kanwar, 2026-07-16): one column
+  // per month (colored by that month's MoM change, so momentum reads down each
+  // row like the reference), then Total / Share / ROAS / ΔYoY / ΔMoM / status.
+  // Month count is set by the section's own window control. ROAS graded vs the
+  // brand's blended ROAS (v1's roasHeat), not a column-wide best-of.
   S5: (p, currency) => {
     const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+    const compact = (v: number | null | undefined) => (v == null ? '—' : formatMoney(v, currency, { compact: true }));
+    const delta = (v: number | null) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
+    const pctChange = (a: number | null | undefined, b: number | null | undefined): number | null =>
+      a == null || b == null || b === 0 ? null : ((a - b) / b) * 100;
     const rows: any[] = p.rows ?? [];
+    const months: string[] = Array.isArray(p.months) ? p.months : [];
+    const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
     const blended = p.total?.spend > 0 ? p.total.revenue / p.total.spend : null;
+
+    const columns: HeatColumn<any>[] = [
+      { key: 'label', label: 'Country', render: (r) => r.label },
+      { key: 'tierLabel', label: 'Tier', render: (r) => r.tierLabel ?? '—' },
+    ];
+    months.forEach((ym, i) => {
+      columns.push({
+        key: `m_${ym}`,
+        label: monthLabels[i] ?? ym,
+        align: 'right',
+        render: (r) => compact(r.monthly?.[i]),
+        // Color each month cell by its change vs the previous month in the row.
+        gradeOf: (r) => (i === 0 ? '' : heatFromDeltaPct(pctChange(r.monthly?.[i], r.monthly?.[i - 1]))),
+      });
+    });
+    columns.push(
+      { key: 'revenue', label: 'Total', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
+      { key: 'sharePct', label: 'Share', align: 'right', render: (r) => (r.sharePct == null ? '—' : `${r.sharePct.toFixed(1)}%`) },
+      { key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)), gradeOf: (r) => heatVsBenchmark(r.roas, blended) },
+      { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => delta(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },
+      { key: 'deltaMoMPct', label: 'Δ MoM', align: 'right', render: (r) => delta(r.deltaMoMPct), gradeOf: (r) => heatFromDeltaPct(r.deltaMoMPct) },
+      { key: 'status', label: 'Status', render: (r) => r.status ?? '—' },
+    );
+
     return (
       <HeatTable
-        columns={[
-          { key: 'label', label: 'Country', render: (r) => r.label },
-          { key: 'tierLabel', label: 'Tier', render: (r) => r.tierLabel ?? '—' },
-          { key: 'status', label: 'Status', render: (r) => r.status ?? '—' },
-          { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue), gradeOf: (r) => heatFromDeltaPct(r.deltaPct) },
-          { key: 'spendPct', label: 'Spend %', align: 'right', render: (r) => (r.spendPct == null ? '—' : `${r.spendPct.toFixed(1)}%`) },
-          { key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)), gradeOf: (r) => heatVsBenchmark(r.roas, blended) },
-          { key: 'deltaPct', label: 'Δ Revenue', align: 'right', render: (r) => (r.deltaPct == null ? '—' : `${r.deltaPct > 0 ? '+' : ''}${r.deltaPct.toFixed(1)}%`) },
-        ]}
+        columns={columns}
         rows={rows}
         rowKey={(r) => r.iso2}
-        title="Country revenue"
+        title="Country revenue MoM"
         footer={p.suggestedTitle}
+        previewRows={15}
       />
     );
   },
 
-  // S6 — ROAS by country, same blended-benchmark grading as S5 (shares the
-  // same underlying join, per the section's own docblock).
+  // S6 — ROAS by country MONTH-BY-MONTH matrix (Kanwar, 2026-07-16): one ROAS
+  // column per month, each cell graded against the (configurable) benchmark —
+  // green above, red below — then window ROAS / Revenue / Meta spend / tier /
+  // ΔYoY / ΔMoM / status. Benchmark + month count come from the section controls.
   S6: (p, currency) => {
     const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+    const delta = (v: number | null) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
     const rows: any[] = p.rows ?? [];
-    const totalSpend = rows.reduce((s, r) => s + (r.spend ?? 0), 0);
-    const totalRevenue = rows.reduce((s, r) => s + (r.revenue ?? 0), 0);
-    const blended = totalSpend > 0 ? totalRevenue / totalSpend : null;
+    const months: string[] = Array.isArray(p.months) ? p.months : [];
+    const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
+    const benchmark: number | null = typeof p.benchmark === 'number' ? p.benchmark : null;
+
+    const columns: HeatColumn<any>[] = [
+      { key: 'label', label: 'Country', render: (r) => r.label },
+      { key: 'tierLabel', label: 'Tier', render: (r) => r.tierLabel ?? '—' },
+    ];
+    months.forEach((ym, i) => {
+      columns.push({
+        key: `m_${ym}`,
+        label: monthLabels[i] ?? ym,
+        align: 'right',
+        render: (r) => (r.monthly?.[i] == null ? '—' : formatRoas(r.monthly[i])),
+        gradeOf: (r) => heatVsBenchmark(r.monthly?.[i], benchmark),
+      });
+    });
+    columns.push(
+      { key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)), gradeOf: (r) => heatVsBenchmark(r.roas, benchmark) },
+      { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
+      { key: 'spend', label: 'Meta', align: 'right', render: (r) => money(r.spend) },
+      { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => delta(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },
+      { key: 'deltaMoMPct', label: 'Δ MoM', align: 'right', render: (r) => delta(r.deltaMoMPct), gradeOf: (r) => heatFromDeltaPct(r.deltaMoMPct) },
+      { key: 'status', label: 'Status', render: (r) => r.status ?? '—' },
+    );
+
     return (
       <HeatTable
-        columns={[
-          { key: 'label', label: 'Country', render: (r) => r.label },
-          { key: 'roas', label: 'ROAS', align: 'right', render: (r) => formatRoas(r.roas), gradeOf: (r) => heatVsBenchmark(r.roas, blended) },
-          { key: 'spend', label: 'Spend', align: 'right', render: (r) => money(r.spend) },
-          { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue) },
-          { key: 'deltaPct', label: 'Δ ROAS', align: 'right', render: (r) => (r.deltaPct == null ? '—' : `${r.deltaPct > 0 ? '+' : ''}${r.deltaPct.toFixed(1)}%`), gradeOf: (r) => heatFromDeltaPct(r.deltaPct) },
-        ]}
+        columns={columns}
         rows={rows}
         rowKey={(r) => r.iso2}
-        title="ROAS by country"
+        title="ROAS by country MoM"
+        footer={benchmark != null ? `Benchmark ${benchmark.toFixed(1)}× — green above / red below.` : undefined}
+        previewRows={15}
       />
     );
   },

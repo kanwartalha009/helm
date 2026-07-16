@@ -37,11 +37,19 @@ final class STierRevenueSection implements MomSection
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }
-        [$start, $end] = $window;
+
+        // Month-by-month tier matrix (Kanwar, 2026-07-16): tiers × the last N
+        // months (window control), then window total / share / ROAS / ΔMoM / ΔYoY.
+        $reportMonth = CarbonImmutable::parse($window[0], $tz)->startOfMonth();
+        $n = $filters->months === null ? 6 : max(1, min(12, $filters->months));
+        $months = [];
+        for ($i = $n - 1; $i >= 0; $i--) {
+            $months[] = $reportMonth->subMonths($i)->format('Y-m');
+        }
 
         $joiner = new CountryRevenueSpend();
-        $cur = $joiner->compute($brand->id, $start, $end);
-        if ($cur === []) {
+        $byCountry = $joiner->computeMonths($brand->id, $months);
+        if ($byCountry === []) {
             return [
                 'key'    => $this->key(),
                 'status' => 'needs_source',
@@ -49,29 +57,57 @@ final class STierRevenueSection implements MomSection
             ];
         }
 
-        $compareWindow = $filters->compareMonthWindow($tz);
-        $cmp = $compareWindow !== null ? $joiner->compute($brand->id, $compareWindow[0], $compareWindow[1]) : [];
-
         $tierDefs = (new CountryTiers())->resolve($brand);
 
-        $curByTier = $this->rollUp($cur, $tierDefs);
-        $cmpByTier = $this->rollUp($cmp, $tierDefs);
+        // Roll countries up into tiers PER MONTH, plus a window total per tier.
+        $byTier = []; // tierKey => ['label','color','months'=>[ym=>['revenue','spend']],'revenue','spend']
+        foreach ($byCountry as $c) {
+            $tier  = $tierDefs[$c['iso2']] ?? null;
+            $key   = $tier['tierKey'] ?? '__other';
+            $byTier[$key] ??= [
+                'label' => $tier['label'] ?? 'Other',
+                'color' => $tier['color'] ?? '#9CA3AF',
+                'months' => [],
+                'revenue' => 0.0,
+                'spend' => 0.0,
+            ];
+            foreach ($c['months'] as $ym => $m) {
+                $byTier[$key]['months'][$ym] ??= ['revenue' => 0.0, 'spend' => 0.0];
+                $byTier[$key]['months'][$ym]['revenue'] += $m['revenue'];
+                $byTier[$key]['months'][$ym]['spend']   += $m['spend'];
+                $byTier[$key]['revenue'] += $m['revenue'];
+                $byTier[$key]['spend']   += $m['spend'];
+            }
+        }
 
-        $totalRevenue = array_sum(array_column($curByTier, 'revenue'));
+        // Same N months last year, rolled up by tier, for ΔYoY.
+        $priorStart = $reportMonth->subMonths($n - 1)->subYear()->startOfMonth();
+        $priorEnd   = $reportMonth->subYear()->endOfMonth();
+        $priorByTier = $this->rollUp($joiner->compute($brand->id, $priorStart->toDateString(), $priorEnd->toDateString()), $tierDefs);
+
+        $totalRevenue = array_sum(array_column($byTier, 'revenue'));
 
         $rows = [];
-        foreach ($curByTier as $tierKey => $t) {
-            $prev = $cmpByTier[$tierKey] ?? null;
+        foreach ($byTier as $tierKey => $t) {
+            $monthly = [];
+            foreach ($months as $ym) {
+                $monthly[] = isset($t['months'][$ym]) ? round((float) $t['months'][$ym]['revenue'], 2) : null;
+            }
+            $last = $monthly[$n - 1] ?? null;
+            $prev = $n >= 2 ? ($monthly[$n - 2] ?? null) : null;
             $roas = $t['spend'] > 0.0 ? round($t['revenue'] / $t['spend'], 2) : null;
+
             $rows[] = [
                 'tierKey'  => $tierKey,
                 'label'    => $t['label'],
                 'color'    => $t['color'],
+                'monthly'  => $monthly,
                 'revenue'  => round($t['revenue'], 2),
                 'share'    => $totalRevenue > 0.0 ? round($t['revenue'] / $totalRevenue * 100, 1) : null,
                 'spend'    => round($t['spend'], 2),
                 'roas'     => $roas,
-                'deltaMoMPct' => $this->delta($t['revenue'], $prev['revenue'] ?? null),
+                'deltaMoMPct' => $this->delta($last, $prev),
+                'deltaYoYPct' => $this->delta($t['revenue'], $priorByTier[$tierKey]['revenue'] ?? null),
             ];
         }
         usort($rows, static fn (array $a, array $b): int => $b['revenue'] <=> $a['revenue']);
@@ -79,8 +115,10 @@ final class STierRevenueSection implements MomSection
         return [
             'key'    => $this->key(),
             'status' => 'ok',
-            'month'  => CarbonImmutable::parse($start)->format('Y-m'),
-            'compareMonth' => $compareWindow !== null ? CarbonImmutable::parse($compareWindow[0])->format('Y-m') : null,
+            'month'  => $reportMonth->format('Y-m'),
+            'months' => $months,
+            'monthLabels' => array_map(static fn (string $ym): string => CarbonImmutable::createFromFormat('Y-m-d', $ym . '-01')->isoFormat('MMM YY'), $months),
+            'monthsWindow' => $n,
             'total'  => round($totalRevenue, 2),
             'rows'   => $rows,
             'unavailable' => [

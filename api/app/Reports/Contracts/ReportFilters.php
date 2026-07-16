@@ -35,6 +35,11 @@ final class ReportFilters
         // unrecognised value) preserves every other report type's/section's
         // existing behaviour exactly.
         public readonly ?int $months = null,
+        // Kanwar, 2026-07-16: a ROAS benchmark the S6 ROAS-by-country matrix
+        // colours and flags against (green above / red below), overriding the
+        // config default floor. Additive and mom-S6-specific; null = use the
+        // config default, so every other section is unaffected.
+        public readonly ?float $benchmark = null,
     ) {}
 
     /** @param array<string, mixed> $p query params */
@@ -64,6 +69,7 @@ final class ReportFilters
             platform: in_array($p['platform'] ?? null, ['meta', 'google', 'tiktok'], true) ? (string) $p['platform'] : null,
             compareMonth: $ym($p['compare_month'] ?? null),
             months: in_array((int) ($p['months'] ?? 0), [3, 4, 6, 12], true) ? (int) $p['months'] : null,
+            benchmark: is_numeric($p['benchmark'] ?? null) && (float) $p['benchmark'] > 0.0 ? round((float) $p['benchmark'], 2) : null,
         );
     }
 

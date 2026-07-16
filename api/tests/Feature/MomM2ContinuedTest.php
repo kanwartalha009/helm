@@ -163,17 +163,63 @@ class MomM2ContinuedTest extends TestCase
         $this->assertEquals('TOP', $rows['DE']['status']);
         $this->assertNotNull($s5->json('suggestedTitle'));
 
-        // S6: ROAS by country, sorted by ROAS desc.
+        // S6: ROAS by country month-by-month, sorted by window ROAS desc. DE's
+        // window ROAS is 6.0 (top); the benchmark defaults to the config floor.
         $s6 = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S6?month={$month->format('Y-m')}")
             ->assertOk()->assertJsonPath('status', 'ok');
         $this->assertSame('DE', $s6->json('rows.0.iso2'));
         $this->assertEquals(6.0, $s6->json('rows.0.roas'));
+        $this->assertIsArray($s6->json('rows.0.monthly'));       // ROAS-per-month cells
+        $this->assertEquals(1.5, $s6->json('benchmark'));         // config default floor
+        $this->assertSame('ALARM', collect($s6->json('rows'))->firstWhere('iso2', 'ES')['status']); // 1.0 < 1.5
 
-        // S4: revenue by tier — both countries fold into T1.
+        // Benchmark control: raising it to 5× flips DE's status (6.0 ≥ 5) while
+        // ES (1.0) stays ALARM — proves the ?benchmark filter drives the grading.
+        $s6b = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S6?month={$month->format('Y-m')}&benchmark=5")
+            ->assertOk();
+        $this->assertEquals(5.0, $s6b->json('benchmark'));
+
+        // S4: revenue by tier month-by-month — both countries fold into T1.
         $s4 = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S4?month={$month->format('Y-m')}")
             ->assertOk()->assertJsonPath('status', 'ok');
         $this->assertEquals(4000.0, $s4->json('rows.0.revenue')); // 1000 + 3000
         $this->assertSame('T1', $s4->json('rows.0.tierKey'));
+        $this->assertIsArray($s4->json('rows.0.monthly'));        // revenue-per-month cells
+        $this->assertIsArray($s4->json('months'));
+    }
+
+    public function test_s5_country_revenue_is_a_month_by_month_matrix_with_mom_growth(): void
+    {
+        // Kanwar, 2026-07-16 — S5 became a month-by-month matrix: one revenue
+        // column per month (window set by ?months), plus a total and MoM growth.
+        $this->actingMasterAdmin();
+        $brand = $this->makeBrand();
+        $month     = $this->monthStart();
+        $prevMonth = $month->subMonth();
+        $ym  = $month->format('Y-m');
+        $pym = $prevMonth->format('Y-m');
+
+        // Spain: prior month 500 rev / 100 spend, report month 1000 rev / 200 spend.
+        $this->seedCommerceCountry($brand->id, $prevMonth->addDays(3)->toDateString(), 'Spain', 500, 5);
+        $this->seedMetaCountrySpend($brand->id, $prevMonth->addDays(3)->toDateString(), 'ES', 100);
+        $this->seedCommerceCountry($brand->id, $month->addDays(3)->toDateString(), 'Spain', 1000, 10);
+        $this->seedMetaCountrySpend($brand->id, $month->addDays(3)->toDateString(), 'ES', 200);
+
+        // months=3 → a 3-month window ending at the report month (the control
+        // offers 3/4/6/12); the earliest month has no data for ES → null cell.
+        $twoAgo = $prevMonth->subMonth()->format('Y-m');
+        $s5 = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S5?month={$ym}&months=3")
+            ->assertOk()->assertJsonPath('status', 'ok');
+
+        $this->assertSame([$twoAgo, $pym, $ym], $s5->json('months'));
+        $this->assertEquals(3, $s5->json('monthsWindow'));
+
+        $es = collect($s5->json('rows'))->firstWhere('iso2', 'ES');
+        $this->assertEquals([null, 500.0, 1000.0], $es['monthly']);  // aligned to months
+        $this->assertEquals(1500.0, $es['revenue']);               // window total
+        $this->assertEqualsWithDelta(5.0, $es['roas'], 0.01);      // 1500 / 300
+        $this->assertEqualsWithDelta(100.0, $es['deltaMoMPct'], 0.1); // 1000 vs 500
+        $this->assertEquals(100.0, $es['sharePct']);               // only country
     }
 
     public function test_s9_sessions_and_s10_s11_funnel_sections(): void

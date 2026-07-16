@@ -7,6 +7,7 @@ namespace App\Reports\Mom\Support;
 use App\Models\CommerceDailyMetric;
 use App\Models\MetaBreakdownDaily;
 use App\Support\CountryCodes;
+use Carbon\CarbonImmutable;
 
 /**
  * M2 (monthly-report-v2-mom.md §M2 — S4/S5/S6): joins Shopify commerce revenue
@@ -77,6 +78,38 @@ final class CountryRevenueSpend
                 // Spend with no matching commerce row this window (e.g. prospecting
                 // into a market with no orders yet) — still real, still shown.
                 $out[$iso2] = ['iso2' => $iso2, 'label' => $iso2, 'revenue' => 0.0, 'orders' => 0, 'spend' => round((float) $r->spend, 2)];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The same country join, broken out PER MONTH across an ordered list of
+     * 'Y-m' months — the backbone of the S4/S5/S6 month-by-month matrices
+     * (Kanwar, 2026-07-16). Reuses compute() once per month (each a bounded
+     * windowed aggregate), so the name↔ISO2 join and D-005 revenue rule stay
+     * identical to the single-window path — no second copy to drift.
+     *
+     * @param array<int, string> $months ordered 'Y-m'
+     * @return array<string, array{iso2: string, label: string, months: array<string, array{revenue: float, spend: float, orders: int}>}>
+     */
+    public function computeMonths(int $brandId, array $months): array
+    {
+        $out = [];
+        foreach ($months as $ym) {
+            $start = CarbonImmutable::createFromFormat('Y-m-d', $ym . '-01')->startOfMonth();
+            $end   = $start->endOfMonth();
+            foreach ($this->compute($brandId, $start->toDateString(), $end->toDateString()) as $key => $row) {
+                $out[$key] ??= ['iso2' => $row['iso2'], 'label' => $row['label'], 'months' => []];
+                if ($row['label'] !== '') {
+                    $out[$key]['label'] = $row['label'];
+                }
+                $out[$key]['months'][$ym] = [
+                    'revenue' => $row['revenue'],
+                    'spend'   => $row['spend'],
+                    'orders'  => $row['orders'],
+                ];
             }
         }
 
