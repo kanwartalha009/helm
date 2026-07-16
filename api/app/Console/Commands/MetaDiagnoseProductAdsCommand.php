@@ -82,12 +82,14 @@ class MetaDiagnoseProductAdsCommand extends Command
             ->where('brand_id', $brand->id)
             ->where('product_key', $wantHandle)
             ->whereBetween('date', [$from->toDateString(), $to->toDateString()])
-            ->selectRaw('COALESCE(SUM(spend),0) AS spend, COALESCE(MAX(ads_count),0) AS ads, COUNT(*) AS rows')
+            // `rows` is a RESERVED WORD in MariaDB (ROW/ROWS), so the alias must be quoted or it is a
+            // 1064 syntax error. `row_count` sidesteps the whole question.
+            ->selectRaw('COALESCE(SUM(spend),0) AS spend, COALESCE(MAX(ads_count),0) AS ads, COUNT(*) AS row_count')
             ->first();
 
         $storedSpend = (float) ($stored->spend ?? 0);
         $storedAds   = (int) ($stored->ads ?? 0);
-        $storedRows  = (int) ($stored->rows ?? 0);
+        $storedRows  = (int) ($stored->row_count ?? 0);
 
         $this->line('STORED in ad_product_daily (what Inventory reads):');
         $this->line(sprintf('  handle %-20s spend %-10s ads %-4s (%d row(s))', $wantHandle, number_format($storedSpend, 2), $storedAds, $storedRows));
