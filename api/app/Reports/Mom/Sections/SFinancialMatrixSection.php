@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Reports\Mom\Sections;
 
 use App\Models\Brand;
+use App\Models\BrandTarget;
 use App\Models\DailyMetric;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
+use App\Reports\Mom\Support\CustomerMix;
 use Carbon\CarbonImmutable;
 
 /**
@@ -44,6 +46,10 @@ use Carbon\CarbonImmutable;
 final class SFinancialMatrixSection implements MomSection
 {
     private const AD_PLATFORMS = ['meta', 'google', 'tiktok'];
+
+    public function __construct(private readonly CustomerMix $customerMix)
+    {
+    }
 
     public function key(): string
     {
@@ -83,12 +89,21 @@ final class SFinancialMatrixSection implements MomSection
             ];
         }
 
+        // Per-month new/returning customer COUNTS across the whole query window,
+        // in one bounded live ShopifyQL call. Empty when the brand has no Shopify
+        // connection / read_reports scope — the customer columns then render "—"
+        // (honestly unavailable), never fabricated (spec S1's own fallback rule).
+        $counts = $this->customerMix->forRange($brand, $queryStart->toDateString(), $queryEnd->toDateString());
+        // Per-month revenue-goal targets (an explicit month target wins; else the
+        // brand's standing default). Goal shows only where a target exists.
+        $targets = $this->targetsFor($brand->id);
+
         if ($months !== null) {
-            $currentYearRows = $this->buildTrailingRows($byMonth, $reportMonth, $months);
-            $priorYearRows   = $this->buildTrailingRows($byMonth, $reportMonth->subYear(), $months);
+            $currentYearRows = $this->buildTrailingRows($byMonth, $counts, $targets, $reportMonth, $months);
+            $priorYearRows   = $this->buildTrailingRows($byMonth, $counts, $targets, $reportMonth->subYear(), $months);
         } else {
-            $currentYearRows = $this->buildRows($byMonth, $reportYear, 1, (int) $reportMonth->format('n'));
-            $priorYearRows   = $this->buildRows($byMonth, $priorYear, 1, 12);
+            $currentYearRows = $this->buildRows($byMonth, $counts, $targets, $reportYear, 1, (int) $reportMonth->format('n'));
+            $priorYearRows   = $this->buildRows($byMonth, $counts, $targets, $priorYear, 1, 12);
         }
 
         $reportRow = $byMonth[$reportMonth->format('Y-m')] ?? null;
@@ -113,23 +128,53 @@ final class SFinancialMatrixSection implements MomSection
             'currentYearRows' => $currentYearRows,
             'priorYearRows'   => $priorYearRows,
             'summary' => $summary,
-            'unavailable' => [
-                'customerColumns' => 'New/Returning/%Ret/Total customers columns need the ShopifyQL customer_type probe — not run this session (requires live production access).',
-                'cac'    => 'Needs the same customer_type probe as customerColumns.',
-                'roasNc' => 'Needs the same customer_type probe as customerColumns.',
-            ],
+            // ROAS-nc is MODELED (new customers × blended AOV ÷ spend): Shopify
+            // can't report sales by customer type, so new-customer revenue is an
+            // estimate — same honesty basis as S2's new/returning split.
+            'roasNcModeled' => true,
+            // Only flag the customer columns as unavailable when we genuinely have
+            // no counts (no Shopify connection / read_reports scope). When counts
+            // ARE present, these columns are real and no note is shown.
+            'unavailable' => $counts === [] ? [
+                'customerColumns' => 'New / Returning / %Ret / Total customers / CAC / ROAS-nc need the live Shopify customer counts (ShopifyQL read_reports) — none available for this brand yet.',
+            ] : [],
         ];
+    }
+
+    /**
+     * A brand's revenue-goal targets as a per-month map plus the standing default,
+     * so each matrix row can show its Goal % (actual ÷ target − 1) only where a
+     * target exists — never a fabricated goal.
+     *
+     * @return array{map: array<string, float>, default: ?float}
+     */
+    private function targetsFor(int $brandId): array
+    {
+        $map = [];
+        $default = null;
+        foreach (BrandTarget::query()->where('brand_id', $brandId)->get() as $t) {
+            if ($t->revenue_target === null) {
+                continue;
+            }
+            if ($t->month === null) {
+                $default = (float) $t->revenue_target;
+            } else {
+                $map[(string) $t->month] = (float) $t->revenue_target;
+            }
+        }
+
+        return ['map' => $map, 'default' => $default];
     }
 
     /**
      * @param array<string, array{orders:int, revenue:float, refunds:float, spend:float, googleSpend:float}> $byMonth
      * @return array<int, array<string, mixed>>
      */
-    private function buildRows(array $byMonth, int $year, int $fromMonth, int $toMonth): array
+    private function buildRows(array $byMonth, array $counts, array $targets, int $year, int $fromMonth, int $toMonth): array
     {
         $rows = [];
         for ($m = $fromMonth; $m <= $toMonth; $m++) {
-            $rows[] = $this->rowFor($byMonth, CarbonImmutable::createFromDate($year, $m, 1));
+            $rows[] = $this->rowFor($byMonth, $counts, $targets, CarbonImmutable::createFromDate($year, $m, 1));
         }
 
         return $rows;
@@ -144,18 +189,22 @@ final class SFinancialMatrixSection implements MomSection
      * @param array<string, array{orders:int, revenue:float, refunds:float, spend:float, googleSpend:float}> $byMonth
      * @return array<int, array<string, mixed>>
      */
-    private function buildTrailingRows(array $byMonth, CarbonImmutable $endMonth, int $count): array
+    private function buildTrailingRows(array $byMonth, array $counts, array $targets, CarbonImmutable $endMonth, int $count): array
     {
         $rows = [];
         for ($i = $count - 1; $i >= 0; $i--) {
-            $rows[] = $this->rowFor($byMonth, $endMonth->subMonths($i)->startOfMonth());
+            $rows[] = $this->rowFor($byMonth, $counts, $targets, $endMonth->subMonths($i)->startOfMonth());
         }
 
         return $rows;
     }
 
-    /** @param array<string, array{orders:int, revenue:float, refunds:float, spend:float, googleSpend:float}> $byMonth */
-    private function rowFor(array $byMonth, CarbonImmutable $monthDate): array
+    /**
+     * @param array<string, array{orders:int, revenue:float, refunds:float, spend:float, googleSpend:float, metaSpend:float, tiktokSpend:float}> $byMonth
+     * @param array<string, array{customers:int, returning:int, new:int, orders:int, newPct:float, retPct:float}> $counts
+     * @param array{map: array<string, float>, default: ?float} $targets
+     */
+    private function rowFor(array $byMonth, array $counts, array $targets, CarbonImmutable $monthDate): array
     {
         $key = $monthDate->format('Y-m');
         $cur = $byMonth[$key] ?? null;
@@ -163,24 +212,67 @@ final class SFinancialMatrixSection implements MomSection
         $prevKey = $monthDate->subMonth()->format('Y-m');
         $prev    = $byMonth[$prevKey] ?? null;
 
+        // Same month last year — the basis for the YoY comparison columns
+        // (Captación / Ret / Δ Revenue / Δ Budget), matching the reference's
+        // year-over-year framing (the two stacked tables line up per month).
+        $yoyKey = $monthDate->subYear()->format('Y-m');
+        $yoy    = $byMonth[$yoyKey] ?? null;
+
         if ($cur === null) {
             return ['month' => $key, 'label' => $monthDate->isoFormat('MMMM YYYY'), 'status' => 'no_data'];
         }
 
-        $roas = $cur['spend'] > 0.0 ? round($cur['revenue'] / $cur['spend'], 2) : null;
+        $spend = $cur['spend'];
+        $roas = $spend > 0.0 ? round($cur['revenue'] / $spend, 2) : null;
         $prevRoas = ($prev !== null && $prev['spend'] > 0.0) ? round($prev['revenue'] / $prev['spend'], 2) : null;
+        $aov  = $cur['orders'] > 0 ? round($cur['revenue'] / $cur['orders'], 2) : null;
+
+        // Customer split for this month (live Shopify counts) — null throughout
+        // when unavailable, so the columns render "—" rather than a fake 0.
+        $c    = $counts[$key] ?? null;
+        $cYoy = $counts[$yoyKey] ?? null;
+        $new       = $c['new'] ?? null;
+        $returning = $c['returning'] ?? null;
+        $totalCust = $c['customers'] ?? null;
+        $retPct    = $c['retPct'] ?? null;
+
+        // CAC = spend ÷ new customers; ROAS-nc = MODELED new revenue (new × blended
+        // AOV) ÷ spend — the exact v1 monthly-report estimate (MonthlyReport).
+        $cac    = ($new !== null && $new > 0 && $spend > 0.0) ? round($spend / $new, 2) : null;
+        $roasNc = ($new !== null && $aov !== null && $spend > 0.0) ? round(($new * $aov) / $spend, 2) : null;
+
+        // Goal % = actual revenue ÷ target − 1 (over/under the goal), only where a
+        // target exists (explicit month target wins, else the standing default).
+        $target = $targets['map'][$key] ?? $targets['default'] ?? null;
+        $goalPct = ($target !== null && $target > 0.0) ? round(($cur['revenue'] / $target - 1) * 100, 1) : null;
 
         return [
             'month'  => $key,
             'label'  => $monthDate->isoFormat('MMMM YYYY'),
             'status' => 'ok',
             'orders' => $cur['orders'],
-            'aov'    => $cur['orders'] > 0 ? round($cur['revenue'] / $cur['orders'], 2) : null,
+            'aov'    => $aov,
             'returnsPct' => $cur['revenue'] > 0.0 ? round(abs($cur['refunds']) / $cur['revenue'] * 100, 1) : null,
             'revenue' => round($cur['revenue'], 2),
-            'spend'   => round($cur['spend'], 2),
-            'googleSharePct' => $cur['spend'] > 0.0 ? round($cur['googleSpend'] / $cur['spend'] * 100, 1) : null,
+            'spend'   => round($spend, 2),
+            'googleSharePct' => $spend > 0.0 ? round($cur['googleSpend'] / $spend * 100, 1) : null,
+            'metaSharePct'   => $spend > 0.0 ? round($cur['metaSpend'] / $spend * 100, 1) : null,
+            'tiktokSharePct' => $spend > 0.0 ? round($cur['tiktokSpend'] / $spend * 100, 1) : null,
             'roas'    => $roas,
+            // Customer-split columns (real counts; null = unavailable, not zero).
+            'new'            => $new,
+            'returning'      => $returning,
+            'retPctCustomers' => $retPct,
+            'totalCustomers' => $totalCust,
+            'cac'            => $cac,
+            'roasNc'         => $roasNc, // MODELED (see roasNcModeled flag on the payload)
+            'goalPct'        => $goalPct,
+            // YoY comparison columns (vs same month last year).
+            'captacionYoYPct' => ($new !== null && $cYoy !== null) ? $this->pctDelta((float) $new, (float) $cYoy['new']) : null,
+            'retentionYoYPct' => ($returning !== null && $cYoy !== null) ? $this->pctDelta((float) $returning, (float) $cYoy['returning']) : null,
+            'revenueYoYPct'   => $yoy !== null ? $this->pctDelta($cur['revenue'], $yoy['revenue']) : null,
+            'budgetYoYPct'    => $yoy !== null ? $this->pctDelta($spend, $yoy['spend']) : null,
+            // MoM deltas retained for the revenue/ROAS heatmap cell grading.
             'deltaRevenuePct' => $prev !== null ? $this->pctDelta($cur['revenue'], $prev['revenue']) : null,
             'deltaSpendPct'   => $prev !== null ? $this->pctDelta($cur['spend'], $prev['spend']) : null,
             'deltaRoasPct'    => $this->pctDelta($roas, $prevRoas),
@@ -189,7 +281,7 @@ final class SFinancialMatrixSection implements MomSection
         ];
     }
 
-    /** @return array<string, array{orders:int, revenue:float, refunds:float, spend:float, googleSpend:float}> */
+    /** @return array<string, array{orders:int, revenue:float, refunds:float, spend:float, googleSpend:float, metaSpend:float, tiktokSpend:float}> */
     private function monthlyMetrics(int $brandId, string $start, string $end): array
     {
         $revCol = '(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))'; // D-005
@@ -208,20 +300,27 @@ final class SFinancialMatrixSection implements MomSection
             ->selectRaw('date, platform, COALESCE(spend, 0) AS spend')
             ->get();
 
+        $zero = ['orders' => 0, 'revenue' => 0.0, 'refunds' => 0.0, 'spend' => 0.0, 'googleSpend' => 0.0, 'metaSpend' => 0.0, 'tiktokSpend' => 0.0];
+
         $out = [];
         foreach ($shopifyRows as $r) {
             $key = CarbonImmutable::parse((string) $r->date)->format('Y-m');
-            $out[$key] ??= ['orders' => 0, 'revenue' => 0.0, 'refunds' => 0.0, 'spend' => 0.0, 'googleSpend' => 0.0];
+            $out[$key] ??= $zero;
             $out[$key]['orders']  += (int) $r->orders;
             $out[$key]['revenue'] += (float) $r->revenue;
             $out[$key]['refunds'] += (float) $r->refunds;
         }
         foreach ($adRows as $r) {
             $key = CarbonImmutable::parse((string) $r->date)->format('Y-m');
-            $out[$key] ??= ['orders' => 0, 'revenue' => 0.0, 'refunds' => 0.0, 'spend' => 0.0, 'googleSpend' => 0.0];
-            $out[$key]['spend'] += (float) $r->spend;
+            $out[$key] ??= $zero;
+            $spend = (float) $r->spend;
+            $out[$key]['spend'] += $spend;
             if ($r->platform === 'google') {
-                $out[$key]['googleSpend'] += (float) $r->spend;
+                $out[$key]['googleSpend'] += $spend;
+            } elseif ($r->platform === 'meta') {
+                $out[$key]['metaSpend'] += $spend;
+            } elseif ($r->platform === 'tiktok') {
+                $out[$key]['tiktokSpend'] += $spend;
             }
         }
 

@@ -20,29 +20,47 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
   // window is the full year (default) or a trailing N months (M5 selector).
   S1: (p, currency) => {
     const money = (v: number | null) => formatMoney(v, currency, { whole: true });
+    const count = (v: number | null) => (v == null ? '—' : v.toLocaleString());
+    const share = (v: number | null) => (v == null ? '—' : `${v.toFixed(0)}%`);
+    const pct1 = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)}%`);
+    const delta = (v: number | null) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
     const columns = (): HeatColumn<any>[] => [
       { key: 'label', label: 'Month', render: (r) => r.label ?? r.month },
       { key: 'orders', label: 'Orders', align: 'right', render: (r) => (r.orders ?? 0).toLocaleString() },
       { key: 'aov', label: 'AOV', align: 'right', render: (r) => money(r.aov) },
-      { key: 'returnsPct', label: '% Returns', align: 'right', render: (r) => (r.returnsPct == null ? '—' : `${r.returnsPct.toFixed(1)}%`) },
+      { key: 'returnsPct', label: '% Returns', align: 'right', render: (r) => pct1(r.returnsPct) },
       {
         key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue),
         gradeOf: (r) => heatFromDeltaPct(r.deltaRevenuePct),
       },
       { key: 'spend', label: 'Spend', align: 'right', render: (r) => money(r.spend) },
-      { key: 'googleSharePct', label: 'Google %', align: 'right', render: (r) => (r.googleSharePct == null ? '—' : `${r.googleSharePct.toFixed(0)}%`) },
+      { key: 'googleSharePct', label: 'Google %', align: 'right', render: (r) => share(r.googleSharePct) },
+      { key: 'metaSharePct', label: 'Meta %', align: 'right', render: (r) => share(r.metaSharePct) },
+      { key: 'tiktokSharePct', label: 'TikTok %', align: 'right', render: (r) => share(r.tiktokSharePct) },
       {
         key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)),
         gradeOf: (r) => heatFromDeltaPct(r.deltaRoasPct),
       },
-      { key: 'deltaRevenuePct', label: 'Δ Revenue', align: 'right', render: (r) => (r.deltaRevenuePct == null ? '—' : `${r.deltaRevenuePct > 0 ? '+' : ''}${r.deltaRevenuePct.toFixed(1)}%`) },
-      { key: 'deltaRoasPct', label: 'Δ ROAS', align: 'right', render: (r) => (r.deltaRoasPct == null ? '—' : `${r.deltaRoasPct > 0 ? '+' : ''}${r.deltaRoasPct.toFixed(1)}%`) },
+      // Customer split — real Shopify counts; '—' when the counts aren't available.
+      { key: 'new', label: 'New', align: 'right', render: (r) => count(r.new) },
+      { key: 'returning', label: 'Returning', align: 'right', render: (r) => count(r.returning) },
+      { key: 'retPctCustomers', label: '% Ret', align: 'right', render: (r) => pct1(r.retPctCustomers) },
+      { key: 'totalCustomers', label: 'Total', align: 'right', render: (r) => count(r.totalCustomers) },
+      { key: 'cac', label: 'CAC', align: 'right', render: (r) => money(r.cac) },
+      { key: 'roasNc', label: 'ROAS-nc*', align: 'right', render: (r) => (r.roasNc == null ? '—' : formatRoas(r.roasNc)) },
+      { key: 'goalPct', label: 'Goal', align: 'right', render: (r) => delta(r.goalPct) },
+      // YoY comparison columns (vs same month last year) — matches the reference.
+      { key: 'captacionYoYPct', label: 'Captación', align: 'right', render: (r) => delta(r.captacionYoYPct), gradeOf: (r) => heatFromDeltaPct(r.captacionYoYPct) },
+      { key: 'retentionYoYPct', label: 'Ret Δ', align: 'right', render: (r) => delta(r.retentionYoYPct), gradeOf: (r) => heatFromDeltaPct(r.retentionYoYPct) },
+      { key: 'revenueYoYPct', label: 'Δ Revenue', align: 'right', render: (r) => delta(r.revenueYoYPct), gradeOf: (r) => heatFromDeltaPct(r.revenueYoYPct) },
+      { key: 'budgetYoYPct', label: 'Δ Budget', align: 'right', render: (r) => delta(r.budgetYoYPct) },
     ];
     const okRows = (rows: any[]) => rows.filter((r) => r.status === 'ok');
+    const hasRoasNc = [...(p.currentYearRows ?? []), ...(p.priorYearRows ?? [])].some((r: any) => r.roasNc != null);
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <div>
+        <div style={{ overflowX: 'auto' }}>
           <div className="muted text-sm" style={{ marginBottom: 4 }}>{p.reportYear}{p.monthsWindow ? ` — last ${p.monthsWindow} months` : ''}</div>
           <HeatTable
             columns={columns()}
@@ -51,7 +69,7 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
             title={`${p.reportYear} financial matrix`}
           />
         </div>
-        <div>
+        <div style={{ overflowX: 'auto' }}>
           <div className="muted text-sm" style={{ marginBottom: 4 }}>{p.priorYear}{p.monthsWindow ? ` — same ${p.monthsWindow} months last year` : ''}</div>
           <HeatTable
             columns={columns()}
@@ -60,6 +78,11 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
             title={`${p.priorYear} financial matrix`}
           />
         </div>
+        {hasRoasNc && (
+          <div className="muted" style={{ fontSize: 10, fontStyle: 'italic' }}>
+            * ROAS-nc is modeled — new customers × blended AOV ÷ spend (Shopify can’t split sales by customer type; runs slightly high). Captación / Ret Δ / Δ Revenue / Δ Budget are year-over-year, vs the same month last year.
+          </div>
+        )}
       </div>
     );
   },

@@ -69,7 +69,13 @@ final class MetaCreativeFetcher
             for ($d = $from; $d->lessThanOrEqualTo($to); $d = $d->addDay()) {
                 $day = $d->toDateString();
                 try {
-                    $body = $this->client->get($accountId . '/insights', [
+                    // paged(), not get() with a single limit:500 page. level=ad on a large account
+                    // (Flabelus runs 700+ ads/day) truncates at 500 with no pagination, silently
+                    // dropping the low-spend tail — the same bug proven in AdProductFetcher. Following
+                    // Graph's paging.next reads the day in full; MetaClient::request() backs off on
+                    // rate limits between pages.
+                    // NOT named $rows — that is this method's OUTPUT accumulator, appended to below.
+                    $insights = $this->client->paged($accountId . '/insights', [
                         'level'                      => 'ad',
                         'fields'                     => 'ad_id,ad_name,campaign_id,spend,impressions,clicks,actions,action_values,video_thruplay_watched_actions,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,account_currency',
                         'action_attribution_windows' => json_encode([self::ATTRIBUTION_WINDOW]),
@@ -82,7 +88,7 @@ final class MetaCreativeFetcher
                     continue;
                 }
 
-                foreach (($body['data'] ?? []) as $r) {
+                foreach ($insights as $r) {
                     $adId = (string) ($r['ad_id'] ?? '');
                     if ($adId === '') {
                         continue;

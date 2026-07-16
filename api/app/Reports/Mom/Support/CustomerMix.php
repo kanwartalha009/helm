@@ -90,4 +90,60 @@ final class CustomerMix
         ];
     }
 
+    /**
+     * New-vs-returning customer counts for EVERY month in a window, in ONE bounded
+     * ShopifyQL call (customersByMonthRange groups by month natively — a 24-month
+     * window is still a single call, not 24). Used by the S1 financial matrix,
+     * whose rows span the report year + prior year.
+     *
+     * Same honesty contract as forMonth(): no active Shopify connection / missing
+     * read_reports scope / any transport failure → [] (the caller renders the
+     * customer columns as unavailable, never fabricated zeros). A zero-customer
+     * month is simply omitted from the map, not emitted as a real "0".
+     *
+     * @return array<string, array{customers: int, returning: int, new: int, orders: int, newPct: float, retPct: float}>
+     *   keyed by 'Y-m'; empty when the split isn't available at all.
+     */
+    public function forRange(Brand $brand, string $start, string $end): array
+    {
+        $conn = PlatformConnection::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', 'shopify')
+            ->where('status', 'active')
+            ->first();
+
+        if ($conn === null) {
+            return [];
+        }
+
+        try {
+            $byMonth = $this->revenue->customersByMonthRange($conn, $start, $end);
+        } catch (Throwable) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($byMonth as $ym => $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $customers = (int) ($row['customers'] ?? 0);
+            $returning = (int) ($row['returning'] ?? 0);
+            if ($customers <= 0) {
+                continue; // a zero-customer month is no signal, not a real "0"
+            }
+            $new = max(0, $customers - $returning);
+            $out[(string) $ym] = [
+                'customers' => $customers,
+                'returning' => $returning,
+                'new'       => $new,
+                'orders'    => (int) ($row['orders'] ?? 0),
+                'newPct'    => round($new / $customers * 100, 1),
+                'retPct'    => round($returning / $customers * 100, 1),
+            ];
+        }
+
+        return $out;
+    }
+
 }

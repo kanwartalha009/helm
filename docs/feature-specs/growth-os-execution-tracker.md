@@ -1504,3 +1504,19 @@ Kanwar: "Goals vs actual move it to Executive overview cards." (Display: mixed �
 - Proof: `php artisan test` (MomExecOverview + MomM1 + MomM2) green; `npx tsc --noEmit` clean; `npm run build` green.
 
 Note (not a code change): report opening on May instead of the closed June is a server date/timezone issue on the deployment — the last-complete-month logic is correct on a July-dated server. Left as-is per Kanwar.
+
+### Round I — Financial matrix (S1) expanded to the full reference column set (Kanwar, 2026-07-15)
+Kanwar: "add all the missing columns, goal fields will show if we have those data, and as we show google percentage we should show other ads spend percentages as well." Reference = the agency's own PDF financial-matrix table.
+
+Column decisions (permission prompt for the two forks dropped mid-turn; proceeded on the reference's own signals):
+- Comparison columns (Captación, Ret Δ, Δ Revenue, Δ Budget) = **Year-over-Year** (vs same month last year) — the reference summary box is explicitly YoY (New +19% / Returning +15% / Revenue +18% YoY).
+- **ROAS-nc shown as Modeled**: new customers × blended AOV ÷ spend — the exact v1 monthly-report estimate (MonthlyReport::newVsExistingSection, verified against the v1 "ROAS · NEW CUSTOMER … est" card). Flagged `roasNcModeled` + an on-table footnote.
+
+- `api/app/Reports/Mom/Support/CustomerMix.php` — re-added `forRange()`: per-month new/returning counts across the whole window in ONE bounded ShopifyQL call (customersByMonthRange groups by month natively). Same honesty contract as forMonth — [] when no connection/scope.
+- `api/app/Reports/Mom/Sections/SFinancialMatrixSection.php`:
+  - Injected CustomerMix. New per-row columns: metaSharePct, tiktokSharePct (alongside googleSharePct); new / returning / retPctCustomers / totalCustomers; cac (spend ÷ new); roasNc (modeled); goalPct (revenue ÷ target − 1, from BrandTarget month override → standing default); YoY captacionYoYPct / retentionYoYPct / revenueYoYPct / budgetYoYPct.
+  - monthlyMetrics now tracks meta + tiktok spend per month.
+  - `unavailable.customerColumns` note shows ONLY when counts are genuinely absent; when live counts exist the columns are real and unflagged. `roasNcModeled: true` on the payload.
+- `web/src/components/reports/mom/sectionTables.tsx` — S1 table extended to the full reference order (Month, Orders, AOV, %Returns, Revenue, Spend, Google%, Meta%, TikTok%, ROAS, New, Returning, %Ret, Total, CAC, ROAS-nc*, Goal, Captación, Ret Δ, Δ Revenue, Δ Budget); horizontal scroll; modeled/YoY footnote. Customer columns render "—" when unavailable (missing ≠ zero).
+- `api/tests/Feature/MomM2FinalSectionsTest.php` — new test: with mocked customer counts + a target, S1 carries New/Returning/%Ret/Total, CAC (500/60≈8.33), modeled ROAS-nc (60×100÷500=12), Goal (+25%), and YoY (New +100%, Returning +33.3%, Revenue +100%); Meta% asserted in the omit-customer-columns test.
+- Proof: full Mom suite green (62 passed, 516 assertions); `npx tsc --noEmit` clean; `npm run build` green.

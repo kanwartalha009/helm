@@ -57,18 +57,29 @@ class AdProductFetcher
         $agg = [];
 
         foreach ($accountIds as $accountId) {
-            // Pull spend ONE DAY AT A TIME. A month-long level=ad, time_increment=1
-            // pull is thousands of ad×day rows and truncates at the first page
-            // (~500), so only the first day-and-a-half of a month landed. A single
-            // day's ads comfortably fit one page → always complete, and each call
-            // is small, which is also gentler on the rate limit.
+            // Pull spend ONE DAY AT A TIME, FOLLOWING PAGINATION.
+            //
+            // ══ WHY paged(), NOT get() WITH limit:500 ══
+            // The old comment here claimed "a single day's ads comfortably fit one page → always
+            // complete". Measured false on Flabelus (act_987893265344995): EVERY day in an 8-day
+            // window returned a FULL 500-row page — the account runs 700+ ads/day. The single-page
+            // read saw only the top 500 by Meta's default ordering and dropped the rest, and the
+            // rest is the LOW-SPEND TAIL. So a product advertised with a few cents (real case: "pip",
+            // 3 active ads, ~€4 total) was invisible: 0 ads, "—" spend in Inventory, its budget
+            // silently swept into the __other bucket. It affected EVERY low-spend product on EVERY
+            // large account, and inflated the unattributed total on the page.
+            //
+            // `paged()` follows Graph's `paging.next` cursor to the end, routing every page through
+            // MetaClient::request() — which already backs off on rate-limit (error 17). Day-by-day
+            // is still the unit (a month-ranged level=ad pull truncates far worse and can't be
+            // reliably paged), but each day is now read in FULL.
             $spendByDayAd = [];   // day => adId => spend
             $adIds        = [];
 
             for ($d = $from; $d->lessThanOrEqualTo($to); $d = $d->addDay()) {
                 $day = $d->toDateString();
                 try {
-                    $body = $this->client->get($accountId . '/insights', [
+                    $rows = $this->client->paged($accountId . '/insights', [
                         'level'      => 'ad',
                         'fields'     => 'ad_id,spend,account_currency',
                         'time_range' => json_encode(['since' => $day, 'until' => $day]),
@@ -80,7 +91,7 @@ class AdProductFetcher
                     continue;
                 }
 
-                foreach (($body['data'] ?? []) as $r) {
+                foreach ($rows as $r) {
                     $adId = (string) ($r['ad_id'] ?? '');
                     $s    = (float) ($r['spend'] ?? 0);
                     if ($adId === '' || $s <= 0) {

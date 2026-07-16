@@ -5,11 +5,15 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\Brand;
+use App\Models\BrandTarget;
+use App\Models\PlatformConnection;
 use App\Models\User;
+use App\Platforms\Shopify\RevenueFetcher;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use Tests\TestCase;
 
 /**
@@ -125,6 +129,64 @@ class MomM2FinalSectionsTest extends TestCase
         $this->assertEqualsWithDelta(100.0, $res->json('summary.revenueYoYPct'), 0.1); // 1000 vs 500
 
         $this->assertArrayHasKey('customerColumns', $res->json('unavailable'));
+        // Meta share rides alongside Google now (other-platform spend %): meta
+        // 400 of 500 total = 80%.
+        $this->assertEquals(80.0, $reportRow['metaSharePct']);
+    }
+
+    public function test_s1_populates_customer_columns_cac_modeled_roasnc_goal_and_yoy_when_available(): void
+    {
+        // Kanwar, 2026-07-15 — "add all the missing columns": with live Shopify
+        // customer counts (mocked) + a target, S1 now carries New/Returning/%Ret/
+        // Total/CAC/ROAS-nc(modeled)/Goal and the YoY comparison columns.
+        $this->actingMasterAdmin();
+        $brand = $this->makeBrand();
+        $month     = $this->monthStart();
+        $lastYear  = $month->subYear();
+        $ym  = $month->format('Y-m');
+        $lym = $lastYear->format('Y-m');
+
+        // Active Shopify connection so CustomerMix resolves the mocked fetcher.
+        (new PlatformConnection())->forceFill([
+            'brand_id' => $brand->id, 'platform' => 'shopify',
+            'external_id' => "shop-{$brand->id}", 'status' => 'active',
+            'credentials' => ['access_token' => 'tok'],
+        ])->save();
+
+        // customersByMonthRange returns per-month counts for the window.
+        $mock = Mockery::mock(RevenueFetcher::class);
+        $mock->shouldReceive('customersByMonthRange')->andReturn([
+            $ym  => ['orders' => 10, 'customers' => 100, 'returning' => 40],
+            $lym => ['orders' => 5,  'customers' => 60,  'returning' => 30],
+        ]);
+        $this->app->instance(RevenueFetcher::class, $mock);
+
+        // Report month: revenue 1000 over 10 orders (AOV 100), spend 500.
+        $this->seedShopifyDaily($brand->id, $month->toDateString(), 1000, 10);
+        $this->seedAdSpend($brand->id, 'meta', $month->toDateString(), 500);
+        // Same month last year: revenue 500, so YoY revenue = +100%.
+        $this->seedShopifyDaily($brand->id, $lastYear->toDateString(), 500, 5);
+        // Standing-default revenue target 800 → goal = 1000/800 − 1 = +25%.
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => null, 'revenue_target' => 800, 'roas_target' => 3]);
+
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S1?month={$ym}")
+            ->assertOk()->assertJsonPath('status', 'ok');
+
+        $row = collect($res->json('currentYearRows'))->firstWhere('month', $ym);
+        $this->assertEquals(60, $row['new']);            // 100 − 40
+        $this->assertEquals(40, $row['returning']);
+        $this->assertEquals(100, $row['totalCustomers']);
+        $this->assertEquals(40.0, $row['retPctCustomers']);
+        $this->assertEqualsWithDelta(8.33, $row['cac'], 0.05);   // 500 / 60
+        // ROAS-nc modeled = new(60) × AOV(100) ÷ spend(500) = 12.
+        $this->assertEqualsWithDelta(12.0, $row['roasNc'], 0.05);
+        $this->assertTrue($res->json('roasNcModeled'));
+        $this->assertEqualsWithDelta(25.0, $row['goalPct'], 0.1);       // 1000/800 − 1
+        $this->assertEqualsWithDelta(100.0, $row['captacionYoYPct'], 0.1); // new 60 vs 30
+        $this->assertEqualsWithDelta(33.3, $row['retentionYoYPct'], 0.2); // returning 40 vs 30
+        $this->assertEqualsWithDelta(100.0, $row['revenueYoYPct'], 0.1);  // 1000 vs 500
+        // Counts available → no customer-columns unavailable note.
+        $this->assertArrayNotHasKey('customerColumns', $res->json('unavailable') ?? []);
     }
 
     public function test_s7_categories_and_s8_best_sellers_join_stock_from_product_catalog(): void
