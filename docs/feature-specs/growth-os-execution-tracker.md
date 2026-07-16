@@ -1520,3 +1520,17 @@ Column decisions (permission prompt for the two forks dropped mid-turn; proceede
 - `web/src/components/reports/mom/sectionTables.tsx` — S1 table extended to the full reference order (Month, Orders, AOV, %Returns, Revenue, Spend, Google%, Meta%, TikTok%, ROAS, New, Returning, %Ret, Total, CAC, ROAS-nc*, Goal, Captación, Ret Δ, Δ Revenue, Δ Budget); horizontal scroll; modeled/YoY footnote. Customer columns render "—" when unavailable (missing ≠ zero).
 - `api/tests/Feature/MomM2FinalSectionsTest.php` — new test: with mocked customer counts + a target, S1 carries New/Returning/%Ret/Total, CAC (500/60≈8.33), modeled ROAS-nc (60×100÷500=12), Goal (+25%), and YoY (New +100%, Returning +33.3%, Revenue +100%); Meta% asserted in the omit-customer-columns test.
 - Proof: full Mom suite green (62 passed, 516 assertions); `npx tsc --noEmit` clean; `npm run build` green.
+
+### Round J — S1 conditional columns, MoM comparison, reference cell coloring (Kanwar, 2026-07-15)
+Kanwar: "add basic backend conditions (if tiktok not connected don't show tiktok; if goal empty don't show that field), comparison should be month vs previous month, and colour table cells as in the reference."
+
+- Comparison basis → **month-over-month** (Kanwar's call; agreed — MoM reads momentum and populates both stacked tables, whereas the reference's YoY left the prior-year deltas blank). Captación = new-customer MoM, Ret Δ = returning MoM, Δ Revenue / Δ Budget = revenue/spend MoM. Removed the per-row YoY fields (summary.revenueYoYPct kept — it's the headline callout, not a table column).
+- `api/app/Reports/Mom/Sections/SFinancialMatrixSection.php`:
+  - `adPlatforms(brandId, byMonth)` → payload `adPlatforms`: a platform's share column shows when it's an active connection OR has spend in the window (connected-but-0% stays visible; never hides real spend; hides platforms that are neither). Ordered google→meta→tiktok.
+  - Payload `hasGoals` (any month target or standing default) → the Goal column is hidden entirely when no target exists.
+  - rowFor comparison columns switched to MoM (captacionMoMPct / retentionMoMPct from prior-month counts; deltaRevenuePct / deltaSpendPct reused).
+- `web/src/components/reports/mom/sectionTables.tsx`:
+  - Share columns built dynamically from `p.adPlatforms`; Goal column rendered only when `p.hasGoals`.
+  - Cell heat coloring (v1's gradeCol / heatFromDeltaPct, via HeatTable): column-relative green/red on Orders, AOV, Revenue, ROAS, New, Returning, Total, ROAS-nc (higher = greener); % Returns and CAC (lower = greener); delta-graded Goal / Captación / Ret Δ / Δ Revenue / Δ Budget. Spend, the ad-share %s, and % Ret left ungraded on purpose (no well-defined good/bad direction — colouring them would imply a value judgment). Footnote updated to MoM.
+- `api/tests/Feature/MomM2FinalSectionsTest.php` — MoM test (Captación +20% new 60 vs 50, Ret Δ +33.3%, Δ Revenue +25%, Δ Budget +25%); asserts adPlatforms = [google, meta] (tiktok hidden), hasGoals true/false, and no lingering YoY row field.
+- Proof: full Mom suite green (62 passed, 521 assertions); tsc clean; build green.

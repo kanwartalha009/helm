@@ -24,37 +24,46 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     const share = (v: number | null) => (v == null ? '—' : `${v.toFixed(0)}%`);
     const pct1 = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)}%`);
     const delta = (v: number | null) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
-    const columns = (): HeatColumn<any>[] => [
-      { key: 'label', label: 'Month', render: (r) => r.label ?? r.month },
-      { key: 'orders', label: 'Orders', align: 'right', render: (r) => (r.orders ?? 0).toLocaleString() },
-      { key: 'aov', label: 'AOV', align: 'right', render: (r) => money(r.aov) },
-      { key: 'returnsPct', label: '% Returns', align: 'right', render: (r) => pct1(r.returnsPct) },
-      {
-        key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue),
-        gradeOf: (r) => heatFromDeltaPct(r.deltaRevenuePct),
-      },
-      { key: 'spend', label: 'Spend', align: 'right', render: (r) => money(r.spend) },
-      { key: 'googleSharePct', label: 'Google %', align: 'right', render: (r) => share(r.googleSharePct) },
-      { key: 'metaSharePct', label: 'Meta %', align: 'right', render: (r) => share(r.metaSharePct) },
-      { key: 'tiktokSharePct', label: 'TikTok %', align: 'right', render: (r) => share(r.tiktokSharePct) },
-      {
-        key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)),
-        gradeOf: (r) => heatFromDeltaPct(r.deltaRoasPct),
-      },
+    // Which ad-platform share columns to show (backend condition: connected OR
+    // has spend). Falls back to all three if the backend didn't say.
+    const adPlatforms: string[] = Array.isArray(p.adPlatforms) ? p.adPlatforms : ['google', 'meta', 'tiktok'];
+    const platformLabel: Record<string, string> = { google: 'Google %', meta: 'Meta %', tiktok: 'TikTok %' };
+    const platformField: Record<string, string> = { google: 'googleSharePct', meta: 'metaSharePct', tiktok: 'tiktokSharePct' };
+    const columns = (): HeatColumn<any>[] => {
+      const cols: HeatColumn<any>[] = [
+        { key: 'label', label: 'Month', render: (r) => r.label ?? r.month },
+        { key: 'orders', label: 'Orders', align: 'right', render: (r) => (r.orders ?? 0).toLocaleString(), heat: { mode: 'column', dir: 'high', value: (r) => r.orders } },
+        { key: 'aov', label: 'AOV', align: 'right', render: (r) => money(r.aov), heat: { mode: 'column', dir: 'high', value: (r) => r.aov } },
+        { key: 'returnsPct', label: '% Returns', align: 'right', render: (r) => pct1(r.returnsPct), heat: { mode: 'column', dir: 'low', value: (r) => r.returnsPct } },
+        { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
+        { key: 'spend', label: 'Spend', align: 'right', render: (r) => money(r.spend) },
+      ];
+      // Ad-platform share columns — only the connected/spending ones.
+      adPlatforms.forEach((pf) => {
+        const field = platformField[pf];
+        if (field) cols.push({ key: field, label: platformLabel[pf] ?? pf, align: 'right', render: (r) => share(r[field]) });
+      });
+      cols.push({ key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)), heat: { mode: 'column', dir: 'high', value: (r) => r.roas } });
       // Customer split — real Shopify counts; '—' when the counts aren't available.
-      { key: 'new', label: 'New', align: 'right', render: (r) => count(r.new) },
-      { key: 'returning', label: 'Returning', align: 'right', render: (r) => count(r.returning) },
-      { key: 'retPctCustomers', label: '% Ret', align: 'right', render: (r) => pct1(r.retPctCustomers) },
-      { key: 'totalCustomers', label: 'Total', align: 'right', render: (r) => count(r.totalCustomers) },
-      { key: 'cac', label: 'CAC', align: 'right', render: (r) => money(r.cac) },
-      { key: 'roasNc', label: 'ROAS-nc*', align: 'right', render: (r) => (r.roasNc == null ? '—' : formatRoas(r.roasNc)) },
-      { key: 'goalPct', label: 'Goal', align: 'right', render: (r) => delta(r.goalPct) },
-      // YoY comparison columns (vs same month last year) — matches the reference.
-      { key: 'captacionYoYPct', label: 'Captación', align: 'right', render: (r) => delta(r.captacionYoYPct), gradeOf: (r) => heatFromDeltaPct(r.captacionYoYPct) },
-      { key: 'retentionYoYPct', label: 'Ret Δ', align: 'right', render: (r) => delta(r.retentionYoYPct), gradeOf: (r) => heatFromDeltaPct(r.retentionYoYPct) },
-      { key: 'revenueYoYPct', label: 'Δ Revenue', align: 'right', render: (r) => delta(r.revenueYoYPct), gradeOf: (r) => heatFromDeltaPct(r.revenueYoYPct) },
-      { key: 'budgetYoYPct', label: 'Δ Budget', align: 'right', render: (r) => delta(r.budgetYoYPct) },
-    ];
+      cols.push(
+        { key: 'new', label: 'New', align: 'right', render: (r) => count(r.new), heat: { mode: 'column', dir: 'high', value: (r) => r.new } },
+        { key: 'returning', label: 'Returning', align: 'right', render: (r) => count(r.returning), heat: { mode: 'column', dir: 'high', value: (r) => r.returning } },
+        { key: 'retPctCustomers', label: '% Ret', align: 'right', render: (r) => pct1(r.retPctCustomers) },
+        { key: 'totalCustomers', label: 'Total', align: 'right', render: (r) => count(r.totalCustomers), heat: { mode: 'column', dir: 'high', value: (r) => r.totalCustomers } },
+        { key: 'cac', label: 'CAC', align: 'right', render: (r) => money(r.cac), heat: { mode: 'column', dir: 'low', value: (r) => r.cac } },
+        { key: 'roasNc', label: 'ROAS-nc*', align: 'right', render: (r) => (r.roasNc == null ? '—' : formatRoas(r.roasNc)), heat: { mode: 'column', dir: 'high', value: (r) => r.roasNc } },
+      );
+      // Goal column only when the brand has a target (backend `hasGoals`).
+      if (p.hasGoals) cols.push({ key: 'goalPct', label: 'Goal', align: 'right', render: (r) => delta(r.goalPct), gradeOf: (r) => heatFromDeltaPct(r.goalPct) });
+      // Comparison columns — month-over-month.
+      cols.push(
+        { key: 'captacionMoMPct', label: 'Captación', align: 'right', render: (r) => delta(r.captacionMoMPct), gradeOf: (r) => heatFromDeltaPct(r.captacionMoMPct) },
+        { key: 'retentionMoMPct', label: 'Ret Δ', align: 'right', render: (r) => delta(r.retentionMoMPct), gradeOf: (r) => heatFromDeltaPct(r.retentionMoMPct) },
+        { key: 'revMoM', label: 'Δ Revenue', align: 'right', render: (r) => delta(r.deltaRevenuePct), gradeOf: (r) => heatFromDeltaPct(r.deltaRevenuePct) },
+        { key: 'budgetMoM', label: 'Δ Budget', align: 'right', render: (r) => delta(r.deltaSpendPct), gradeOf: (r) => heatFromDeltaPct(r.deltaSpendPct) },
+      );
+      return cols;
+    };
     const okRows = (rows: any[]) => rows.filter((r) => r.status === 'ok');
     const hasRoasNc = [...(p.currentYearRows ?? []), ...(p.priorYearRows ?? [])].some((r: any) => r.roasNc != null);
 
@@ -80,7 +89,7 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
         </div>
         {hasRoasNc && (
           <div className="muted" style={{ fontSize: 10, fontStyle: 'italic' }}>
-            * ROAS-nc is modeled — new customers × blended AOV ÷ spend (Shopify can’t split sales by customer type; runs slightly high). Captación / Ret Δ / Δ Revenue / Δ Budget are year-over-year, vs the same month last year.
+            * ROAS-nc is modeled — new customers × blended AOV ÷ spend (Shopify can’t split sales by customer type; runs slightly high). Captación / Ret Δ / Δ Revenue / Δ Budget are month-over-month (vs the previous month).
           </div>
         )}
       </div>

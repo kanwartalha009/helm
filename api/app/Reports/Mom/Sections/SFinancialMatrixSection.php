@@ -7,6 +7,7 @@ namespace App\Reports\Mom\Sections;
 use App\Models\Brand;
 use App\Models\BrandTarget;
 use App\Models\DailyMetric;
+use App\Models\PlatformConnection;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Support\CustomerMix;
@@ -128,6 +129,14 @@ final class SFinancialMatrixSection implements MomSection
             'currentYearRows' => $currentYearRows,
             'priorYearRows'   => $priorYearRows,
             'summary' => $summary,
+            // Which ad-platform share columns to show (Kanwar: "if tiktok is not
+            // connected don't show tiktok"). A platform appears when it's an
+            // active connection OR has real spend in the window — so a connected
+            // platform shows even at 0% spend, and we never hide spend we do have.
+            'adPlatforms' => $this->adPlatforms($brand->id, $byMonth),
+            // Whether ANY goal target exists — the Goal column is hidden entirely
+            // when the brand has no target set (Kanwar: "goal is empty don't show").
+            'hasGoals' => $targets['default'] !== null || $targets['map'] !== [],
             // ROAS-nc is MODELED (new customers × blended AOV ÷ spend): Shopify
             // can't report sales by customer type, so new-customer revenue is an
             // estimate — same honesty basis as S2's new/returning split.
@@ -164,6 +173,40 @@ final class SFinancialMatrixSection implements MomSection
         }
 
         return ['map' => $map, 'default' => $default];
+    }
+
+    /**
+     * The ad platforms whose spend-share column should render: an active
+     * connection OR any spend in the window. Keeps a connected-but-zero-spend
+     * platform visible, hides a platform that is neither connected nor spending,
+     * and never hides spend we actually have. Ordered google → meta → tiktok
+     * (Google first, matching the reference).
+     *
+     * @param array<string, array{googleSpend:float, metaSpend:float, tiktokSpend:float}> $byMonth
+     * @return array<int, string>
+     */
+    private function adPlatforms(int $brandId, array $byMonth): array
+    {
+        $connected = PlatformConnection::query()
+            ->where('brand_id', $brandId)
+            ->whereIn('platform', self::AD_PLATFORMS)
+            ->where('status', 'active')
+            ->pluck('platform')
+            ->all();
+
+        $spendKey = ['google' => 'googleSpend', 'meta' => 'metaSpend', 'tiktok' => 'tiktokSpend'];
+        $out = [];
+        foreach (['google', 'meta', 'tiktok'] as $platform) {
+            $spend = 0.0;
+            foreach ($byMonth as $m) {
+                $spend += (float) ($m[$spendKey[$platform]] ?? 0);
+            }
+            if (in_array($platform, $connected, true) || $spend > 0.0) {
+                $out[] = $platform;
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -212,12 +255,6 @@ final class SFinancialMatrixSection implements MomSection
         $prevKey = $monthDate->subMonth()->format('Y-m');
         $prev    = $byMonth[$prevKey] ?? null;
 
-        // Same month last year — the basis for the YoY comparison columns
-        // (Captación / Ret / Δ Revenue / Δ Budget), matching the reference's
-        // year-over-year framing (the two stacked tables line up per month).
-        $yoyKey = $monthDate->subYear()->format('Y-m');
-        $yoy    = $byMonth[$yoyKey] ?? null;
-
         if ($cur === null) {
             return ['month' => $key, 'label' => $monthDate->isoFormat('MMMM YYYY'), 'status' => 'no_data'];
         }
@@ -229,8 +266,8 @@ final class SFinancialMatrixSection implements MomSection
 
         // Customer split for this month (live Shopify counts) — null throughout
         // when unavailable, so the columns render "—" rather than a fake 0.
-        $c    = $counts[$key] ?? null;
-        $cYoy = $counts[$yoyKey] ?? null;
+        $c     = $counts[$key] ?? null;
+        $cPrev = $counts[$prevKey] ?? null; // prior month, for the MoM customer deltas
         $new       = $c['new'] ?? null;
         $returning = $c['returning'] ?? null;
         $totalCust = $c['customers'] ?? null;
@@ -267,12 +304,12 @@ final class SFinancialMatrixSection implements MomSection
             'cac'            => $cac,
             'roasNc'         => $roasNc, // MODELED (see roasNcModeled flag on the payload)
             'goalPct'        => $goalPct,
-            // YoY comparison columns (vs same month last year).
-            'captacionYoYPct' => ($new !== null && $cYoy !== null) ? $this->pctDelta((float) $new, (float) $cYoy['new']) : null,
-            'retentionYoYPct' => ($returning !== null && $cYoy !== null) ? $this->pctDelta((float) $returning, (float) $cYoy['returning']) : null,
-            'revenueYoYPct'   => $yoy !== null ? $this->pctDelta($cur['revenue'], $yoy['revenue']) : null,
-            'budgetYoYPct'    => $yoy !== null ? $this->pctDelta($spend, $yoy['spend']) : null,
-            // MoM deltas retained for the revenue/ROAS heatmap cell grading.
+            // Comparison columns — MONTH-OVER-MONTH (Kanwar, 2026-07-15: "month vs
+            // previous month so we see progress"). Captación = new-customer MoM,
+            // Ret Δ = returning-customer MoM; Δ Revenue / Δ Budget reuse the
+            // revenue/spend MoM deltas below.
+            'captacionMoMPct' => ($new !== null && $cPrev !== null && ($cPrev['new'] ?? 0) > 0) ? $this->pctDelta((float) $new, (float) $cPrev['new']) : null,
+            'retentionMoMPct' => ($returning !== null && $cPrev !== null && ($cPrev['returning'] ?? 0) > 0) ? $this->pctDelta((float) $returning, (float) $cPrev['returning']) : null,
             'deltaRevenuePct' => $prev !== null ? $this->pctDelta($cur['revenue'], $prev['revenue']) : null,
             'deltaSpendPct'   => $prev !== null ? $this->pctDelta($cur['spend'], $prev['spend']) : null,
             'deltaRoasPct'    => $this->pctDelta($roas, $prevRoas),
