@@ -67,6 +67,7 @@ final class SFunnelLandingSection implements MomSection
             'status' => 'ok',
             'month'  => CarbonImmutable::parse($start)->format('Y-m'),
             'compareMonth' => $compareWindow !== null ? CarbonImmutable::parse($compareWindow[0])->format('Y-m') : null,
+            'summary' => $this->summary($cur),
             'rows'   => array_slice($cur, 0, 15),
             'unavailable' => [
                 'thresholdFlags' => 'No funnel-stage CVR threshold confirmed in config/momreport.php yet — raw rates only, no red/green flag.',
@@ -114,6 +115,7 @@ final class SFunnelLandingSection implements MomSection
                 'cartPct'     => $sessions > 0 ? round($cart / $sessions * 100, 2) : null,
                 'checkoutPct' => $sessions > 0 ? round($checkout / $sessions * 100, 2) : null,
                 'purchasePct' => $sessions > 0 ? round($purchase / $sessions * 100, 2) : null,
+                'completedCheckoutRate' => $checkout > 0 ? round($purchase / $checkout * 100, 2) : null,
                 'cvr'      => $sessions > 0 ? round($purchase / $sessions * 100, 2) : null,
             ];
         }
@@ -129,5 +131,34 @@ final class SFunnelLandingSection implements MomSection
         }
 
         return round(($value - $compare) / $compare * 100, 1);
+    }
+
+    /**
+     * Brand-wide funnel rates across every landing page — the "Summary" line.
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<string, mixed>
+     */
+    private function summary(array $rows): array
+    {
+        $sessions = 0;
+        $cart = 0;
+        $checkout = 0;
+        $purchase = 0;
+        foreach ($rows as $r) {
+            $sessions += (int) $r['sessions'];
+            $cart     += (int) $r['cart'];
+            $checkout += (int) $r['checkout'];
+            $purchase += (int) $r['purchase'];
+        }
+
+        return [
+            'label'    => 'Summary',
+            'sessions' => $sessions,
+            'cartPct'     => $sessions > 0 ? round($cart / $sessions * 100, 2) : null,
+            'checkoutPct' => $sessions > 0 ? round($checkout / $sessions * 100, 2) : null,
+            'completedCheckoutRate' => $checkout > 0 ? round($purchase / $checkout * 100, 2) : null,
+            'cvr'      => $sessions > 0 ? round($purchase / $sessions * 100, 2) : null,
+        ];
     }
 }

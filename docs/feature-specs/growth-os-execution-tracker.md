@@ -1596,3 +1596,13 @@ Frontend (web/src/components/reports/mom/sectionTables.tsx): shared monthColumns
 
 Tests (MomM2ContinuedTest, MomM3Test, MomM2FinalSectionsTest already green): S10 funnel % (cart 10 / checkout 5 / purchase 2), S14 detailed (ctr 2.0, cpm 80, share 88.9), S15 detailed gender rows (ctr/roas/cpa/share), S13 matrix rows.
 Proof: full Mom suite green (63 passed, 546 assertions); npx tsc --noEmit clean; npm run build green.
+
+### Round M — Funnel sections actually show rates (Kanwar, 2026-07-16)
+Kanwar: "in funnel sections i STILL see numbers for Add to cart / Checkout / Purchase — show percentage" + reference (Added-to-cart rate / Reached-checkout rate / Completed-checkout rate / Conversion rate, with a Summary row).
+
+Root cause: a stale `funnelTable` (raw counts + CVR) was assigned to SECTION_TABLE_RENDERERS.S10/.S11 AFTER the object literal, overriding Round L's percentage renderer — so the raw-count table kept rendering. Removed that block.
+
+- web/src/components/reports/mom/sectionTables.tsx — deleted the overriding funnelTable; renderFunnel now shows Sessions + Added-to-cart rate (÷ sessions) + Reached-checkout rate (÷ sessions) + Completed-checkout rate (purchases ÷ reached-checkout) + Conversion rate (÷ sessions, graded) + Δ CVR, with a leading brand-wide "Summary" row (excluded from grading).
+- api/app/Reports/Mom/Sections/SFunnelCountrySection.php + SFunnelLandingSection.php — added per-row completedCheckoutRate (purchases ÷ reached-checkout) and a summary() line (rates over ALL rows, not just the visible top 15).
+- api/tests/Feature/MomM2ContinuedTest.php — assert completedCheckoutRate 40 (20/50) and summary.cvr 2.0.
+Proof: full Mom suite green (63 passed, 548 assertions); tsc clean; build green.

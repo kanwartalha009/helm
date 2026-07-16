@@ -246,6 +246,8 @@ class MomM2ContinuedTest extends TestCase
         $this->assertEquals(10.0, $s10->json('rows.0.cartPct'));
         $this->assertEquals(5.0, $s10->json('rows.0.checkoutPct'));
         $this->assertEquals(2.0, $s10->json('rows.0.purchasePct'));
+        $this->assertEquals(40.0, $s10->json('rows.0.completedCheckoutRate')); // 20 purchase / 50 checkout
+        $this->assertEquals(2.0, $s10->json('summary.cvr'));                    // brand-wide summary row
 
         $s11 = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S11?month={$month->format('Y-m')}")
             ->assertOk()->assertJsonPath('status', 'ok');

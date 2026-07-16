@@ -1,6 +1,6 @@
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import { HeatTable, type HeatColumn } from './HeatTable';
-import { heatFromDeltaPct, heatVsBenchmark, type HeatGrade } from './heat';
+import { gradeColumn, heatFromDeltaPct, heatVsBenchmark, type HeatGrade } from './heat';
 
 /** % change a→b, null-safe (shared by the month-by-month matrices). */
 const pctChange = (a: number | null | undefined, b: number | null | undefined): number | null =>
@@ -63,28 +63,40 @@ function renderAdMetrics(p: any, currency: string, firstLabel: string, title: st
 }
 
 /**
- * Shared funnel table for S10/S11 — the stages (Add to cart / Checkout /
- * Purchase) shown as % of sessions (Kanwar, 2026-07-16), higher = greener.
+ * Shared funnel table for S10/S11 — every funnel stage shown as a RATE, not a
+ * raw count (Kanwar, 2026-07-16): Added-to-cart / Reached-checkout rate (÷
+ * sessions), Completed-checkout rate (÷ reached-checkout) and the session-level
+ * Conversion rate. A brand-wide "Summary" row leads the table (from the
+ * backend's `summary`, so it sums ALL rows, not just the visible top 15).
  */
 function renderFunnel(p: any, firstLabel: string): React.ReactNode {
-  const rows: any[] = p.rows ?? [];
-  const pct = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(1)}%`);
+  const pct = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
+  const summary = p.summary ? [{ ...p.summary, key: '__summary', isSummary: true }] : [];
+  const rows: any[] = [...summary, ...(p.rows ?? [])];
   return (
     <HeatTable
       columns={[
-        { key: 'label', label: firstLabel, render: (r) => r.label },
+        { key: 'label', label: firstLabel, render: (r) => (r.isSummary ? 'Summary' : r.label) },
         { key: 'sessions', label: 'Sessions', align: 'right', render: (r) => (r.sessions ?? 0).toLocaleString() },
-        { key: 'cartPct', label: 'Add to cart', align: 'right', render: (r) => pct(r.cartPct), heat: { mode: 'column', dir: 'high', value: (r) => r.cartPct } },
-        { key: 'checkoutPct', label: 'Checkout', align: 'right', render: (r) => pct(r.checkoutPct), heat: { mode: 'column', dir: 'high', value: (r) => r.checkoutPct } },
-        { key: 'purchasePct', label: 'Purchase', align: 'right', render: (r) => pct(r.purchasePct), heat: { mode: 'column', dir: 'high', value: (r) => r.purchasePct } },
-        { key: 'deltaPct', label: 'Δ CVR', align: 'right', render: (r) => deltaFmt(r.deltaPct), gradeOf: (r) => heatFromDeltaPct(r.deltaPct) },
+        { key: 'cartPct', label: 'Added to cart rate', align: 'right', render: (r) => pct(r.cartPct) },
+        { key: 'checkoutPct', label: 'Reached checkout rate', align: 'right', render: (r) => pct(r.checkoutPct) },
+        { key: 'completedCheckoutRate', label: 'Completed checkout rate', align: 'right', render: (r) => pct(r.completedCheckoutRate) },
+        // Conversion rate = purchases ÷ sessions; graded (higher = greener), but
+        // never the Summary row (it's a reference line, not a ranked competitor).
+        { key: 'cvr', label: 'Conversion rate', align: 'right', render: (r) => pct(r.cvr), gradeOf: (r) => (r.isSummary ? '' : gradeCvr(r.cvr, p.rows)) },
+        { key: 'deltaPct', label: 'Δ CVR', align: 'right', render: (r) => (r.isSummary ? '—' : deltaFmt(r.deltaPct)), gradeOf: (r) => (r.isSummary ? '' : heatFromDeltaPct(r.deltaPct)) },
       ]}
       rows={rows}
       rowKey={(r) => r.key}
       title={`Funnel by ${firstLabel.toLowerCase()}`}
-      previewRows={15}
+      previewRows={16}
     />
   );
+}
+
+/** Column-relative grade for a CVR value against the (non-summary) rows. */
+function gradeCvr(v: number | null | undefined, rows: any[]): HeatGrade {
+  return gradeColumn(v, (rows ?? []).map((r) => r.cvr), 'high');
 }
 
 /**
@@ -464,31 +476,3 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
   },
 };
 
-// S10/S11 — web funnel by country / by landing path. Identical row shape
-// (SFunnelCountrySection and SFunnelLandingSection both build off the same
-// shopify_funnel_daily aggregation), so one shared renderer covers both —
-// CVR graded column-wide (v1's FunnelTable gradeCol pattern) since there's
-// no fixed benchmark to grade a conversion rate against.
-const funnelTable = (title: string) => (p: any) => {
-  const rows: any[] = p.rows ?? [];
-  const n = (v: number) => (v ?? 0).toLocaleString();
-  return (
-    <HeatTable
-      columns={[
-        { key: 'label', label: title === 'Web funnel by country' ? 'Country' : 'Landing page', render: (r) => r.label },
-        { key: 'sessions', label: 'Sessions', align: 'right', render: (r) => n(r.sessions) },
-        { key: 'cart', label: 'Add to cart', align: 'right', render: (r) => n(r.cart) },
-        { key: 'checkout', label: 'Checkout', align: 'right', render: (r) => n(r.checkout) },
-        { key: 'purchase', label: 'Purchase', align: 'right', render: (r) => n(r.purchase) },
-        { key: 'cvr', label: 'CVR', align: 'right', render: (r) => (r.cvr == null ? '—' : `${r.cvr.toFixed(2)}%`), heat: { mode: 'column', dir: 'high', value: (r) => r.cvr } },
-        { key: 'deltaPct', label: 'Δ CVR', align: 'right', render: (r) => (r.deltaPct == null ? '—' : `${r.deltaPct > 0 ? '+' : ''}${r.deltaPct.toFixed(1)}%`), gradeOf: (r) => heatFromDeltaPct(r.deltaPct) },
-      ]}
-      rows={rows}
-      rowKey={(r) => r.key ?? r.label}
-      title={title}
-    />
-  );
-};
-
-SECTION_TABLE_RENDERERS.S10 = funnelTable('Web funnel by country');
-SECTION_TABLE_RENDERERS.S11 = funnelTable('Web funnel by landing path');
