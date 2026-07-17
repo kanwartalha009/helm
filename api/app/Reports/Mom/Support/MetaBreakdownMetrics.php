@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Reports\Mom\Support;
 
 use App\Models\MetaBreakdownDaily;
+use App\Models\PlatformConnection;
 
 /**
  * The detailed per-segment ad metrics both S14 (placement) and S15 (gender) now
@@ -59,6 +60,41 @@ final class MetaBreakdownMetrics
                 'purchases'   => (int) $r->purchases,
                 'convValue'   => (float) $r->conv_value,
             ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Which ad platforms the S14/S15 toggle should offer for this brand/window.
+     * 'meta' is always the baseline; 'tiktok' is included ONLY when the brand
+     * has an ACTIVE tiktok connection OR real tiktok breakdown rows on this axis
+     * in the window (Kanwar, 2026-07-17 — "if tiktok is not connected with brand
+     * then only show meta"). Mirrors SFinancialMatrixSection::adPlatforms()'s
+     * connected-OR-has-data rule so the toggle never offers a platform with
+     * nothing behind it, yet never hides a platform we actually have data for.
+     *
+     * @return array<int, string>
+     */
+    public function availablePlatforms(int $brandId, string $breakdownType, string $start, string $end): array
+    {
+        $out = ['meta'];
+
+        $tiktokConnected = PlatformConnection::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'tiktok')
+            ->where('status', 'active')
+            ->exists();
+
+        $tiktokHasData = MetaBreakdownDaily::query()
+            ->where('brand_id', $brandId)
+            ->where('platform', 'tiktok')
+            ->where('breakdown_type', $breakdownType)
+            ->whereBetween('date', [$start, $end])
+            ->exists();
+
+        if ($tiktokConnected || $tiktokHasData) {
+            $out[] = 'tiktok';
         }
 
         return $out;

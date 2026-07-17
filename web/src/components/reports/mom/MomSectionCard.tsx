@@ -111,6 +111,20 @@ function MetricSectionCard({
     return Object.keys(p).length ? p : undefined;
   })();
   const { data, isLoading, isError, refetch, isRefetching } = useMomSection(slug, section.key, filters, section.ready, extraParams);
+  // TikTok only appears in the toggle when the section reports it's available —
+  // an active TikTok connection OR real TikTok breakdown data for this brand/
+  // window (Kanwar, 2026-07-17 — "if tiktok is not connected then only show
+  // meta"). Until the section loads we assume meta-only, so a not-connected
+  // brand never flashes a TikTok tab. '' is the Meta baseline value.
+  const availablePlatforms: string[] = Array.isArray((data as any)?.availablePlatforms)
+    ? (data as any).availablePlatforms
+    : ['meta'];
+  const platformOptions = PLATFORM_OPTIONS.filter((o) =>
+    availablePlatforms.includes(o.value === '' ? 'meta' : o.value)
+  );
+  // A single-option toggle (Meta only) is noise — render the control solely
+  // when there's a real choice to make.
+  const showPlatformControl = hasPlatformControl && platformOptions.length > 1;
   const [showNotes, setShowNotes] = useState(false);
   const backfill = useTriggerBackfill(slug);
 
@@ -131,7 +145,7 @@ function MetricSectionCard({
     <Card style={{ padding: 18 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <SectionHeader label={section.label} sub={data?.status && data.status !== 'ok' ? statusNote(data) : undefined} />
-        {(hasMonthsControl || hasBenchmarkControl || hasPlatformControl) && (
+        {(hasMonthsControl || hasBenchmarkControl || showPlatformControl) && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             {hasMonthsControl && <Segmented options={MONTHS_OPTIONS} value={monthsWindow} onChange={setMonthsWindow} />}
             {hasBenchmarkControl && (
@@ -140,7 +154,7 @@ function MetricSectionCard({
                 <Segmented options={BENCHMARK_OPTIONS} value={benchmark} onChange={setBenchmark} />
               </>
             )}
-            {hasPlatformControl && <Segmented options={PLATFORM_OPTIONS} value={platform} onChange={setPlatform} />}
+            {showPlatformControl && <Segmented options={platformOptions} value={platform} onChange={setPlatform} />}
           </div>
         )}
       </div>

@@ -44,6 +44,7 @@ final class SGenderMixSection implements MomSection
         // spend), then derives the rates via the shared MetaBreakdownMetrics.
         $platform = in_array($filters->platform, ['meta', 'tiktok'], true) ? $filters->platform : 'meta';
         $svc = new MetaBreakdownMetrics();
+        $platforms = $svc->availablePlatforms($brand->id, 'age_gender', $start, $end);
         $raw = $svc->rawSegments($brand->id, $platform, 'age_gender', $start, $end);
         if ($raw === null) {
             return [
@@ -51,11 +52,19 @@ final class SGenderMixSection implements MomSection
                 'status' => 'needs_source',
                 'note'   => "No {$platform} age/gender-breakdown data synced for this brand/month yet (meta:backfill-breakdown --type=age_gender).",
                 'platform' => $platform,
+                'availablePlatforms' => $platforms,
             ];
         }
 
-        // Fold every segment into a gender bucket, summing all raw metrics.
-        $buckets = [];
+        // Pre-seed the two KNOWN genders so both always render even at an honest
+        // zero (Kanwar, 2026-07-17 — "even if male is zero show male row with
+        // zero"). We only reach here when the axis HAS data, so this surfaces an
+        // empty gender as a real €0 row, never fabricates a table out of nothing.
+        // 'unknown' stays dynamic — it only appears when Meta actually returns it.
+        $buckets = [
+            'male'   => ['label' => 'Male', 'spend' => 0.0, 'impressions' => 0, 'clicks' => 0, 'reach' => null, 'purchases' => 0, 'convValue' => 0.0],
+            'female' => ['label' => 'Female', 'spend' => 0.0, 'impressions' => 0, 'clicks' => 0, 'reach' => null, 'purchases' => 0, 'convValue' => 0.0],
+        ];
         $total = 0.0;
         foreach ($raw as $key => $s) {
             $k = strtolower($key . ' ' . $s['label']);
@@ -83,6 +92,7 @@ final class SGenderMixSection implements MomSection
             'status' => 'ok',
             'month'  => CarbonImmutable::parse($start)->format('Y-m'),
             'platform' => $platform,
+            'availablePlatforms' => $platforms,
             'rows'   => $rows,
         ];
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\Brand;
+use App\Models\PlatformConnection;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -151,6 +152,80 @@ class MomM3Test extends TestCase
         $this->assertEqualsWithDelta(3.0, $rows['female']['roas'], 0.01);  // 900/300
         $this->assertEqualsWithDelta(30.0, $rows['female']['cpa'], 0.01);  // 300/10 purchases
         $this->assertEqualsWithDelta(66.7, $rows['female']['sharePct'], 0.2); // 300 / 450
+    }
+
+    public function test_s15_always_shows_the_male_row_even_when_only_female_has_spend(): void
+    {
+        // Kanwar, 2026-07-17 — "even if male is zero show male row with zero".
+        // With ONLY female age_gender data, both known genders must still render
+        // (male at an honest €0), so the client never sees a one-sided table.
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+        $month = $this->monthStart();
+        $date  = $month->addDays(3)->toDateString();
+
+        $this->seedBreakdown($brand->id, $date, 'age_gender', '25-34 · female', ['spend' => 300, 'impressions' => 10000, 'clicks' => 100, 'conversions' => 10, 'conversion_value' => 900]);
+
+        Sanctum::actingAs($user);
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S15?month={$month->format('Y-m')}")
+            ->assertOk()->assertJsonPath('status', 'ok');
+
+        $rows = collect($res->json('rows'))->keyBy('key');
+        $this->assertArrayHasKey('male', $rows, 'Male row must always be present');
+        $this->assertEquals(0.0, $rows['male']['spend']);
+        $this->assertEquals(0, $rows['male']['clicks']);
+        $this->assertNull($rows['male']['roas']); // no spend -> honestly blank, not a fabricated rate
+        $this->assertEquals(300.0, $rows['female']['spend']);
+    }
+
+    public function test_s15_offers_tiktok_only_when_tiktok_is_connected_or_has_breakdown_data(): void
+    {
+        // Kanwar, 2026-07-17 — "if tiktok is not connected with brand then only
+        // show meta". availablePlatforms drives the frontend toggle: meta always,
+        // tiktok only when there's an active connection OR real tiktok breakdown.
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+        $month = $this->monthStart();
+        $date  = $month->addDays(3)->toDateString();
+
+        $this->seedBreakdown($brand->id, $date, 'age_gender', '25-34 · female', ['spend' => 300, 'impressions' => 10000, 'clicks' => 100]);
+
+        Sanctum::actingAs($user);
+        $metaOnly = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S15?month={$month->format('Y-m')}")
+            ->assertOk()->json('availablePlatforms');
+        $this->assertSame(['meta'], $metaOnly);
+
+        // A real tiktok age_gender row for the window -> tiktok becomes offerable.
+        DB::table('meta_breakdown_daily')->insert([
+            'brand_id' => $brand->id, 'platform' => 'tiktok', 'date' => $date,
+            'breakdown_type' => 'age_gender', 'segment_key' => '25-34 · female', 'segment_label' => null,
+            'spend' => 120, 'currency' => 'EUR', 'fx_rate_to_usd' => 1.0, 'is_complete' => true, 'pulled_at' => now(),
+        ]);
+
+        $withTiktok = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S15?month={$month->format('Y-m')}")
+            ->assertOk()->json('availablePlatforms');
+        $this->assertContains('tiktok', $withTiktok);
+    }
+
+    public function test_s14_offers_tiktok_when_a_tiktok_connection_is_active_even_with_no_data(): void
+    {
+        // The connected-but-zero-data case: an active tiktok connection alone
+        // makes the toggle offer tiktok (mirrors S1's connected-OR-has-data rule).
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+        $month = $this->monthStart();
+        $date  = $month->addDays(3)->toDateString();
+
+        $this->seedBreakdown($brand->id, $date, 'placement', 'facebook_feed', ['spend' => 100, 'impressions' => 2000, 'clicks' => 20], 'Facebook Feed');
+        (new PlatformConnection())->forceFill([
+            'brand_id' => $brand->id, 'platform' => 'tiktok',
+            'external_id' => "acc-{$brand->id}-tiktok", 'status' => 'active', 'credentials' => ['k' => 'v'],
+        ])->save();
+
+        Sanctum::actingAs($user);
+        $platforms = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S14?month={$month->format('Y-m')}")
+            ->assertOk()->json('availablePlatforms');
+        $this->assertContains('tiktok', $platforms);
     }
 
     public function test_s18_klaviyo_needs_source_then_real_attribution_never_summed_into_store_revenue(): void

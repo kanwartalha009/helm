@@ -49,6 +49,7 @@ final class SPlacementMixSection implements MomSection
         // (Meta default; TikTok when its breakdown is synced).
         $platform = in_array($filters->platform, ['meta', 'tiktok'], true) ? $filters->platform : 'meta';
         $svc = new MetaBreakdownMetrics();
+        $platforms = $svc->availablePlatforms($brand->id, 'placement', $start, $end);
         $raw = $svc->rawSegments($brand->id, $platform, 'placement', $start, $end);
         if ($raw === null) {
             return [
@@ -56,6 +57,7 @@ final class SPlacementMixSection implements MomSection
                 'status' => 'needs_source',
                 'note'   => "No {$platform} placement-breakdown data synced for this brand/month yet (meta:backfill-breakdown --type=placement).",
                 'platform' => $platform,
+                'availablePlatforms' => $platforms,
             ];
         }
 
@@ -85,6 +87,7 @@ final class SPlacementMixSection implements MomSection
             'status' => 'ok',
             'month'  => CarbonImmutable::parse($start)->format('Y-m'),
             'platform' => $platform,
+            'availablePlatforms' => $platforms,
             'verticalPct' => ['value' => $verticalPct],
             'goal' => $goal,
             'goalHit' => $verticalPct !== null ? $verticalPct >= $goal : null,
