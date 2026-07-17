@@ -1606,3 +1606,12 @@ Root cause: a stale `funnelTable` (raw counts + CVR) was assigned to SECTION_TAB
 - api/app/Reports/Mom/Sections/SFunnelCountrySection.php + SFunnelLandingSection.php — added per-row completedCheckoutRate (purchases ÷ reached-checkout) and a summary() line (rates over ALL rows, not just the visible top 15).
 - api/tests/Feature/MomM2ContinuedTest.php — assert completedCheckoutRate 40 (20/50) and summary.cvr 2.0.
 Proof: full Mom suite green (63 passed, 548 assertions); tsc clean; build green.
+
+### Round N — Country tiers wouldn't save (camelCase vs snake_case) (Kanwar, 2026-07-16)
+Kanwar: "why can't I save tiers, I'm master admin" — the drawer showed "Could not save tiers / Admins and managers only" even for a master_admin.
+
+Not a permissions bug: EnsureRole('role:master_admin,manager') and BrandPolicy::update both pass for master_admin. The toast is a GENERIC onError message, not proof of a 403. Real cause: the read endpoint returns tiers as `tierKey` (camelCase, via present()), so the drawer/hook PUT `tierKey` back — but CountryTierController::validateRows required snake_case `tier_key` (required), so every save 422'd on a missing field. Tests only exercised the service layer (snake_case), so the HTTP contract mismatch was never caught.
+
+- api/app/Http/Controllers/Api/CountryTierController.php — validateRows now normalises camelCase `tierKey` → `tier_key` before validation (snake_case still accepted). Fixes both the brand override (store) and agency-default (storeAgencyDefault) saves.
+- api/tests/Feature/MomTierSidebarTest.php — new regression test: master_admin PUTs the exact camelCase `{tierKey,...}` payload the drawer sends → 201, and the tiers resolve.
+Proof: MomTierSidebarTest + MomM1Test green (11 passed, 56 assertions).

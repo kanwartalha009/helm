@@ -162,6 +162,22 @@ class CountryTierController extends Controller
     /** @return array<int, array{tier_key: string, label: string, color: string, countries: array<int, string>}> */
     private function validateRows(Request $request): array
     {
+        // The read endpoint returns `tierKey` (camelCase, via present()), so the
+        // SPA/tier drawer naturally sends `tierKey` back on save. Accept that here
+        // — normalise camelCase `tierKey` to the snake_case `tier_key` this
+        // controller (and CountryTiers) works in — so a save doesn't 422 on a
+        // missing `tier_key` purely because of the casing mismatch (Kanwar,
+        // 2026-07-16 — "why can't I save tiers"). snake_case input still works.
+        $request->merge([
+            'tiers' => collect($request->input('tiers', []))->map(static function ($t) {
+                if (is_array($t) && ! isset($t['tier_key']) && isset($t['tierKey'])) {
+                    $t['tier_key'] = $t['tierKey'];
+                }
+
+                return $t;
+            })->all(),
+        ]);
+
         $data = $request->validate([
             'tiers'                    => ['required', 'array', 'max:30'],
             'tiers.*.tier_key'         => ['required', 'string', 'max:24'],

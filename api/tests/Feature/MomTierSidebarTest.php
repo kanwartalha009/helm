@@ -116,4 +116,27 @@ class MomTierSidebarTest extends TestCase
 
         $this->getJson("/api/brands/{$brand->slug}/country-tiers/available-countries")->assertOk();
     }
+
+    public function test_master_admin_saves_tiers_with_the_camelcase_payload_the_drawer_sends(): void
+    {
+        // Regression (Kanwar, 2026-07-16 — "why can't I save tiers, I'm master
+        // admin"): the tier drawer PUTs `tierKey` (camelCase, matching the read
+        // endpoint's own shape), but validation required snake_case `tier_key`,
+        // so every save 422'd and surfaced as a generic "Admins and managers
+        // only" toast. The endpoint must accept the shape it hands back.
+        $this->actingMasterAdmin();
+        $brand = $this->makeBrand();
+
+        $this->putJson("/api/brands/{$brand->slug}/country-tiers", [
+            'tiers' => [
+                ['tierKey' => 'DE', 'label' => 'Germany', 'color' => '#7c3aed', 'countries' => ['DE']],
+                ['tierKey' => 'US', 'label' => 'United States', 'color' => '#65a30d', 'countries' => ['US']],
+            ],
+        ])->assertStatus(201);
+
+        // Persisted and resolvable.
+        $res = $this->getJson("/api/brands/{$brand->slug}/country-tiers")->assertOk();
+        $this->assertSame('DE', $res->json('resolved.DE.tierKey'));
+        $this->assertSame('US', $res->json('resolved.US.tierKey'));
+    }
 }
