@@ -150,13 +150,15 @@ export function DashboardPage() {
   const brandGroup = useFiltersStore((s) => s.brandGroup);
   const setBrandGroup = useFiltersStore((s) => s.setBrandGroup);
   // Single-brand filter (Kanwar, 2026-07-17 — "a filter to select only 1
-  // brand"). Holds a brand slug or null (all). The dropdown it drives is built
-  // from `rows`, which the backend has ALREADY scoped to this user's brand-
-  // manager access (the `manager` query param) — so a limited-role user only
-  // ever sees, and can only ever pick, brands they're allowed to. Picking a
-  // single brand and picking a group are mutually exclusive (a brand lives in
-  // at most one group), so choosing one clears the other.
+  // brand", "make this filter separate than group filter and give search
+  // option"). Its OWN popover, independent of Group — the two AND together, the
+  // same way Manager already ANDs. Holds a brand slug or null (all). The
+  // dropdown it drives is built from `rows`, which the backend has ALREADY
+  // scoped to this user's brand-manager access (the `manager` query param) — so
+  // a limited-role user only ever sees, and can only ever pick, brands they're
+  // allowed to. `brandQuery` is the type-to-filter search inside that popover.
   const [brandSlug, setBrandSlug] = useState<string | null>(null);
+  const [brandQuery, setBrandQuery] = useState('');
 
   // Mirrors the backend `role:master_admin,manager` middleware. Hiding the
   // button for team_member / brand_user prevents a 403 round-trip from a
@@ -205,13 +207,21 @@ export function DashboardPage() {
     }
   }, [rows, brandSlug]);
 
-  // Apply the brand filters client-side. A single-brand pick wins outright;
-  // otherwise the brand-group filter applies. Other filters (period, compare)
+  // Brand options narrowed by the search box.
+  const visibleBrandOptions = useMemo(() => {
+    const q = brandQuery.trim().toLowerCase();
+    if (!q) return brandOptions;
+    return brandOptions.filter((b) => b.name.toLowerCase().includes(q));
+  }, [brandOptions, brandQuery]);
+
+  // Apply the brand filters client-side. Group and single-brand are INDEPENDENT
+  // filters that AND together (like Manager). Other filters (period, compare)
   // aren't wired yet — see the inline note where their controls used to live.
   const filteredRows: DashboardRow[] = useMemo(() => {
-    if (brandSlug) return rows.filter((r) => r.brand.slug === brandSlug);
-    if (!brandGroup) return rows;
-    return rows.filter((r) => r.brand.groupTag === brandGroup);
+    let list = rows;
+    if (brandGroup) list = list.filter((r) => r.brand.groupTag === brandGroup);
+    if (brandSlug) list = list.filter((r) => r.brand.slug === brandSlug);
+    return list;
   }, [rows, brandGroup, brandSlug]);
 
   // Client-side sort. Best/worst performing rank by the chosen metric over the
@@ -260,9 +270,10 @@ export function DashboardPage() {
   // Audience rows honor the same client-side brand-group filter as Performance.
   const filteredAudienceRows = useMemo(() => {
     if (!audience) return [];
-    if (brandSlug) return audience.rows.filter((r) => r.brand.slug === brandSlug);
-    if (!brandGroup) return audience.rows;
-    return audience.rows.filter((r) => r.brand.groupTag === brandGroup);
+    let list = audience.rows;
+    if (brandGroup) list = list.filter((r) => r.brand.groupTag === brandGroup);
+    if (brandSlug) list = list.filter((r) => r.brand.slug === brandSlug);
+    return list;
   }, [audience, brandGroup, brandSlug]);
 
   const breakdownLabel =
@@ -297,9 +308,10 @@ export function DashboardPage() {
       ? `${rows.length} active`
       : undefined;
 
-  const brandFilterLabel = brandSlug
+  const brandFilterLabel = brandGroup ?? `All ${rows.length}`;
+  const singleBrandLabel = brandSlug
     ? brandOptions.find((b) => b.slug === brandSlug)?.name ?? 'Brand'
-    : brandGroup ?? `All ${rows.length}`;
+    : 'All brands';
 
   return (
     <AppLayout title="All brands" tag={tag}>
@@ -340,12 +352,9 @@ export function DashboardPage() {
         >
           <PopoverLabel>Group</PopoverLabel>
           <PopoverItem
-            active={brandGroup === null && brandSlug === null}
+            active={brandGroup === null}
             meta={String(rows.length)}
-            onClick={() => {
-              setBrandGroup(null);
-              setBrandSlug(null);
-            }}
+            onClick={() => setBrandGroup(null)}
           >
             All groups
           </PopoverItem>
@@ -354,36 +363,61 @@ export function DashboardPage() {
             return (
               <PopoverItem
                 key={g}
-                active={brandGroup === g && brandSlug === null}
+                active={brandGroup === g}
                 meta={String(count)}
-                onClick={() => {
-                  // Group and single-brand are mutually exclusive.
-                  setBrandSlug(null);
-                  setBrandGroup(g);
-                }}
+                onClick={() => setBrandGroup(g)}
               >
                 {g}
               </PopoverItem>
             );
           })}
           <PopoverDivider />
-          <PopoverLabel>Brand</PopoverLabel>
-          {brandOptions.map((b) => (
-            <PopoverItem
-              key={b.slug}
-              active={brandSlug === b.slug}
-              onClick={() => {
-                // Picking a single brand clears any group selection.
-                setBrandGroup(null);
-                setBrandSlug(brandSlug === b.slug ? null : b.slug);
-              }}
-            >
-              {b.name}
-            </PopoverItem>
-          ))}
-          <PopoverDivider />
           <PopoverLabel>Status</PopoverLabel>
           <PopoverItem active meta={String(rows.length)}>Active only</PopoverItem>
+        </Popover>
+
+        <Popover
+          trigger={
+            <button className="filter-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                <path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01" />
+              </svg>
+              Brand: <strong style={{ fontWeight: 500 }}>{singleBrandLabel}</strong>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          }
+        >
+          <div style={{ padding: '2px 4px 8px' }}>
+            <input
+              className="input"
+              type="text"
+              placeholder="Search brands…"
+              value={brandQuery}
+              autoComplete="off"
+              onChange={(e) => setBrandQuery(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              style={{ width: '100%', height: 32, fontSize: 13 }}
+            />
+          </div>
+          <PopoverItem active={brandSlug === null} onClick={() => setBrandSlug(null)}>
+            All brands
+          </PopoverItem>
+          <PopoverDivider />
+          {visibleBrandOptions.length === 0 ? (
+            <div className="popover-label" style={{ opacity: 0.7 }}>No brands match “{brandQuery}”.</div>
+          ) : (
+            visibleBrandOptions.map((b) => (
+              <PopoverItem
+                key={b.slug}
+                active={brandSlug === b.slug}
+                onClick={() => setBrandSlug(brandSlug === b.slug ? null : b.slug)}
+              >
+                {b.name}
+              </PopoverItem>
+            ))
+          )}
         </Popover>
 
         {canFilterByManager && (
@@ -620,7 +654,7 @@ export function DashboardPage() {
           <div className="flex items-center justify-between mt-24">
             <div className="text-xs muted">
               Showing {filteredRows.length} brand{filteredRows.length === 1 ? '' : 's'}
-              {brandSlug ? ` — ${brandFilterLabel}` : brandGroup ? ` in “${brandGroup}”` : ''}.
+              {brandSlug ? ` — ${singleBrandLabel}` : brandGroup ? ` in “${brandGroup}”` : ''}.
             </div>
           </div>
         </>
@@ -653,7 +687,7 @@ export function DashboardPage() {
                 <div className="text-xs muted">
                   Showing {filteredAudienceRows.length} Meta brand
                   {filteredAudienceRows.length === 1 ? '' : 's'}
-                  {brandSlug ? ` — ${brandFilterLabel}` : brandGroup ? ` in “${brandGroup}”` : ''}.
+                  {brandSlug ? ` — ${singleBrandLabel}` : brandGroup ? ` in “${brandGroup}”` : ''}.
                 </div>
               </div>
             </>
