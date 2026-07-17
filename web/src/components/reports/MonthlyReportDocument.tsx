@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import { Chip } from '@/components/ui';
 import { REPORT_CSS } from './ReportDocument';
-import type { MonthlyChannelRow, MonthlyCustomerRow, MonthlyEmailSection, MonthlyFunnelRow, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyPlatformSection, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySeriesData } from '@/types/reports';
+import { StackedBar100, TrendLineChart } from './mom/charts';
+import { RangeCollapseTable } from './mom/sectionTables';
+import type { MonthlyChannelRow, MonthlyCustomerRow, MonthlyEmailSection, MonthlyFunnelRow, MonthlyFunnelSummary, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyPlatformSection, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySalesEvolution, MonthlySeriesData } from '@/types/reports';
 
 const DEFAULT_COMMENTARY =
   'Summarise the month for the store owner here — what moved, how it landed against targets, and the plan for next month. Editable before you send.';
@@ -121,11 +123,16 @@ export function MonthlyReportDocument({
         <span>Outcome columns are shaded by performance; cost metrics (CAC, CPM) are shaded so lower is greener. Counts, spend and share stay unshaded.</span>
       </div>
 
+      {sections.salesEvolution && <SalesEvolutionBlock section={sections.salesEvolution} currency={currency} editable={editable} />}
+
       <div className="mrt-group"><span>Commerce</span></div>
-      <SectionBlock num="01" title="Market revenue" sub="Revenue grouped into markets and tiers, month over month." section={sections.market} currency={currency} editable={editable} />
+      <SectionBlock num="01" title="Market revenue" sub="Revenue grouped into markets, month over month." section={sections.market} currency={currency} editable={editable} />
+      {sections.marketTier && (
+        <SectionBlock num="01b" title="Market revenue by tier" sub="Revenue grouped by the brand's own country tiers, month over month." section={sections.marketTier} currency={currency} editable={editable} />
+      )}
       <SectionBlock num="02" title="Country revenue" sub="Revenue by country, rolled to calendar months." section={sections.countryRevenue} currency={currency} editable={editable} />
-      <SectionBlock num="03" title="Best categories" sub="Revenue by product category, month over month." section={sections.categories} currency={currency} editable={editable} foot="Product-tagged revenue only — orders without a product category are excluded, so this total runs below the order-level country and market totals above." />
-      <SectionBlock num="04" title="Best sellers" sub="Top products by revenue, with stock context." section={sections.bestSellers} currency={currency} editable={editable} foot="Line-item product revenue — excludes untagged items, so this total runs below the order-level country and market totals above." />
+      <SectionBlock num="03" title="Best categories" sub="Revenue by product category, month over month." section={sections.categories} currency={currency} editable={editable} stackLabel="Revenue mix by product type · 100% stacked" foot="Product-tagged revenue only — orders without a product category are excluded, so this total runs below the order-level country and market totals above." />
+      <SectionBlock num="04" title="Best sellers" sub="Top products by revenue, with stock context." section={sections.bestSellers} currency={currency} editable={editable} stackLabel="Revenue mix by product · 100% stacked" foot="Line-item product revenue — excludes untagged items, so this total runs below the order-level country and market totals above." />
 
       <div className="mrt-group"><span>Advertising</span></div>
       <SectionBlock num="05" title="Channel mix" sub="Meta, Google and TikTok side by side — spend, purchases, revenue, ROAS and CPA for the month." section={sections.channelMix} currency={currency} editable={editable} tag="All platforms" />
@@ -259,7 +266,7 @@ function EmailSection({ num, section, currency }: { num: string; section: Monthl
   );
 }
 
-function SectionBlock({ num, title, sub, section, currency, tag, foot, editable = false }: { num: string; title: string; sub: string; section: MonthlyReportSection; currency: string; tag?: string; foot?: string; editable?: boolean }) {
+function SectionBlock({ num, title, sub, section, currency, tag, foot, editable = false, stackLabel }: { num: string; title: string; sub: string; section: MonthlyReportSection; currency: string; tag?: string; foot?: string; editable?: boolean; stackLabel?: string }) {
   // Roadmap "coming" ribbons are internal build-status notes for the agency —
   // they render only in the editable in-app view, never on a shared/public report.
   if (section.status === 'coming' && !editable) return null;
@@ -267,7 +274,17 @@ function SectionBlock({ num, title, sub, section, currency, tag, foot, editable 
     <section className="rpt-sec">
       <div className="rpt-sec-head"><span className="rpt-sec-num">{num}</span><h2>{title}</h2>{tag && <span className="mrt-plat-tag">{tag}</span>}</div>
       <div className="rpt-sec-sub">{sub}</div>
-      {section.status === 'ready' && section.data ? (
+      {/* 100%-stacked revenue-mix chart (Kanwar, 2026-07-17 — item 6): products /
+          product types, above the month-by-month table. Renders from the same
+          series data, so it needs no extra backend. Pure SVG → prints/shares. */}
+      {section.status === 'ready' && section.data && stackLabel && !section.rangeCollapse && (
+        <SeriesStack data={section.data} label={stackLabel} />
+      )}
+      {/* Custom-range collapse (item 1): a sub-month range can't be a monthly
+          grid, so the section returns a range-vs-same-range-last-year table. */}
+      {section.status === 'ready' && section.rangeCollapse ? (
+        <RangeCollapseTable data={section.rangeCollapse} currency={currency} />
+      ) : section.status === 'ready' && section.data ? (
         <MoMTable data={section.data} currency={currency} />
       ) : section.status === 'ready' && section.roas ? (
         <RoasTable data={section.roas} currency={currency} />
@@ -278,7 +295,7 @@ function SectionBlock({ num, title, sub, section, currency, tag, foot, editable 
       ) : section.status === 'ready' && section.placement ? (
         <PlacementTable rows={section.placement} currency={currency} />
       ) : section.status === 'ready' && section.funnel ? (
-        <FunnelTable rows={section.funnel} />
+        <FunnelTable rows={section.funnel} summary={section.summary} />
       ) : section.status === 'ready' && section.customers ? (
         <NewVsExistingTable rows={section.customers} currency={currency} />
       ) : section.status === 'ready' && section.channels ? (
@@ -622,9 +639,88 @@ function PlacementTable({ rows, currency }: { rows: MonthlyPlacementRow[]; curre
   );
 }
 
-// Web funnel — sessions → cart → checkout → purchase, by country or landing.
-function FunnelTable({ rows }: { rows: MonthlyFunnelRow[] }) {
+// Sales evolution (Kanwar, 2026-07-17 — item 3): a daily revenue line for the
+// report month, with the MODELED new-vs-returning split shown as two amounts +
+// their own daily lines. Reuses the MoM report's pure-SVG TrendLineChart.
+function SalesEvolutionBlock({ section, currency, editable }: { section: MonthlySalesEvolution; currency: string; editable: boolean }) {
+  if (section.status === 'coming' && !editable) return null;
+  const series = section.series ?? [];
+  const dayLabels = series.map((s, i) => (i === 0 || i === series.length - 1 || s.day % 5 === 0 ? String(s.day) : ''));
+  const money = (v: number | null | undefined) => (v == null ? '—' : formatMoney(v, currency, { whole: true }));
+  const compact = (v: number) => formatMoney(v, currency, { compact: true });
+  const split = section.split;
+  const daily = section.daily ?? [];
+  return (
+    <section className="rpt-sec">
+      <div className="rpt-sec-head"><span className="rpt-sec-num">00</span><h2>Total sales evolution</h2></div>
+      <div className="rpt-sec-sub">Daily revenue across the report month, with a modeled new-vs-returning split.</div>
+      {section.status === 'ready' && series.length > 0 ? (
+        <>
+          <div className="mrt-kpi-val" style={{ fontSize: 22, fontWeight: 650, margin: '2px 0 8px' }}>{money(section.total)}</div>
+          <TrendLineChart
+            labels={dayLabels}
+            series={series.map((s) => s.revenue)}
+            valueFormatter={compact}
+            seriesLabel="Revenue"
+            height={170}
+          />
+          {split && (
+            <div style={{ borderTop: '1px solid var(--rpt-border, #E7E9F0)', marginTop: 12, paddingTop: 12 }}>
+              <div className="rpt-sec-sub" style={{ marginBottom: 8 }}>
+                New vs returning customer sales <span className="chip" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.4 }}>Modeled — estimate</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+                <div style={{ flex: '1 1 45%', minWidth: 260 }}>
+                  <div className="rpt-sec-sub">New customer sales · ~{money(split.new.sales)} · {split.new.customers.toLocaleString()} customers</div>
+                  {daily.length > 0 && <TrendLineChart labels={dayLabels} series={daily.map((d) => d.new)} valueFormatter={compact} seriesLabel="New" seriesColor="#3B5BFB" height={140} />}
+                </div>
+                <div style={{ flex: '1 1 45%', minWidth: 260 }}>
+                  <div className="rpt-sec-sub">Returning customer sales · ~{money(split.returning.sales)} · {split.returning.customers.toLocaleString()} customers</div>
+                  {daily.length > 0 && <TrendLineChart labels={dayLabels} series={daily.map((d) => d.returning)} valueFormatter={compact} seriesLabel="Returning" seriesColor="#3B5BFB" height={140} />}
+                </div>
+              </div>
+              <div className="rpt-cap">{split.method}</div>
+            </div>
+          )}
+        </>
+      ) : (
+        <Ribbon status={section.status} note={section.note} />
+      )}
+    </section>
+  );
+}
+
+// 100%-stacked revenue-mix chart from a month-by-month series (Kanwar,
+// 2026-07-17 — item 6). Each month column is normalised to 100% of its own
+// total across the shown rows, so the MIX reads across months. Reuses the same
+// pure-SVG StackedBar100 the MoM report uses (print/share safe).
+function SeriesStack({ data, label }: { data: MonthlySeriesData; label: string }) {
+  const months = data.months ?? [];
+  const rows = data.rows ?? [];
+  if (months.length < 2 || rows.length === 0) return null;
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthLabel = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    return `${MONTHS[(m ?? 1) - 1] ?? ym} ${String(y ?? '').slice(2)}`;
+  };
+  return (
+    <div style={{ margin: '4px 0 16px' }}>
+      <div className="rpt-sec-sub" style={{ marginBottom: 4 }}>{label}</div>
+      <StackedBar100
+        labels={months.map(monthLabel)}
+        series={rows.map((r) => ({ label: r.label, values: months.map((m) => r.byMonth[m] ?? 0) }))}
+      />
+    </div>
+  );
+}
+
+// Web funnel — RATES, not raw counts (Kanwar, 2026-07-17): added-to-cart and
+// reached-checkout as a % of sessions, completed-checkout as a % of those who
+// reached checkout, and the overall conversion rate. A brand-wide summary row
+// leads when the backend supplies it.
+function FunnelTable({ rows, summary }: { rows: MonthlyFunnelRow[]; summary?: MonthlyFunnelSummary }) {
   const n = (v: number) => v.toLocaleString();
+  const pct = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
   return (
     <div className="rpt-tbl-wrap">
       <table className="rpt-tbl mrt-tbl">
@@ -632,21 +728,31 @@ function FunnelTable({ rows }: { rows: MonthlyFunnelRow[] }) {
           <tr>
             <th>Segment</th>
             <th className="r">Sessions</th>
-            <th className="r">Add to cart</th>
-            <th className="r">Checkout</th>
-            <th className="r">Purchase</th>
-            <th className="r">CVR</th>
+            <th className="r">Added to cart rate</th>
+            <th className="r">Reached checkout rate</th>
+            <th className="r">Completed checkout rate</th>
+            <th className="r">Conversion rate</th>
           </tr>
         </thead>
         <tbody>
+          {summary && (
+            <tr style={{ fontWeight: 600, background: 'var(--rpt-zebra, #f7f8fa)' }}>
+              <td className="name"><div className="rpt-dim-label">Summary</div></td>
+              <td className="r">{n(summary.sessions)}</td>
+              <td className="r">{pct(summary.cartRate)}</td>
+              <td className="r">{pct(summary.checkoutRate)}</td>
+              <td className="r">{pct(summary.completedRate)}</td>
+              <td className="r">{pct(summary.cvr)}</td>
+            </tr>
+          )}
           {rows.map((r) => (
             <tr key={r.label}>
               <td className="name"><div className="rpt-dim-label">{r.label}</div></td>
               <td className="r">{n(r.sessions)}</td>
-              <td className="r">{n(r.cart)}</td>
-              <td className="r">{n(r.checkout)}</td>
-              <td className="r">{n(r.purchase)}</td>
-              <td className={`r ${gradeCol(r.cvr, rows.map((x) => x.cvr), 'high')}`}>{r.cvr == null ? '—' : `${r.cvr.toFixed(2)}%`}</td>
+              <td className="r">{pct(r.cartRate)}</td>
+              <td className="r">{pct(r.checkoutRate)}</td>
+              <td className="r">{pct(r.completedRate)}</td>
+              <td className={`r ${gradeCol(r.cvr, rows.map((x) => x.cvr), 'high')}`}>{pct(r.cvr)}</td>
             </tr>
           ))}
         </tbody>

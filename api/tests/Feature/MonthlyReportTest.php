@@ -213,6 +213,112 @@ class MonthlyReportTest extends TestCase
         $this->assertEquals(4.0, $placement['roas']);
     }
 
+    public function test_web_funnel_renders_rates_and_a_brand_wide_summary(): void
+    {
+        // Kanwar, 2026-07-17 (item 5) — the web funnel shows RATES, not raw counts:
+        // added-to-cart / reached-checkout as % of sessions, completed-checkout as
+        // % of those who reached checkout, plus a brand-wide summary row.
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+        $date  = $this->monthStart()->addDays(4)->toDateString();
+
+        DB::table('shopify_funnel_daily')->insert([
+            'brand_id' => $brand->id, 'date' => $date, 'dimension' => 'country',
+            'segment_key' => 'ES', 'segment_label' => 'Spain',
+            'sessions' => 1000, 'cart_additions' => 200, 'reached_checkout' => 100,
+            'completed_checkout' => 40, 'is_complete' => true, 'pulled_at' => now(),
+        ]);
+
+        Sanctum::actingAs($user);
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/monthly")->assertOk()
+            ->assertJsonPath('sections.funnelCountry.status', 'ready');
+
+        $spain = collect($res->json('sections.funnelCountry.funnel'))->firstWhere('label', 'Spain');
+        $this->assertNotNull($spain);
+        $this->assertEquals(20.0, $spain['cartRate']);      // 200 / 1000
+        $this->assertEquals(10.0, $spain['checkoutRate']);  // 100 / 1000
+        $this->assertEquals(40.0, $spain['completedRate']); // 40 / 100 (of those who reached checkout)
+        $this->assertEquals(4.0, $spain['cvr']);            // 40 / 1000
+
+        $this->assertEquals(20.0, $res->json('sections.funnelCountry.summary.cartRate'));
+        $this->assertEquals(4.0, $res->json('sections.funnelCountry.summary.cvr'));
+    }
+
+    public function test_sales_evolution_returns_a_daily_revenue_series(): void
+    {
+        // Kanwar, 2026-07-17 (item 3) — a daily revenue line for the report month.
+        // (The modeled new/returning split rides on the same Shopify customer pull
+        // §4 uses; with no Shopify connection here it's simply null, not fabricated.)
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+        $monthStart = $this->monthStart();
+
+        $this->seedDaily($brand->id, 'shopify', $monthStart->addDays(3)->toDateString(), ['total_sales' => 500, 'refunds_amount' => 0, 'orders' => 5]);
+        $this->seedDaily($brand->id, 'shopify', $monthStart->addDays(4)->toDateString(), ['total_sales' => 300, 'refunds_amount' => 0, 'orders' => 3]);
+
+        Sanctum::actingAs($user);
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/monthly")->assertOk()
+            ->assertJsonPath('sections.salesEvolution.status', 'ready');
+
+        $this->assertEquals(800.0, $res->json('sections.salesEvolution.total'));
+        $this->assertCount(2, $res->json('sections.salesEvolution.series'));
+    }
+
+    public function test_market_by_tier_groups_countries_into_the_brands_tiers(): void
+    {
+        // Kanwar, 2026-07-17 (item 4) — market revenue grouped by the brand's own
+        // country tiers, table only. ES + FR both in Tier 1 → one Tier 1 row.
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+        $date  = $this->monthStart()->addDays(4)->toDateString();
+
+        $this->seedCommerce($brand->id, $date, 'Spain', 1000, 0, 10);
+        $this->seedCommerce($brand->id, $date, 'France', 500, 0, 5);
+
+        DB::table('country_tiers')->insert([
+            'brand_id' => $brand->id, 'tier_key' => 'T1', 'label' => 'Tier 1', 'color' => '#111111',
+            'countries' => json_encode(['ES', 'FR']), 'position' => 0, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        Sanctum::actingAs($user);
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/monthly")->assertOk()
+            ->assertJsonPath('sections.marketTier.status', 'ready');
+
+        $t1 = collect($res->json('sections.marketTier.data.rows'))->firstWhere('label', 'Tier 1');
+        $this->assertNotNull($t1);
+        $this->assertEquals(1500.0, $t1['total']); // ES 1000 + FR 500, report month
+    }
+
+    public function test_custom_range_collapses_the_monthly_matrices_to_range_vs_last_year(): void
+    {
+        // Kanwar, 2026-07-17 (item 1) — a period=custom from/to drives the whole
+        // report off a sub-month range; the month-by-month matrices collapse to
+        // range vs the same range last year, and month-only sections gate.
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+
+        $this->seedCommerce($brand->id, '2026-06-05', 'Spain', 800, 0, 8);  // inside Jun 1–14
+        $this->seedCommerce($brand->id, '2026-06-20', 'Spain', 400, 0, 4);  // outside the range
+        $this->seedCommerce($brand->id, '2025-06-05', 'Spain', 500, 0, 5);  // same range last year
+
+        Sanctum::actingAs($user);
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/monthly?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
+            ->assertOk()
+            ->assertJsonPath('range', true)
+            ->assertJsonPath('sections.countryRevenue.status', 'ready');
+
+        $spain = collect($res->json('sections.countryRevenue.rangeCollapse.rows'))->first(fn ($r) => $r[0]['v'] === 'Spain');
+        $this->assertNotNull($spain);
+        $this->assertEquals(800.0, $spain[1]['v']); // range revenue (only in-range day)
+        $this->assertEquals(500.0, $spain[2]['v']); // same range last year
+
+        // Month-granular section gates honestly in range mode.
+        $this->assertSame('coming', $res->json('sections.newVsExisting.status'));
+
+        CarbonImmutable::setTestNow();
+    }
+
     public function test_freshness_gates_when_the_month_is_not_fully_synced(): void
     {
         $user  = User::factory()->create(['role' => 'master_admin']);

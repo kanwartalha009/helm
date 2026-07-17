@@ -258,6 +258,22 @@ export interface MonthlySeriesData {
 
 export type MonthlySectionStatus = 'ready' | 'coming' | 'needs_source' | 'no_data';
 
+// Sales evolution (Kanwar, 2026-07-17 — item 3): a daily revenue line for the
+// report month + a MODELED new-vs-returning split (estimate, never Verified).
+export interface MonthlySalesEvolution {
+  status: MonthlySectionStatus;
+  series?: { day: number; revenue: number }[];
+  total?: number;
+  split?: {
+    basis: string;
+    method: string;
+    new: { customers: number; sales: number; pct: number | null };
+    returning: { customers: number; sales: number; pct: number | null };
+  } | null;
+  daily?: { day: number; new: number; returning: number }[] | null;
+  note?: string;
+}
+
 // Single-month metric rows (e.g. ad spend by gender). Reach/frequency are absent
 // until they're added to the Meta breakdown pull.
 export interface MonthlyGenderRow {
@@ -345,7 +361,21 @@ export interface MonthlyFunnelRow {
   cart: number;
   checkout: number;
   purchase: number;
-  cvr: number | null; // purchase ÷ sessions %
+  // Rates (Kanwar, 2026-07-17 — funnel shows % not raw counts). Raw counts stay
+  // above for tooltips/export; the client table reads these.
+  cartRate?: number | null;      // added-to-cart ÷ sessions %
+  checkoutRate?: number | null;  // reached-checkout ÷ sessions %
+  completedRate?: number | null; // completed-checkout ÷ reached-checkout %
+  cvr: number | null;            // purchase ÷ sessions %
+}
+
+/** Brand-wide funnel summary row (rates over every segment). */
+export interface MonthlyFunnelSummary {
+  sessions: number;
+  cartRate: number | null;
+  checkoutRate: number | null;
+  completedRate: number | null;
+  cvr: number | null;
 }
 
 /** Channel mix — Meta / Google / TikTok side by side for the month. Revenue
@@ -379,7 +409,19 @@ export interface MonthlyReportSection {
   placement?: MonthlyPlacementRow[]; // ad spend by placement
   channels?: MonthlyChannelRow[];    // channel mix (Meta/Google/TikTok side by side)
   funnel?: MonthlyFunnelRow[];       // web funnel by country / landing path
+  summary?: MonthlyFunnelSummary;    // brand-wide funnel rates (funnel sections)
   customers?: MonthlyCustomerRow[];  // new vs existing customers, month over month
+  // Custom-range collapse (Kanwar, 2026-07-17 — item 1): a matrix section that
+  // can't be monthly for a sub-month range returns this uniform table instead.
+  rangeCollapse?: {
+    title?: string;
+    rangeLabel?: string;
+    compareLabel?: string;
+    columns: string[];
+    rows: { v: unknown; f: string }[][];
+    footer?: { v: unknown; f: string }[] | null;
+    note?: string | null;
+  };
   note?: string;
 }
 
@@ -400,6 +442,8 @@ export interface MonthlyReportData {
   reportType: 'monthly';
   brand: { name: string; slug: string; baseCurrency: string; timezone: string };
   currency: string;
+  /** True when a custom day range is active (vs whole-month mode). */
+  range?: boolean;
   month: { label: string; start: string; end: string };
   // Selectable months, latest first — first entry is the default the server
   // builds when no ?month= is passed.
@@ -413,12 +457,17 @@ export interface MonthlyReportData {
     acquisitionYoY: MonthlyKpi | null;
   };
   sections: {
+    // Sales evolution (Kanwar, 2026-07-17). Optional so cached payloads render.
+    salesEvolution?: MonthlySalesEvolution;
     countryRevenue: MonthlyReportSection;
     categories: MonthlyReportSection;
     bestSellers: MonthlyReportSection;
     roasByCountry: MonthlyReportSection;
     gender: MonthlyPlatformSection<MonthlyGenderRow>;
     market: MonthlyReportSection;
+    // Market revenue grouped by the brand's tier system (Kanwar, 2026-07-17).
+    // Optional so pre-migration cached payloads still render.
+    marketTier?: MonthlyReportSection;
     channelMix: MonthlyReportSection;
     placement: MonthlyPlatformSection<MonthlyPlacementRow>;
     landingSellers: MonthlyReportSection;

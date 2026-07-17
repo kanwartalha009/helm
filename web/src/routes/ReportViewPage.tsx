@@ -251,7 +251,45 @@ export function ReportViewPage() {
             onChange={(v) => setPlatform(v as PlatformChoice)}
           />
         )}
-        {isMonthly && monthOptions.length > 0 && (
+        {/* Monthly: Month vs Custom day-range mode (Kanwar, 2026-07-17 — item 1).
+            A custom range drives the whole report off a sub-month window compared
+            to the same range last year; the month-by-month tables collapse. */}
+        {isMonthly && (
+          <Segmented
+            options={[
+              { value: 'month', label: 'Month' },
+              { value: 'range', label: 'Custom range' },
+            ]}
+            value={period === 'custom' ? 'range' : 'month'}
+            onChange={(v) => {
+              if (v === 'range') {
+                setPeriod('custom');
+                setCompare('last_year'); // range default: same range last year
+              } else {
+                setPeriod('last30');
+              }
+            }}
+          />
+        )}
+        {isMonthly && period === 'custom' && (
+          <>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <input type="date" className="input" style={{ width: 150 }} value={fromDate} max={toDate || maxDate} onChange={(e) => setFromDate(e.target.value)} aria-label="Range from" />
+              <span className="muted text-sm">to</span>
+              <input type="date" className="input" style={{ width: 150 }} value={toDate} min={fromDate || undefined} max={maxDate} onChange={(e) => setToDate(e.target.value)} aria-label="Range to" />
+            </span>
+            <Segmented
+              options={[
+                { value: 'last_year', label: 'vs same range last year' },
+                { value: 'previous', label: 'vs previous period' },
+              ]}
+              value={compare}
+              onChange={(v) => setCompare(v as ReportFiltersInput['compare'])}
+            />
+            {(!fromDate || !toDate) && <span className="muted text-sm">Pick a start and end date.</span>}
+          </>
+        )}
+        {isMonthly && period !== 'custom' && monthOptions.length > 0 && (
           <>
             <span className="muted text-sm">Month</span>
             <select
@@ -267,7 +305,7 @@ export function ReportViewPage() {
             </select>
           </>
         )}
-        {isMonthly && !month && monthLabel && <span className="muted text-sm">Last complete month · {monthLabel}</span>}
+        {isMonthly && period !== 'custom' && !month && monthLabel && <span className="muted text-sm">Last complete month · {monthLabel}</span>}
         {isWeekly && weekOptions.length > 0 && (
           <>
             <span className="muted text-sm">Week</span>

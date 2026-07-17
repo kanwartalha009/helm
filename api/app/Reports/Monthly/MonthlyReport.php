@@ -16,8 +16,12 @@ use App\Models\ShopifyFunnelDaily;
 use App\Platforms\Shopify\RevenueFetcher;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Contracts\ReportType;
+use App\Reports\Mom\Support\CountryRevenueSpend;
+use App\Reports\Mom\Support\RangeCollapse;
+use App\Reports\Support\CommerceBreakdown;
 use App\Reports\Support\MonthlySeries;
 use App\Reports\Support\SqlMonth;
+use App\Services\CountryTiers;
 use App\Support\CountryCodes;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
@@ -90,7 +94,17 @@ final class MonthlyReport implements ReportType
         // comparison below derives from $monthStart, so they shift with it.
         $defaultMonthStart = $now->startOfMonth()->subMonth();
 
-        $selected = $filters->monthWindow($tz);
+        // Custom day range (Kanwar, 2026-07-17 — item 1): a period='custom' with
+        // from/to drives the whole report off an arbitrary day window compared to
+        // the same range last year. The month-by-month matrix sections collapse
+        // (they can't be a monthly grid for a sub-month range); every single-window
+        // section (gender, channels, placement, funnels, email, sales evolution)
+        // just runs over the range because they already take start/end.
+        $isRange   = $filters->isCustomRange();
+        $rangeWin  = $filters->activeWindow($tz);
+        $rangeCmp  = $isRange ? $filters->activeComparisonWindow($tz) : null;
+
+        $selected = $rangeWin;
         if ($selected !== null) {
             $monthStart = CarbonImmutable::parse($selected[0], $tz)->startOfDay();
             $monthEnd   = CarbonImmutable::parse($selected[1], $tz)->endOfDay();
@@ -111,14 +125,35 @@ final class MonthlyReport implements ReportType
         $yoyStart = $monthStart->subYear();
 
         $cur = $this->monthMetrics($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd);
-        $mom = $this->monthMetrics($brand->id, $momStart->toDateString(), $momStart->endOfMonth()->toDateString(), $filters->usd);
+        // The Overall-picture comparison: the same range last year in range mode,
+        // else the previous calendar month (the report's traditional MoM delta).
+        $mom = $isRange
+            ? ($rangeCmp !== null
+                ? $this->monthMetrics($brand->id, $rangeCmp[0], $rangeCmp[1], $filters->usd)
+                : ['revenue' => 0.0, 'totalSpend' => 0.0, 'roas' => null])
+            : $this->monthMetrics($brand->id, $momStart->toDateString(), $momStart->endOfMonth()->toDateString(), $filters->usd);
 
         // §4 is built here (not inline in `sections`) so the Overall picture can
         // surface its ESTIMATED new-customer ROAS for the report month. Built once,
-        // reused below — one ShopifyQL customer pull.
-        $newVsExisting = $this->newVsExistingSection($brand, $months, $filters->usd);
-        $curNewRoas    = $this->newRoasForMonth($newVsExisting, $monthStart->isoFormat('MMM YY'));
-        $prevNewRoas   = $this->newRoasForMonth($newVsExisting, $momStart->isoFormat('MMM YY'));
+        // reused below — one ShopifyQL customer pull. In range mode the customer
+        // feed is month-granular, so §4 is gated and the new-customer KPI/split
+        // are honestly omitted rather than approximated across a sub-month range.
+        if ($isRange) {
+            $newVsExisting     = ['status' => 'coming', 'note' => 'New vs existing customers needs whole calendar months — switch off the custom range to see it.'];
+            $curNewRoas        = null;
+            $prevNewRoas       = null;
+            $reportCustomerRow = null;
+        } else {
+            $newVsExisting     = $this->newVsExistingSection($brand, $months, $filters->usd);
+            $curNewRoas        = $this->newRoasForMonth($newVsExisting, $monthStart->isoFormat('MMM YY'));
+            $prevNewRoas       = $this->newRoasForMonth($newVsExisting, $momStart->isoFormat('MMM YY'));
+            $reportCustomerRow = $this->customerRowForMonth($newVsExisting, $monthStart->isoFormat('MMM YY'));
+        }
+
+        // Sales evolution (Kanwar, 2026-07-17 — item 3): a daily revenue line for
+        // the window + a MODELED new-vs-returning split (month mode only, where the
+        // customer counts exist).
+        $salesEvolution = $this->salesEvolutionSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd, $reportCustomerRow);
 
         $currency = $filters->usd ? 'USD' : ($brand->base_currency ?: 'USD');
         $limit    = 8;
@@ -132,13 +167,20 @@ final class MonthlyReport implements ReportType
                 'timezone'     => $brand->timezone,
             ],
             'currency' => $currency,
+            // `range` flags custom-range mode so the SPA labels the header as a date
+            // range and shows the collapsed matrix tables.
+            'range'    => $isRange,
             'month'    => [
-                'label' => $monthStart->isoFormat('MMMM YYYY'),
+                'label' => $isRange
+                    ? $monthStart->isoFormat('D MMM YYYY') . ' – ' . $monthEnd->isoFormat('D MMM YYYY')
+                    : $monthStart->isoFormat('MMMM YYYY'),
                 'start' => $monthStart->toDateString(),
                 'end'   => $monthEnd->toDateString(),
             ],
             'comparison' => [
-                'mom' => $momStart->isoFormat('MMMM YYYY'),
+                'mom' => $isRange && $rangeCmp !== null
+                    ? CarbonImmutable::parse($rangeCmp[0])->isoFormat('D MMM YYYY') . ' – ' . CarbonImmutable::parse($rangeCmp[1])->isoFormat('D MMM YYYY')
+                    : $momStart->isoFormat('MMMM YYYY'),
                 'yoy' => $yoyStart->isoFormat('MMMM YYYY'),
             ],
             // Month picker: every COMPLETE month the brand has Shopify rows for
@@ -157,13 +199,19 @@ final class MonthlyReport implements ReportType
             // Each section carries a readiness status so the SPA renders the whole
             // report structure, lighting up sections as their data lands.
             'sections' => [
-                'countryRevenue' => $this->commerceSection('country', $brand->id, $months, $filters->usd, $limit),
-                'categories'     => $this->commerceSection('category', $brand->id, $months, $filters->usd, $limit),
-                'bestSellers'    => $this->commerceSection('product', $brand->id, $months, $filters->usd, $limit),
-                'market'         => $this->marketSection($brand->id, $months, $filters->usd),
+                'salesEvolution' => $salesEvolution,
+                // Matrix sections collapse to range-vs-same-range-last-year when a
+                // custom range is active; otherwise the month-by-month grids.
+                'countryRevenue' => $isRange ? $this->commerceCollapse('country', $brand->id, $rangeWin, $rangeCmp, $filters->usd, 'No commerce-by-country data in the selected range.') : $this->commerceSection('country', $brand->id, $months, $filters->usd, $limit),
+                'categories'     => $isRange ? $this->commerceCollapse('category', $brand->id, $rangeWin, $rangeCmp, $filters->usd, 'No commerce-by-category data in the selected range.') : $this->commerceSection('category', $brand->id, $months, $filters->usd, $limit),
+                'bestSellers'    => $isRange ? $this->commerceCollapse('product', $brand->id, $rangeWin, $rangeCmp, $filters->usd, 'No commerce-by-product data in the selected range.') : $this->commerceSection('product', $brand->id, $months, $filters->usd, $limit),
+                'market'         => $isRange ? $this->regionCollapse($brand->id, $rangeWin, $rangeCmp, $filters->usd) : $this->marketSection($brand->id, $months, $filters->usd),
+                // Kanwar, 2026-07-17 — market revenue grouped by the brand's own TIER
+                // system (the same country tiers the MoM report uses), table only.
+                'marketTier'     => $isRange ? $this->tierCollapse($brand, $rangeWin, $rangeCmp, $filters->usd) : $this->tierRevenueSection($brand, $months, $filters->usd),
                 'gender'         => $this->genderSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'channelMix'     => $this->channelMixSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
-                'roasByCountry'  => $this->roasByCountrySection($brand->id, $months, $filters->usd),
+                'roasByCountry'  => $isRange ? $this->roasCollapse($brand->id, $rangeWin, $rangeCmp, $filters->usd) : $this->roasByCountrySection($brand->id, $months, $filters->usd),
                 'placement'      => $this->placementSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'landingSellers' => $this->landingSellersSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'newVsExisting'  => $newVsExisting,
@@ -317,6 +365,196 @@ final class MonthlyReport implements ReportType
         }
 
         return $data === null ? ['status' => 'no_data'] : ['status' => 'ready', 'data' => $data];
+    }
+
+    /**
+     * Market revenue grouped by the brand's own TIER system (Kanwar, 2026-07-17 —
+     * "market revenue replace this with tiers systems as we did in MOM strategy
+     * report, just show table only"). Reuses the exact region-fold machinery
+     * marketSection() uses, but the country→group map comes from CountryTiers
+     * (the same tiers the MoM report groups by) instead of the region config, so
+     * the two reports group a country identically. 'coming' when no tiers are set.
+     *
+     * @param array<int, string> $months
+     * @return array<string, mixed>
+     */
+    private function tierRevenueSection(Brand $brand, array $months, bool $usd): array
+    {
+        $resolved = (new CountryTiers())->resolve($brand); // iso2 => ['tierKey','label','color']
+        if ($resolved === []) {
+            return ['status' => 'coming'];
+        }
+
+        $map    = [];
+        $labels = [];
+        foreach ($resolved as $iso2 => $t) {
+            $map[$iso2] = $t['tierKey'];
+            $labels[$t['tierKey']] = $t['label'];
+        }
+
+        try {
+            // Fold Shopify country NAMES → ISO-2 first so the code-keyed tier map
+            // matches instead of dumping everything into "Other".
+            $data = $this->series->forDimension($brand->id, 'country', $months, $usd, 12, $map, $labels, CountryCodes::toIso2(...));
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'market_tier', 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+
+        return $data === null ? ['status' => 'no_data'] : ['status' => 'ready', 'data' => $data];
+    }
+
+    /**
+     * Custom-range collapse (Kanwar, 2026-07-17 — item 1). Each matrix section
+     * returns a uniform `rangeCollapse` payload the SPA's shared RangeCollapseTable
+     * draws — revenue (or ROAS) by group over the range vs the same range last
+     * year. Reuses the exact engines the MoM report uses, so the two agree.
+     *
+     * @param array{0: string, 1: string} $range
+     * @param array{0: string, 1: string}|null $cmp
+     */
+    private function commerceCollapse(string $dimension, int $brandId, array $range, ?array $cmp, bool $usd, string $emptyNote): array
+    {
+        try {
+            $bd = (new CommerceBreakdown())->forDimension($brandId, $dimension, $range[0], $range[1], $cmp[0] ?? null, $cmp[1] ?? null, $usd, 8);
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'collapse_' . $dimension, 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+        if ($bd === null) {
+            return ['status' => 'no_data', 'note' => $emptyNote];
+        }
+
+        $groups = [];
+        foreach ($bd['rows'] as $r) {
+            $groups[] = ['label' => $r['label'], 'value' => $r['revenue'], 'compare' => $r['previous']];
+        }
+
+        return ['status' => 'ready', 'rangeCollapse' => RangeCollapse::revenueByGroup($this->rangeLabels($range, $cmp)[0], $this->rangeLabels($range, $cmp)[1], $groups)];
+    }
+
+    /** Region-grouped revenue collapse (the country_regions map), range vs YoY. */
+    private function regionCollapse(int $brandId, array $range, ?array $cmp, bool $usd): array
+    {
+        $map    = array_change_key_case((array) config('country_regions.map', []), CASE_UPPER);
+        $labels = (array) config('country_regions.labels', []);
+        if ($map === []) {
+            return ['status' => 'coming'];
+        }
+
+        return $this->groupCollapse($brandId, $range, $cmp, $map, $labels);
+    }
+
+    /** Tier-grouped revenue collapse (the brand's CountryTiers), range vs YoY. */
+    private function tierCollapse(Brand $brand, array $range, ?array $cmp, bool $usd): array
+    {
+        $resolved = (new CountryTiers())->resolve($brand);
+        if ($resolved === []) {
+            return ['status' => 'coming'];
+        }
+        $map = [];
+        $labels = [];
+        foreach ($resolved as $iso2 => $t) {
+            $map[$iso2] = $t['tierKey'];
+            $labels[$t['tierKey']] = $t['label'];
+        }
+
+        return $this->groupCollapse($brand->id, $range, $cmp, $map, $labels);
+    }
+
+    /**
+     * Shared country→group revenue collapse for region/tier: sums the country
+     * revenue join (the same one S4/S5 use) into the map's groups over the range
+     * and over the same range last year.
+     *
+     * @param array{0: string, 1: string} $range
+     * @param array{0: string, 1: string}|null $cmp
+     * @param array<string, string> $map    iso2 => group key
+     * @param array<string, string> $labels group key => label
+     */
+    private function groupCollapse(int $brandId, array $range, ?array $cmp, array $map, array $labels): array
+    {
+        $joiner = new CountryRevenueSpend();
+        $rangeC = $joiner->compute($brandId, $range[0], $range[1]);
+        if ($rangeC === []) {
+            return ['status' => 'no_data', 'note' => 'No commerce-by-country data in the selected range.'];
+        }
+        $yoyC = $cmp !== null ? $joiner->compute($brandId, $cmp[0], $cmp[1]) : [];
+
+        $fold = static function (array $countries) use ($map, $labels): array {
+            $out = [];
+            foreach ($countries as $c) {
+                $iso2 = $c['iso2'];
+                $key  = ($iso2 !== '' && isset($map[$iso2])) ? $map[$iso2] : '__other';
+                $label = $labels[$key] ?? ($key === '__other' ? 'Other' : $key);
+                $out[$key] ??= ['label' => $label, 'revenue' => 0.0];
+                $out[$key]['revenue'] += $c['revenue'];
+            }
+
+            return $out;
+        };
+
+        $r = $fold($rangeC);
+        $y = $fold($yoyC);
+        $groups = [];
+        foreach ($r as $key => $g) {
+            $groups[] = ['label' => $g['label'], 'value' => $g['revenue'], 'compare' => $y[$key]['revenue'] ?? null];
+        }
+
+        [$rl, $cl] = $this->rangeLabels($range, $cmp);
+
+        return ['status' => 'ready', 'rangeCollapse' => RangeCollapse::revenueByGroup($rl, $cl, $groups)];
+    }
+
+    /** ROAS-by-country collapse, range vs the same range last year. */
+    private function roasCollapse(int $brandId, array $range, ?array $cmp, bool $usd): array
+    {
+        $joiner = new CountryRevenueSpend();
+        $rangeC = $joiner->compute($brandId, $range[0], $range[1]);
+        $yoyC   = $cmp !== null ? $joiner->compute($brandId, $cmp[0], $cmp[1]) : [];
+
+        $items = [];
+        foreach ($rangeC as $key => $c) {
+            if ($c['spend'] <= 0.0) {
+                continue;
+            }
+            $roas = round($c['revenue'] / $c['spend'], 2);
+            $yc   = $yoyC[$key] ?? null;
+            $yoyRoas = ($yc !== null && $yc['spend'] > 0.0) ? round($yc['revenue'] / $yc['spend'], 2) : null;
+            $items[] = ['label' => $c['label'], 'roas' => $roas, 'yoy' => $yoyRoas];
+        }
+        if ($items === []) {
+            return ['status' => 'no_data', 'note' => 'No ad spend by country in the selected range.'];
+        }
+        usort($items, static fn (array $a, array $b): int => $b['roas'] <=> $a['roas']);
+
+        [$rl, $cl] = $this->rangeLabels($range, $cmp);
+        $rows = [];
+        foreach ($items as $it) {
+            $rows[] = [
+                RangeCollapse::cell($it['label'], 'text'),
+                RangeCollapse::cell($it['roas'], 'ratio'),
+                RangeCollapse::cell($it['yoy'], 'ratio'),
+                RangeCollapse::cell(RangeCollapse::delta($it['roas'], $it['yoy']), 'delta'),
+            ];
+        }
+
+        return ['status' => 'ready', 'rangeCollapse' => RangeCollapse::table($rl, $cl, ['Country', 'ROAS · ' . $rl, 'ROAS · ' . $cl, 'Δ YoY'], $rows)];
+    }
+
+    /**
+     * @param array{0: string, 1: string} $range
+     * @param array{0: string, 1: string}|null $cmp
+     * @return array{0: string, 1: string}
+     */
+    private function rangeLabels(array $range, ?array $cmp): array
+    {
+        return [
+            RangeCollapse::label($range[0], $range[1]),
+            $cmp !== null ? RangeCollapse::label($cmp[0], $cmp[1]) : 'Last year',
+        ];
     }
 
     /**
@@ -941,9 +1179,19 @@ final class MonthlyReport implements ReportType
         // are dropped (a wall of 0/0/0 rows reads as broken). Country keeps every row.
         $isLanding = $dimension === 'landing';
 
+        // Kanwar, 2026-07-17 — the funnel shows RATES, not raw counts: added-to-cart
+        // and reached-checkout as a % of sessions, completed-checkout as a % of those
+        // who reached checkout, and the overall conversion rate. Raw counts are kept
+        // on each row for tooltips/export but the client table reads the percentages.
         $out = [];
+        $totSessions = 0;
+        $totCart = 0;
+        $totCheckout = 0;
+        $totPurchase = 0;
         foreach ($rows as $r) {
             $sessions = (int) $r->sessions;
+            $cart     = (int) $r->cart_additions;
+            $checkout = (int) $r->reached_checkout;
             $purchase = (int) $r->completed_checkout;
             if ($isLanding && $purchase <= 0) {
                 continue;
@@ -952,11 +1200,18 @@ final class MonthlyReport implements ReportType
             $out[] = [
                 'label'    => $isLanding ? $this->landingLabel($rawLabel) : $rawLabel,
                 'sessions' => $sessions,
-                'cart'     => (int) $r->cart_additions,
-                'checkout' => (int) $r->reached_checkout,
+                'cart'     => $cart,
+                'checkout' => $checkout,
                 'purchase' => $purchase,
+                'cartRate'      => $sessions > 0 ? round($cart / $sessions * 100, 2) : null,
+                'checkoutRate'  => $sessions > 0 ? round($checkout / $sessions * 100, 2) : null,
+                'completedRate' => $checkout > 0 ? round($purchase / $checkout * 100, 2) : null,
                 'cvr'      => $sessions > 0 ? round($purchase / $sessions * 100, 2) : null,
             ];
+            $totSessions += $sessions;
+            $totCart     += $cart;
+            $totCheckout += $checkout;
+            $totPurchase += $purchase;
         }
         usort($out, static fn (array $a, array $b): int => $b['sessions'] <=> $a['sessions']);
 
@@ -964,7 +1219,16 @@ final class MonthlyReport implements ReportType
             return ['status' => 'no_data'];
         }
 
-        return ['status' => 'ready', 'funnel' => array_slice($out, 0, 10)];
+        // Brand-wide summary row (rates over every row, not an average of averages).
+        $summary = [
+            'sessions'      => $totSessions,
+            'cartRate'      => $totSessions > 0 ? round($totCart / $totSessions * 100, 2) : null,
+            'checkoutRate'  => $totSessions > 0 ? round($totCheckout / $totSessions * 100, 2) : null,
+            'completedRate' => $totCheckout > 0 ? round($totPurchase / $totCheckout * 100, 2) : null,
+            'cvr'           => $totSessions > 0 ? round($totPurchase / $totSessions * 100, 2) : null,
+        ];
+
+        return ['status' => 'ready', 'funnel' => array_slice($out, 0, 10), 'summary' => $summary];
     }
 
     /**
@@ -1082,6 +1346,100 @@ final class MonthlyReport implements ReportType
         }
 
         return ['status' => 'ready', 'customers' => $rows];
+    }
+
+    /**
+     * The full §4 customer row for one month label ("Jun 26"), or null — so the
+     * sales-evolution section can model this month's new-vs-returning split from
+     * the SAME counts §4 shows, without a second Shopify pull.
+     *
+     * @param array<string, mixed> $section
+     * @return array<string, mixed>|null
+     */
+    private function customerRowForMonth(array $section, string $monthLabel): ?array
+    {
+        if (($section['status'] ?? '') !== 'ready') {
+            return null;
+        }
+        foreach ($section['customers'] ?? [] as $row) {
+            if (($row['month'] ?? '') === $monthLabel) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Sales evolution (Kanwar, 2026-07-17 — item 3): a daily revenue line for the
+     * report month and a MODELED new-vs-returning sales split — the same estimate
+     * §4 / the MoM report use (new sales ≈ new customers × blended AOV; returning =
+     * total − new), allocated across the days by the month's new-share so the daily
+     * series reconciles to the monthly split. Modeled, never Verified.
+     *
+     * @param array<string, mixed>|null $customerRow this month's §4 row (new/orders)
+     * @return array<string, mixed>
+     */
+    private function salesEvolutionSection(int $brandId, string $start, string $end, bool $usd, ?array $customerRow): array
+    {
+        $revCol = '(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))'; // D-005
+        $disp   = $usd ? "{$revCol} * COALESCE(fx_rate_to_usd, 1)" : $revCol;
+
+        try {
+            $rows = DailyMetric::query()
+                ->where('brand_id', $brandId)
+                ->where('platform', 'shopify')
+                ->whereBetween('date', [$start, $end])
+                ->groupBy('date')
+                ->selectRaw("date, COALESCE(SUM({$disp}), 0) AS revenue")
+                ->orderBy('date')
+                ->get();
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'salesEvolution', 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
+
+        if ($rows->isEmpty()) {
+            return ['status' => 'needs_source', 'note' => 'No Shopify daily data synced for this brand/month yet.'];
+        }
+
+        $series = $rows->map(static fn ($r): array => [
+            'day'     => (int) CarbonImmutable::parse((string) $r->date)->format('j'),
+            'revenue' => round((float) $r->revenue, 2),
+        ])->values()->all();
+        $total = round(array_sum(array_column($series, 'revenue')), 2);
+
+        // Modeled split from this month's §4 counts, when available.
+        $split = null;
+        $daily = null;
+        $new    = $customerRow !== null ? (int) ($customerRow['new'] ?? 0) : 0;
+        $orders = $customerRow !== null ? (int) ($customerRow['orders'] ?? 0) : 0;
+        if ($customerRow !== null && $orders > 0 && $total > 0.0) {
+            $aov      = $total / $orders;
+            $newSales = round(min($new * $aov, $total), 2);
+            $retSales = round($total - $newSales, 2);
+            $split = [
+                'basis'  => 'modeled',
+                'method' => 'Estimate — new-customer sales ≈ new customers × blended AOV (revenue ÷ orders); returning = total − new. Shopify doesn’t report sales by customer type, and blended AOV runs slightly high for new customers.',
+                'new'       => ['customers' => $new, 'sales' => $newSales, 'pct' => $customerRow['total'] ? round($new / (int) $customerRow['total'] * 100, 1) : null],
+                'returning' => ['customers' => (int) ($customerRow['returning'] ?? 0), 'sales' => $retSales, 'pct' => $customerRow['retPct'] ?? null],
+            ];
+            $newShare = $total > 0.0 ? $newSales / $total : 0.0;
+            $daily = array_map(static function (array $d) use ($newShare): array {
+                $newDay = round($d['revenue'] * $newShare, 2);
+
+                return ['day' => $d['day'], 'new' => $newDay, 'returning' => round($d['revenue'] - $newDay, 2)];
+            }, $series);
+        }
+
+        return [
+            'status'   => 'ready',
+            'series'   => $series,
+            'total'    => $total,
+            'split'    => $split,
+            'daily'    => $daily,
+        ];
     }
 
     /**
