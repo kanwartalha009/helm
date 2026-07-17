@@ -437,4 +437,78 @@ export function EmptyChart({ height = 120 }: { height?: number }) {
   );
 }
 
+/**
+ * 100%-stacked bar over time (Kanwar, 2026-07-17 — "revenue by product stacked
+ * 100%, and another one by product type"). Each period column is normalised to
+ * 100% of its OWN total across the given series, so the MIX (not absolute size)
+ * reads across periods. Pure SVG so it prints and share-links cleanly like the
+ * other twins here.
+ */
+export function StackedBar100({
+  labels,
+  series,
+  height = 240,
+}: {
+  labels: string[];
+  series: { label: string; values: (number | null)[] }[];
+  height?: number;
+}) {
+  const n = labels.length;
+  if (n === 0 || series.length === 0) return <EmptyChart height={height} />;
+
+  const PAD_L = 34;
+  const PAD_B = 20;
+  const PAD_T = 8;
+  const PAD_R = 8;
+  const W = Math.max(320, n * 48 + PAD_L + PAD_R);
+  const plotH = height - PAD_B - PAD_T;
+  const plotW = W - PAD_L - PAD_R;
+  const bw = Math.min(40, (plotW / n) * 0.68);
+
+  const totals = labels.map((_, i) => series.reduce((s, ser) => s + Math.max(0, ser.values[i] ?? 0), 0));
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <svg width={W} height={height} style={{ display: 'block' }} role="img" aria-label="100% stacked bar chart">
+        {[0, 25, 50, 75, 100].map((p) => {
+          const y = PAD_T + plotH * (1 - p / 100);
+          return (
+            <g key={p}>
+              <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke={GRID} strokeWidth={1} />
+              <text x={PAD_L - 6} y={y + 3} textAnchor="end" fontSize={9} fill="#6b7280">{p}%</text>
+            </g>
+          );
+        })}
+        {labels.map((lab, i) => {
+          const cx = PAD_L + (plotW / n) * (i + 0.5);
+          const x = cx - bw / 2;
+          const total = totals[i];
+          let yCursor = PAD_T + plotH; // stack upward from the baseline
+          return (
+            <g key={i}>
+              {total > 0 &&
+                series.map((ser, si) => {
+                  const v = Math.max(0, ser.values[i] ?? 0);
+                  if (v <= 0) return null;
+                  const h = (v / total) * plotH;
+                  yCursor -= h;
+                  return <rect key={si} x={x} y={yCursor} width={bw} height={h} fill={paletteColor(si)} />;
+                })}
+              <text x={cx} y={height - 6} textAnchor="middle" fontSize={9} fill="#6b7280">{lab}</text>
+            </g>
+          );
+        })}
+      </svg>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
+        {series.map((ser, si) => (
+          <span key={si} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: paletteColor(si), display: 'inline-block' }} />
+            {ser.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export { fmtCompact };

@@ -8,6 +8,7 @@ use App\Models\Brand;
 use App\Models\ProductCatalog;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
+use App\Reports\Mom\Support\RangeCollapse;
 use App\Reports\Support\CommerceBreakdown;
 use Carbon\CarbonImmutable;
 
@@ -41,6 +42,13 @@ final class SCategoriesSection implements MomSection
     public function build(Brand $brand, ReportFilters $filters): array
     {
         $tz = $brand->timezone ?: 'UTC';
+
+        // Custom range (Kanwar, 2026-07-17): collapse to category revenue over the
+        // range vs the same range last year.
+        if ($filters->isCustomRange()) {
+            return $this->rangeCollapse($brand, $filters, $tz);
+        }
+
         $window = $filters->monthWindow($tz);
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
@@ -92,6 +100,46 @@ final class SCategoriesSection implements MomSection
             'unavailable' => [
                 'stockCoverWeeks' => 'Stock is a simple on-hand PRESENCE check (<= 20 units flags lowStock), not a real weeks-of-cover figure — that needs sell-through velocity math not computed this pass.',
             ],
+        ];
+    }
+
+    /** Collapse S7 to category revenue over the custom range vs the same range last year. */
+    private function rangeCollapse(Brand $brand, ReportFilters $filters, string $tz): array
+    {
+        $range = $filters->activeWindow($tz);
+        $cmp   = $filters->activeComparisonWindow($tz);
+        if ($range === null) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
+        }
+
+        $bd = (new CommerceBreakdown())->forDimension(
+            $brand->id,
+            'category',
+            $range[0],
+            $range[1],
+            $cmp[0] ?? null,
+            $cmp[1] ?? null,
+            $filters->usd,
+            8,
+        );
+        if ($bd === null) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No commerce-by-category data in the selected range.'];
+        }
+
+        $groups = [];
+        foreach ($bd['rows'] as $r) {
+            $groups[] = ['label' => $r['label'], 'value' => $r['revenue'], 'compare' => $r['previous']];
+        }
+
+        return [
+            'key'    => $this->key(),
+            'status' => 'ok',
+            'range'  => true,
+            'rangeCollapse' => RangeCollapse::revenueByGroup(
+                RangeCollapse::label($range[0], $range[1]),
+                $cmp !== null ? RangeCollapse::label($cmp[0], $cmp[1]) : 'Last year',
+                $groups,
+            ),
         ];
     }
 }

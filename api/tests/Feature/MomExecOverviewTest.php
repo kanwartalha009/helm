@@ -247,19 +247,70 @@ class MomExecOverviewTest extends TestCase
         CarbonImmutable::setTestNow();
     }
 
-    public function test_month_by_month_matrix_gates_to_month_mode_under_a_custom_range(): void
+    public function test_financial_matrix_collapses_to_range_vs_same_range_last_year(): void
     {
-        // The matrix sections (here S1 financial matrix) stay month-bucketed, so a
-        // custom range with no month resolves to no complete month — an honest
-        // "pick a month" gate, never wrong numbers. (Collapse-to-range is a later slice.)
+        // Kanwar, 2026-07-17 — the month-by-month matrices (here S1) COLLAPSE under
+        // a custom range: one "selected range vs same range last year" table, not a
+        // monthly grid. Revenue over Jun 1–14 = 700; the same range last year = 500.
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
         $this->actingMasterAdmin();
         $brand = $this->makeBrand();
 
-        $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S1?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
-            ->assertOk()->assertJsonPath('status', 'no_data');
+        $seed = function (string $date, float $sales) use ($brand): void {
+            DB::table('daily_metrics')->insert([
+                'brand_id' => $brand->id, 'platform' => 'shopify', 'date' => $date,
+                'currency' => 'EUR', 'fx_rate_to_usd' => 1.0, 'is_complete' => true, 'pulled_at' => now(),
+                'total_sales' => $sales, 'refunds_amount' => 0, 'orders' => 1,
+            ]);
+        };
+        $seed('2026-06-05', 700);
+        $seed('2026-06-20', 300); // outside the range
+        $seed('2025-06-05', 500); // same range last year
+
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S1?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
+            ->assertOk()->assertJsonPath('status', 'ok')->assertJsonPath('range', true);
+
+        // Revenue is the first collapse row: [label, range value, last-year value, Δ].
+        $revenueRow = collect($res->json('rangeCollapse.rows'))->first(fn ($r) => $r[0]['v'] === 'Revenue');
+        $this->assertNotNull($revenueRow);
+        $this->assertEquals(700.0, $revenueRow[1]['v']);
+        $this->assertEquals(500.0, $revenueRow[2]['v']);
+        $this->assertEquals(40.0, $revenueRow[3]['v']); // (700-500)/500
 
         CarbonImmutable::setTestNow();
+    }
+
+    public function test_categories_collapse_to_range_revenue_by_group_with_share_and_yoy(): void
+    {
+        // Kanwar, 2026-07-17 — revenue-by-group collapse (S7 categories): each
+        // group's range revenue, the same range last year, Δ YoY and share.
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
+        $this->actingMasterAdmin();
+        $brand = $this->makeBrand();
+
+        $seedCat = function (string $date, string $cat, float $sales) use ($brand): void {
+            DB::table('commerce_daily_metrics')->insert([
+                'brand_id' => $brand->id, 'date' => $date, 'dimension_type' => 'category',
+                'dimension_key' => $cat, 'dimension_label' => $cat, 'orders' => 1,
+                'total_sales' => $sales, 'refunds_amount' => 0, 'currency' => 'EUR',
+                'fx_rate_to_usd' => 1.0, 'is_complete' => true, 'pulled_at' => now(),
+            ]);
+        };
+        $seedCat('2026-06-05', 'Bags', 800);
+        $seedCat('2026-06-06', 'Wallets', 200);
+        $seedCat('2026-06-20', 'Bags', 500);  // outside the range
+        $seedCat('2025-06-05', 'Bags', 400);   // Bags, same range last year
+
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S7?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
+            ->assertOk()->assertJsonPath('status', 'ok')->assertJsonPath('range', true);
+
+        // Bags is the top row: range 800, last year 400, Δ +100%, share 80% (of 1000).
+        $bags = collect($res->json('rangeCollapse.rows'))->first(fn ($r) => $r[0]['v'] === 'Bags');
+        $this->assertNotNull($bags);
+        $this->assertEquals(800.0, $bags[1]['v']);
+        $this->assertEquals(400.0, $bags[2]['v']);
+        $this->assertEquals(100.0, $bags[3]['v']);
+        $this->assertEquals(80.0, $bags[4]['v']);
     }
 
     protected function tearDown(): void

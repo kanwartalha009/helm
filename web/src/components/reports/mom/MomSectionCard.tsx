@@ -4,7 +4,7 @@ import { useTriggerBackfill } from '@/hooks/useApiData';
 import type { MomFiltersInput, MomSectionManifestEntry } from '@/hooks/useMomReport';
 import { useMomCommentary, useMomSection, useSaveMomCommentary } from '@/hooks/useMomReport';
 import { SECTION_CHART_RENDERERS } from './sectionCharts';
-import { SECTION_TABLE_RENDERERS } from './sectionTables';
+import { RangeCollapseTable, SECTION_TABLE_RENDERERS } from './sectionTables';
 import { GenericKeyValue, GenericTable } from './GenericTable';
 import { SNextStepsCard } from './SNextSteps';
 import { SNovedadesCard } from './SNovedades';
@@ -249,6 +249,13 @@ export function SectionBody({
   view: 'chart' | 'table' | 'both';
   currency: string;
 }) {
+  // Custom-range collapse (Kanwar, 2026-07-17): when a matrix section returns a
+  // `rangeCollapse` payload (sub-month range active), render the shared collapse
+  // table and nothing else — the monthly chart/table twins don't apply.
+  if (payload.rangeCollapse) {
+    return <RangeCollapseTable data={payload.rangeCollapse} currency={currency} />;
+  }
+
   const chartRenderer = SECTION_CHART_RENDERERS[sectionKey];
   const chart = chartRenderer ? chartRenderer(payload, currency) : null;
   // M5 (Kanwar, 2026-07-15 — "table primary, chart secondary") — a bespoke

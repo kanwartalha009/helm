@@ -1,4 +1,5 @@
 import { formatMoney, formatRoas } from '@/lib/formatters';
+import { DeltaChip } from './charts';
 import { HeatTable, type HeatColumn } from './HeatTable';
 import { gradeColumn, heatFromDeltaPct, heatVsBenchmark, type HeatGrade } from './heat';
 
@@ -475,4 +476,79 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     );
   },
 };
+
+/**
+ * Custom-range collapse table (Kanwar, 2026-07-17). When a sub-month range is
+ * active the month-by-month matrices (S1/S4/S5/S6/S7/S8) can't show monthly
+ * columns, so each backend section returns a uniform `rangeCollapse` payload —
+ * header labels + rows of {v,f} cells — and THIS one renderer draws all of them
+ * (SectionBody routes to it whenever `payload.rangeCollapse` is present). One
+ * render path, so a new collapsing section needs no new frontend code.
+ */
+export function RangeCollapseTable({ data, currency }: { data: any; currency: string }) {
+  const columns: string[] = Array.isArray(data?.columns) ? data.columns : [];
+  const rows: { v: any; f: string }[][] = Array.isArray(data?.rows) ? data.rows : [];
+  const footer: { v: any; f: string }[] | null = Array.isArray(data?.footer) ? data.footer : null;
+
+  const cellNode = (c: { v: any; f: string }, key: React.Key) => {
+    const v = c?.v ?? null;
+    if (c?.f === 'delta') {
+      return (
+        <td key={key} style={{ padding: '6px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+          <DeltaChip pct={v} />
+        </td>
+      );
+    }
+    let text: string;
+    if (v == null) text = '—';
+    else if (c.f === 'money') text = formatMoney(Number(v), currency, { whole: true });
+    else if (c.f === 'pct') text = `${Number(v).toFixed(1)}%`;
+    else if (c.f === 'ratio') text = formatRoas(Number(v));
+    else if (c.f === 'count') text = Number(v).toLocaleString();
+    else text = String(v);
+    const isText = c?.f === 'text';
+    return (
+      <td key={key} style={{ padding: '6px 10px', textAlign: isText ? 'left' : 'right', whiteSpace: 'nowrap', fontWeight: isText ? 500 : 400 }}>
+        {text}
+      </td>
+    );
+  };
+
+  return (
+    <div>
+      <div className="muted text-sm" style={{ marginBottom: 8 }}>
+        {data?.title ?? 'Selected range vs last year'}
+        {data?.rangeLabel ? ` · ${data.rangeLabel} vs ${data.compareLabel}` : ''}
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border, #E7E9F0)' }}>
+              {columns.map((c, i) => (
+                <th key={i} style={{ padding: '6px 10px', textAlign: i === 0 ? 'left' : 'right', fontWeight: 600, color: 'var(--text-muted, #6b7280)', whiteSpace: 'nowrap' }}>
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, ri) => (
+              <tr key={ri} style={{ borderBottom: '1px solid var(--border, #F1F2F6)' }}>
+                {r.map((c, ci) => cellNode(c, ci))}
+              </tr>
+            ))}
+          </tbody>
+          {footer && (
+            <tfoot>
+              <tr style={{ borderTop: '2px solid var(--border, #E7E9F0)', fontWeight: 600 }}>
+                {footer.map((c, ci) => cellNode(c, ci))}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+      {data?.note && <div className="muted" style={{ fontSize: 11, marginTop: 6, fontStyle: 'italic' }}>{data.note}</div>}
+    </div>
+  );
+}
 

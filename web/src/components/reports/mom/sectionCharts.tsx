@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { formatMoney } from '@/lib/formatters';
-import { DonutChart, RankedBarChart, TrendLineChart } from './charts';
+import { DonutChart, RankedBarChart, StackedBar100, TrendLineChart } from './charts';
 import { StatTile, UnavailableTile } from './StatTile';
 
 /**
@@ -185,35 +185,9 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
     />
   ),
 
-  S7: (p, currency) => {
-    const rows: any[] = p.rows ?? [];
-    return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
-        <DonutChart rows={rows.slice(0, 6).map((r) => ({ label: r.label, value: r.revenue ?? r.value ?? 0 }))} />
-        <div style={{ flex: '1 1 220px' }}>
-          <RankedBarChart
-            rows={rows.slice(0, 8).map((r) => ({ label: r.label, value: r.revenue ?? r.value ?? 0, deltaPct: r.deltaYoYPct ?? r.deltaPct }))}
-            valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
-          />
-        </div>
-      </div>
-    );
-  },
+  S7: (p, currency) => <ProductMixCharts p={p} currency={currency} mixLabel="Revenue mix by product type · 100% stacked" />,
 
-  S8: (p, currency) => {
-    const rows: any[] = p.rows ?? [];
-    return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
-        <DonutChart rows={rows.slice(0, 6).map((r) => ({ label: r.label, value: r.revenue ?? r.value ?? 0 }))} />
-        <div style={{ flex: '1 1 220px' }}>
-          <RankedBarChart
-            rows={rows.slice(0, 8).map((r) => ({ label: r.label, value: r.revenue ?? r.value ?? 0, deltaPct: r.deltaYoYPct ?? r.deltaPct }))}
-            valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
-          />
-        </div>
-      </div>
-    );
-  },
+  S8: (p, currency) => <ProductMixCharts p={p} currency={currency} mixLabel="Revenue mix by product · 100% stacked" />,
 
   S9: (p) => {
     const series: { day: number; sessions: number; purchase: number }[] = p.dailySessions ?? [];
@@ -285,6 +259,42 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
     />
   ),
 };
+
+/**
+ * S7/S8 product charts (Kanwar, 2026-07-17 — item 6): a 100%-stacked revenue-mix
+ * bar over the month window (by product for S8, by product type for S7), on top
+ * of the existing donut + ranked-bar twins. The stacked bar reads each product's
+ * SHARE of the shown mix per month, normalised to 100% — the "revenue by product
+ * stacked 100%" reference. Renders only when the section carries a month series;
+ * in custom-range mode the section collapses to a table instead (no monthly bars).
+ */
+function ProductMixCharts({ p, currency, mixLabel }: { p: any; currency: string; mixLabel: string }) {
+  const rows: any[] = p.rows ?? [];
+  const labels: string[] = p.monthLabels ?? [];
+  const canStack = labels.length > 1 && rows.some((r) => Array.isArray(r.monthly));
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {canStack && (
+        <div>
+          <div className="muted text-sm" style={{ marginBottom: 4 }}>{mixLabel}</div>
+          <StackedBar100
+            labels={labels}
+            series={rows.map((r) => ({ label: r.label, values: r.monthly ?? [] }))}
+          />
+        </div>
+      )}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
+        <DonutChart rows={rows.slice(0, 6).map((r) => ({ label: r.label, value: r.revenue ?? r.value ?? 0 }))} />
+        <div style={{ flex: '1 1 220px' }}>
+          <RankedBarChart
+            rows={rows.slice(0, 8).map((r) => ({ label: r.label, value: r.revenue ?? r.value ?? 0, deltaPct: r.deltaYoYPct ?? r.deltaPct }))}
+            valueFormatter={(n) => formatMoney(n, currency, { compact: true })}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function fmt(v: number | null, currency: string | undefined, suffix: string | undefined): string {
   if (v === null) return '—';

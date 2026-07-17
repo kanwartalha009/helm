@@ -8,6 +8,7 @@ use App\Models\Brand;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Support\CountryRevenueSpend;
+use App\Reports\Mom\Support\RangeCollapse;
 use App\Services\CountryTiers;
 use Carbon\CarbonImmutable;
 
@@ -41,6 +42,13 @@ final class SCountryRevenueSection implements MomSection
     public function build(Brand $brand, ReportFilters $filters): array
     {
         $tz = $brand->timezone ?: 'UTC';
+
+        // Custom range (Kanwar, 2026-07-17): collapse to country revenue over the
+        // range vs the same range last year.
+        if ($filters->isCustomRange()) {
+            return $this->rangeCollapse($brand, $filters, $tz);
+        }
+
         $window = $filters->monthWindow($tz);
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
@@ -160,6 +168,39 @@ final class SCountryRevenueSection implements MomSection
             'unavailable' => [
                 'breakevenRoas' => 'No per-brand margin/breakeven figure read this pass — status uses the HELM default floor (1.5) only.',
             ],
+        ];
+    }
+
+    /** Collapse S5 to country revenue over the custom range vs the same range last year. */
+    private function rangeCollapse(Brand $brand, ReportFilters $filters, string $tz): array
+    {
+        $range = $filters->activeWindow($tz);
+        $cmp   = $filters->activeComparisonWindow($tz);
+        if ($range === null) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
+        }
+
+        $joiner = new CountryRevenueSpend();
+        $rangeC = $joiner->compute($brand->id, $range[0], $range[1]);
+        if ($rangeC === []) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No commerce-by-country data in the selected range.'];
+        }
+        $yoyC = $cmp !== null ? $joiner->compute($brand->id, $cmp[0], $cmp[1]) : [];
+
+        $groups = [];
+        foreach ($rangeC as $key => $c) {
+            $groups[] = ['label' => $c['label'], 'value' => $c['revenue'], 'compare' => $yoyC[$key]['revenue'] ?? null];
+        }
+
+        return [
+            'key'    => $this->key(),
+            'status' => 'ok',
+            'range'  => true,
+            'rangeCollapse' => RangeCollapse::revenueByGroup(
+                RangeCollapse::label($range[0], $range[1]),
+                $cmp !== null ? RangeCollapse::label($cmp[0], $cmp[1]) : 'Last year',
+                $groups,
+            ),
         ];
     }
 
