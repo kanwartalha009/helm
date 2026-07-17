@@ -24,7 +24,7 @@ const TYPE_DESCRIPTIONS: Record<string, string> = {
   weekly: 'The Monday email — last complete week, WoW deltas, campaign movers and the action plan.',
   creatives: 'Creative winners, fatigue and watch depth — what to scale, cap or refresh.',
   'ads-audit': "Platform-by-platform campaign audit — what's winning, what's burning spend, what to do about it. Filter to one platform to send a Meta-only or Google-only audit.",
-  mom: 'Bosco\'s meeting deck, automated — money, markets, ads mechanics and next steps in the agency\'s own tier language. In progress: v1 (monthly) stays the default until this is approved.',
+  mom: 'The automated month-over-month strategy report — revenue, markets, advertising performance and recommended next steps, grouped by your own country tiers.',
 };
 
 type PlatformChoice = 'all' | 'meta' | 'google' | 'tiktok';

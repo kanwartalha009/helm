@@ -73,6 +73,10 @@ export function MomPublicReportPage() {
             agencyName={shell.branding?.agency_name || 'Roasdriven'}
             monthLabel={shell.month.label}
             sections={enabled}
+            // Client-facing share deck: only slides with real data, closing on a
+            // "Thank you" slide (Kanwar, 2026-07-17).
+            skipEmpty
+            showThankYou
             renderSection={(s) => {
               const full = enabled.find((e) => e.key === s.key)!;
               return <PublicMomSectionCard token={token!} section={full} currency={shell.currency} />;

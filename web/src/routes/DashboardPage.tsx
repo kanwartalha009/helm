@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { APP_NAME } from '@/lib/branding';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
@@ -149,6 +149,14 @@ export function DashboardPage() {
   const [sortBy, setSortBy] = useState<'best' | 'worst' | 'name'>('best');
   const brandGroup = useFiltersStore((s) => s.brandGroup);
   const setBrandGroup = useFiltersStore((s) => s.setBrandGroup);
+  // Single-brand filter (Kanwar, 2026-07-17 — "a filter to select only 1
+  // brand"). Holds a brand slug or null (all). The dropdown it drives is built
+  // from `rows`, which the backend has ALREADY scoped to this user's brand-
+  // manager access (the `manager` query param) — so a limited-role user only
+  // ever sees, and can only ever pick, brands they're allowed to. Picking a
+  // single brand and picking a group are mutually exclusive (a brand lives in
+  // at most one group), so choosing one clears the other.
+  const [brandSlug, setBrandSlug] = useState<string | null>(null);
 
   // Mirrors the backend `role:master_admin,manager` middleware. Hiding the
   // button for team_member / brand_user prevents a 403 round-trip from a
@@ -178,12 +186,33 @@ export function DashboardPage() {
     return set;
   }, [rows]);
 
-  // Apply the brand-group filter client-side. Other filters (period, compare)
+  // Every brand in scope, A–Z, for the single-brand dropdown. Deduped by slug
+  // (rows are already one-per-brand, but guard anyway) and drawn straight from
+  // the access-scoped `rows`.
+  const brandOptions = useMemo(
+    () =>
+      [...rows]
+        .map((r) => ({ slug: r.brand.slug, name: r.brand.name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [rows],
+  );
+
+  // If the manager filter changes and the picked brand is no longer in scope,
+  // drop the selection so the label never names a brand that isn't shown.
+  useEffect(() => {
+    if (brandSlug && !rows.some((r) => r.brand.slug === brandSlug)) {
+      setBrandSlug(null);
+    }
+  }, [rows, brandSlug]);
+
+  // Apply the brand filters client-side. A single-brand pick wins outright;
+  // otherwise the brand-group filter applies. Other filters (period, compare)
   // aren't wired yet — see the inline note where their controls used to live.
   const filteredRows: DashboardRow[] = useMemo(() => {
+    if (brandSlug) return rows.filter((r) => r.brand.slug === brandSlug);
     if (!brandGroup) return rows;
     return rows.filter((r) => r.brand.groupTag === brandGroup);
-  }, [rows, brandGroup]);
+  }, [rows, brandGroup, brandSlug]);
 
   // Client-side sort. Best/worst performing rank by the chosen metric over the
   // last 7 days (high→low / low→high); Name is A–Z.
@@ -231,9 +260,10 @@ export function DashboardPage() {
   // Audience rows honor the same client-side brand-group filter as Performance.
   const filteredAudienceRows = useMemo(() => {
     if (!audience) return [];
+    if (brandSlug) return audience.rows.filter((r) => r.brand.slug === brandSlug);
     if (!brandGroup) return audience.rows;
     return audience.rows.filter((r) => r.brand.groupTag === brandGroup);
-  }, [audience, brandGroup]);
+  }, [audience, brandGroup, brandSlug]);
 
   const breakdownLabel =
     BREAKDOWN_OPTIONS.find((o) => o.key === breakdown)?.label ?? 'Audience segments';
@@ -267,7 +297,9 @@ export function DashboardPage() {
       ? `${rows.length} active`
       : undefined;
 
-  const brandFilterLabel = brandGroup ?? `All ${rows.length}`;
+  const brandFilterLabel = brandSlug
+    ? brandOptions.find((b) => b.slug === brandSlug)?.name ?? 'Brand'
+    : brandGroup ?? `All ${rows.length}`;
 
   return (
     <AppLayout title="All brands" tag={tag}>
@@ -308,9 +340,12 @@ export function DashboardPage() {
         >
           <PopoverLabel>Group</PopoverLabel>
           <PopoverItem
-            active={brandGroup === null}
+            active={brandGroup === null && brandSlug === null}
             meta={String(rows.length)}
-            onClick={() => setBrandGroup(null)}
+            onClick={() => {
+              setBrandGroup(null);
+              setBrandSlug(null);
+            }}
           >
             All groups
           </PopoverItem>
@@ -319,14 +354,33 @@ export function DashboardPage() {
             return (
               <PopoverItem
                 key={g}
-                active={brandGroup === g}
+                active={brandGroup === g && brandSlug === null}
                 meta={String(count)}
-                onClick={() => setBrandGroup(g)}
+                onClick={() => {
+                  // Group and single-brand are mutually exclusive.
+                  setBrandSlug(null);
+                  setBrandGroup(g);
+                }}
               >
                 {g}
               </PopoverItem>
             );
           })}
+          <PopoverDivider />
+          <PopoverLabel>Brand</PopoverLabel>
+          {brandOptions.map((b) => (
+            <PopoverItem
+              key={b.slug}
+              active={brandSlug === b.slug}
+              onClick={() => {
+                // Picking a single brand clears any group selection.
+                setBrandGroup(null);
+                setBrandSlug(brandSlug === b.slug ? null : b.slug);
+              }}
+            >
+              {b.name}
+            </PopoverItem>
+          ))}
           <PopoverDivider />
           <PopoverLabel>Status</PopoverLabel>
           <PopoverItem active meta={String(rows.length)}>Active only</PopoverItem>
@@ -566,7 +620,7 @@ export function DashboardPage() {
           <div className="flex items-center justify-between mt-24">
             <div className="text-xs muted">
               Showing {filteredRows.length} brand{filteredRows.length === 1 ? '' : 's'}
-              {brandGroup ? ` in “${brandGroup}”` : ''}.
+              {brandSlug ? ` — ${brandFilterLabel}` : brandGroup ? ` in “${brandGroup}”` : ''}.
             </div>
           </div>
         </>
@@ -599,7 +653,7 @@ export function DashboardPage() {
                 <div className="text-xs muted">
                   Showing {filteredAudienceRows.length} Meta brand
                   {filteredAudienceRows.length === 1 ? '' : 's'}
-                  {brandGroup ? ` in “${brandGroup}”` : ''}.
+                  {brandSlug ? ` — ${brandFilterLabel}` : brandGroup ? ` in “${brandGroup}”` : ''}.
                 </div>
               </div>
             </>

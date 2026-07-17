@@ -71,6 +71,33 @@ class MomM2Test extends TestCase
         $this->assertTrue($types->contains('mom'));
     }
 
+    public function test_available_months_stay_anchored_to_the_last_complete_month_when_an_earlier_month_is_selected(): void
+    {
+        // Kanwar, 2026-07-17 — "in v2 I can't see June". The picker used to rebuild
+        // from the SELECTED month, so choosing May dropped June (a later month) off
+        // the list and you couldn't get back. It must always anchor to the last
+        // complete month, like v1.
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+        $lastComplete = $this->monthStart();       // e.g. June
+        $earlier      = $lastComplete->subMonth();  // e.g. May
+
+        $this->seedDaily($brand->id, 'shopify', $lastComplete->addDays(2)->toDateString(), ['total_sales' => 100, 'orders' => 1]);
+        $this->seedDaily($brand->id, 'shopify', $earlier->addDays(2)->toDateString(), ['total_sales' => 100, 'orders' => 1]);
+        $this->seedDaily($brand->id, 'shopify', $earlier->subMonth()->addDays(2)->toDateString(), ['total_sales' => 100, 'orders' => 1]);
+
+        Sanctum::actingAs($user);
+        $months = collect(
+            $this->getJson("/api/brands/{$brand->slug}/reports/mom?month={$earlier->format('Y-m')}")
+                ->assertOk()->json('availableMonths')
+        )->pluck('key');
+
+        // Even though May is selected, June (the last complete month) is still listed.
+        $this->assertSame($lastComplete->format('Y-m'), $months->first());
+        $this->assertTrue($months->contains($lastComplete->format('Y-m')));
+        $this->assertTrue($months->contains($earlier->format('Y-m')));
+    }
+
     public function test_sex_section_computes_d005_revenue_and_compare_month_delta(): void
     {
         $user  = User::factory()->create(['role' => 'master_admin']);

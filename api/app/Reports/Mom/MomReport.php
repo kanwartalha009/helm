@@ -53,6 +53,13 @@ final class MomReport implements ReportType
         // one is set, else the selected month; either way the header names the
         // exact window shown. Falls back to the last complete month only when
         // nothing is selected at all.
+        // The month picker must always list from the LAST COMPLETE month, never
+        // from the currently-selected one — otherwise selecting an earlier month
+        // (e.g. May) drops every later month (June) off the picker so you can't
+        // get back to them (Kanwar, 2026-07-17 — "in v2 I can't see June"). This
+        // matches v1's availableMonths, which is always anchored to the default.
+        $defaultMonthStart = $now->startOfMonth()->subDay()->startOfMonth();
+
         $isRange = $filters->isCustomRange();
         $window  = $filters->activeWindow($tz);
         if ($window !== null) {
@@ -97,7 +104,7 @@ final class MomReport implements ReportType
                 'start' => $compareWindow[0],
                 'end'   => $compareWindow[1],
             ] : null,
-            'availableMonths' => $this->availableMonths($brand->id, $monthStart),
+            'availableMonths' => $this->availableMonths($brand->id, $defaultMonthStart),
             // The resolved, ORDERED section manifest (brand override -> agency
             // default -> code default) — each entry says whether M2/M3 has
             // actually built that section yet ('ready'), so the SPA can render

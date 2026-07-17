@@ -71,3 +71,22 @@ export function useSaveAgencyDefaultLayout(reportType: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['report-layouts-default', reportType] }),
   });
 }
+
+/**
+ * Save the current layout as the agency default AND apply it to every brand
+ * (drops all per-brand overrides). master_admin only. Returns { brandsReset }.
+ */
+export function useApplyLayoutToAllBrands(reportType: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (sections: ReportLayoutSection[]): Promise<{ ok: boolean; brandsReset: number }> => {
+      const { data } = await api.post(`/report-layouts/${reportType}/apply-to-all`, { sections });
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-layouts-default', reportType] });
+      // Every brand's resolved layout may have changed → refetch any that are open.
+      qc.invalidateQueries({ queryKey: ['brand'] });
+    },
+  });
+}

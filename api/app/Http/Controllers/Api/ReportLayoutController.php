@@ -77,6 +77,22 @@ class ReportLayoutController extends Controller
         return response()->json(['ok' => true, 'sections' => $layout->sections], 201);
     }
 
+    /**
+     * Save the posted layout as the agency default AND apply it to every brand —
+     * i.e. drop all per-brand overrides so every brand uses this one format
+     * (Kanwar, 2026-07-17 — "a button to apply agency default settings to every
+     * brand"). master_admin only (route-gated). Returns how many brand overrides
+     * were cleared.
+     */
+    public function applyToAllBrands(Request $request, string $reportType): JsonResponse
+    {
+        $sections = $this->validateSections($request);
+        $this->layouts->save(null, $reportType, $sections, Auth::id());
+        $brandsReset = $this->layouts->clearAllBrandLayouts($reportType);
+
+        return response()->json(['ok' => true, 'brandsReset' => $brandsReset], 200);
+    }
+
     /** @return array<int, array{key: string, enabled: bool, position: int, view: string, settings?: ?array}> */
     private function validateSections(Request $request): array
     {

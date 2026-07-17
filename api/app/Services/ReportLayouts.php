@@ -109,6 +109,20 @@ class ReportLayouts
     }
 
     /**
+     * "Apply the agency default to every brand" (Kanwar, 2026-07-17): drop every
+     * brand's own override for this report type so they ALL resolve to the agency
+     * default (brand_id null) — the single source of truth. Returns how many brand
+     * overrides were removed. master_admin only (route-gated).
+     */
+    public function clearAllBrandLayouts(string $reportType): int
+    {
+        return ReportLayout::query()
+            ->whereNotNull('brand_id')
+            ->where('report_type', $reportType)
+            ->delete();
+    }
+
+    /**
      * The agency-wide DEFAULT layout for a report type, falling back to the code
      * default if the agency hasn't customized it yet — Settings -> "Report format"
      * editing surface (master_admin only, route-gated).

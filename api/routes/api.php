@@ -107,6 +107,9 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         Route::put('workspace-country-tiers',  [CountryTierController::class, 'storeAgencyDefault']);
         Route::get('report-layouts/{reportType}/default', [ReportLayoutController::class, 'showAgencyDefault']);
         Route::put('report-layouts/{reportType}/default', [ReportLayoutController::class, 'storeAgencyDefault']);
+        // Save as the agency default AND drop every brand's override so all brands
+        // use this one format (Kanwar, 2026-07-17).
+        Route::post('report-layouts/{reportType}/apply-to-all', [ReportLayoutController::class, 'applyToAllBrands']);
 
         // M4 (monthly-report-v2-mom.md §M4) — S19 Novedades' agency-wide DEFAULT
         // note per month, written once here, read by every brand's S19 that

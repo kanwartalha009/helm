@@ -211,6 +211,45 @@ class MomM1Test extends TestCase
         $this->assertSame('chart', $svc->resolve($brand, 'mom')[0]['view']);
     }
 
+    public function test_apply_to_all_brands_sets_the_agency_default_and_clears_every_brand_override(): void
+    {
+        // Kanwar, 2026-07-17 — "a button to apply agency default settings to every
+        // brand": POST apply-to-all saves the posted layout as the agency default
+        // AND drops every brand's own override, so all brands resolve to this one.
+        $svc = app(ReportLayouts::class);
+        $brandA = $this->makeBrand();
+        $brandB = $this->makeBrand();
+
+        // Both brands have their OWN (different) overrides.
+        $svc->save($brandA, 'mom', [['key' => 'S2', 'enabled' => true, 'position' => 0, 'view' => 'chart']], null);
+        $svc->save($brandB, 'mom', [['key' => 'S5', 'enabled' => true, 'position' => 0, 'view' => 'table']], null);
+
+        Sanctum::actingAs(User::factory()->create(['role' => 'master_admin']));
+        $res = $this->postJson('/api/report-layouts/mom/apply-to-all', [
+            'sections' => [
+                ['key' => 'S1', 'enabled' => true, 'position' => 0, 'view' => 'table'],
+                ['key' => 'S2', 'enabled' => true, 'position' => 1, 'view' => 'chart'],
+            ],
+        ])->assertOk();
+
+        $this->assertSame(2, $res->json('brandsReset')); // both overrides removed
+
+        // Neither brand has an override now, and both resolve to the applied layout.
+        $this->assertFalse($svc->hasOverride($brandA->fresh(), 'mom'));
+        $this->assertFalse($svc->hasOverride($brandB->fresh(), 'mom'));
+        $this->assertSame('S1', $svc->resolve($brandA->fresh(), 'mom')[0]['key']);
+        $this->assertSame('S1', $svc->resolve($brandB->fresh(), 'mom')[0]['key']);
+    }
+
+    public function test_apply_to_all_brands_is_master_admin_only(): void
+    {
+        $this->makeBrand();
+        Sanctum::actingAs(User::factory()->create(['role' => 'manager']));
+        $this->postJson('/api/report-layouts/mom/apply-to-all', [
+            'sections' => [['key' => 'S1', 'enabled' => true, 'position' => 0, 'view' => 'table']],
+        ])->assertForbidden();
+    }
+
     // ---------------------------------------------------------------
     // RBAC
     // ---------------------------------------------------------------
