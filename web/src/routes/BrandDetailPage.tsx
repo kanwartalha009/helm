@@ -12,7 +12,6 @@ import { CountryTierDrawer } from '@/components/brands/CountryTierDrawer';
 import { CountryTiersSummary } from '@/components/brands/CountryTiersSummary';
 import { MoodboardCard } from '@/components/brands/MoodboardCard';
 import { CreativeStudioCard } from '@/components/brands/CreativeStudioCard';
-import { ReportFormatSection } from '@/components/brands/ReportFormatSection';
 import { PacingCards } from '@/components/brands/PacingCards';
 import { TruthPanel } from '@/components/brands/TruthPanel';
 import {
@@ -1821,10 +1820,8 @@ function SettingsTab({ brand }: { brand: Brand }) {
       currency={brand.baseCurrency}
     />
 
-    {/* M1 + REV2 R2 — report format customizer for this brand's mom report. */}
-    <div className="form-grid" style={{ marginTop: 24 }}>
-      <ReportFormatSection slug={brand.slug} canEdit={canEditGoals} />
-    </div>
+    {/* Report format customizer moved to a slide-over opened by the "Format"
+        button ON the MoM report itself (Kanwar, 2026-07-17) — no longer here. */}
 
     {/* GO-4.4 (master plan §7.4) — brand moodboard / style. */}
     <div className="form-grid" style={{ marginTop: 24 }}>

@@ -6,6 +6,7 @@ import { toQuery, useCreateMomShare, type MomFiltersInput, type MomReportShell }
 import { toast } from '@/stores/toastStore';
 import { CountryTierDrawer } from '@/components/brands/CountryTierDrawer';
 import { GoalsDrawer } from '@/components/brands/GoalsDrawer';
+import { ReportFormatDrawer } from '@/components/brands/ReportFormatDrawer';
 import { MomSectionCard } from './MomSectionCard';
 import { PresentationMode } from './PresentationMode';
 
@@ -41,6 +42,7 @@ export function MomReportDocument({ slug, shell, filters }: { slug: string; shel
   // report as well" — the SAME CountryTierDrawer the brand Settings tab now
   // opens (BrandDetailPage), just triggered from here too, no second copy.
   const [tierDrawerOpen, setTierDrawerOpen] = useState(false);
+  const [formatOpen, setFormatOpen] = useState(false);
   const { data: reportUser } = useCurrentUser();
   const canEditTiers = reportUser?.role === 'master_admin' || reportUser?.role === 'manager';
 
@@ -71,6 +73,9 @@ export function MomReportDocument({ slug, shell, filters }: { slug: string; shel
           <Button size="sm" variant="ghost" type="button" onClick={() => setTierDrawerOpen(true)}>
             Tiers
           </Button>
+          <Button size="sm" variant="ghost" type="button" onClick={() => setFormatOpen(true)}>
+            Format
+          </Button>
           <Button size="sm" variant="ghost" type="button" disabled={createShare.isPending} onClick={onShare}>
             {createShare.isPending ? 'Creating link…' : 'Share'}
           </Button>
@@ -97,6 +102,13 @@ export function MomReportDocument({ slug, shell, filters }: { slug: string; shel
         open={tierDrawerOpen}
         onClose={() => setTierDrawerOpen(false)}
         currency={shell.currency}
+      />
+
+      <ReportFormatDrawer
+        slug={slug}
+        canEdit={canEditTiers}
+        open={formatOpen}
+        onClose={() => setFormatOpen(false)}
       />
 
       <PresentationMode

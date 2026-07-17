@@ -264,7 +264,7 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
       { key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)), gradeOf: (r) => heatVsBenchmark(r.roas, blended) },
       { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => delta(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },
       { key: 'deltaMoMPct', label: 'Δ MoM', align: 'right', render: (r) => delta(r.deltaMoMPct), gradeOf: (r) => heatFromDeltaPct(r.deltaMoMPct) },
-      { key: 'status', label: 'Status', render: (r) => r.status ?? '—' },
+      // Status (TOP/CHECK/ALARM) column removed on request (Kanwar, 2026-07-17).
     );
 
     return (
@@ -310,7 +310,7 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
       { key: 'spend', label: 'Meta', align: 'right', render: (r) => money(r.spend) },
       { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => delta(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },
       { key: 'deltaMoMPct', label: 'Δ MoM', align: 'right', render: (r) => delta(r.deltaMoMPct), gradeOf: (r) => heatFromDeltaPct(r.deltaMoMPct) },
-      { key: 'status', label: 'Status', render: (r) => r.status ?? '—' },
+      // Status (TOP/CHECK/ALARM) column removed on request (Kanwar, 2026-07-17).
     );
 
     return (
@@ -419,7 +419,10 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
         rows={rows}
         rowKey={(r) => r.iso2}
         title="Awareness country concentration"
-        footer={p.alert ? `${p.topCountry} carries ${p.topSharePct?.value}% of awareness spend — above the ${threshold}% concentration threshold.` : undefined}
+        footer={[
+          p.window ? `${p.window.trailing ? 'Trailing window' : 'Selected range'} · ${p.window.start} – ${p.window.end} (awareness campaigns run sparsely, so this isn't the report month).` : undefined,
+          p.alert ? `${p.topCountry} carries ${p.topSharePct?.value}% of awareness spend — above the ${threshold}% concentration threshold.` : undefined,
+        ].filter(Boolean).join(' ') || undefined}
       />
     );
   },

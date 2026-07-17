@@ -42,9 +42,31 @@ final class SAwarenessCountrySection implements MomSection
     public function build(Brand $brand, ReportFilters $filters): array
     {
         $tz = $brand->timezone ?: 'UTC';
-        $window = $filters->activeWindow($tz);
+
+        // Awareness campaigns run SPARSELY, and the useful data is usually in the
+        // current, still-open month — which the report's month picker can't select
+        // (it only offers COMPLETE months). So this "where is awareness spend
+        // concentrated right now" section reads a TRAILING window ending yesterday
+        // (default 90 days), deliberately including month-to-date, rather than the
+        // selected complete month (Kanwar, 2026-07-17 — "it shows empty" because
+        // all the awareness data sat in the in-progress month). A custom day range
+        // still wins when one is active.
+        if ($filters->isCustomRange()) {
+            $window        = $filters->activeWindow($tz);
+            $compareWindow = $filters->activeComparisonWindow($tz);
+        } else {
+            $days  = max(7, (int) config('momreport.benchmarks.awareness_trailing_days', 90));
+            $end   = CarbonImmutable::now($tz)->subDay()->startOfDay();
+            $start = $end->subDays($days - 1);
+            $window = [$start->toDateString(), $end->toDateString()];
+            // The equal-length window immediately before it, for the Δ.
+            $cmpEnd   = $start->subDay();
+            $cmpStart = $cmpEnd->subDays($days - 1);
+            $compareWindow = [$cmpStart->toDateString(), $cmpEnd->toDateString()];
+        }
+
         if ($window === null) {
-            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
+            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
         }
         [$start, $end] = $window;
 
@@ -53,11 +75,10 @@ final class SAwarenessCountrySection implements MomSection
             return [
                 'key'    => $this->key(),
                 'status' => 'needs_source',
-                'note'   => 'No Meta awareness-campaign country data synced for this brand/month yet (meta:backfill-awareness-country — needs ads:backfill-campaigns run first so a campaign objective exists to filter on).',
+                'note'   => 'No Meta awareness-campaign country data synced for this brand yet (meta:backfill-awareness-country — needs ads:backfill-campaigns run first so a campaign objective exists to filter on).',
             ];
         }
 
-        $compareWindow = $filters->activeComparisonWindow($tz);
         $cmp = $compareWindow !== null ? $this->countrySpend($brand->id, $compareWindow[0], $compareWindow[1]) : null;
 
         $threshold = (float) config('momreport.benchmarks.awareness_country_concentration_pct', 50.0);
@@ -69,6 +90,14 @@ final class SAwarenessCountrySection implements MomSection
             'status' => 'ok',
             'month'  => CarbonImmutable::parse($start)->format('Y-m'),
             'compareMonth' => $compareWindow !== null ? CarbonImmutable::parse($compareWindow[0])->format('Y-m') : null,
+            // The window this section actually read (a trailing window ending
+            // yesterday in normal mode, or the custom range) — the SPA captions it
+            // so the client knows these figures aren't the report month.
+            'window' => [
+                'start'    => $start,
+                'end'      => $end,
+                'trailing' => ! $filters->isCustomRange(),
+            ],
             'totalSpend' => $this->tile($cur['total'], $cmp['total'] ?? null),
             'topCountry' => $cur['rows'] !== [] ? $cur['rows'][0]['label'] : null,
             'topSharePct' => $this->tile($topSharePct, $cmpTopSharePct),

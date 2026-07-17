@@ -108,6 +108,35 @@ class MomS16Test extends TestCase
         $this->assertFalse($res->json('alert'));
     }
 
+    public function test_s16_reads_a_trailing_window_so_current_month_awareness_still_shows(): void
+    {
+        // Kanwar, 2026-07-17 — awareness runs sparsely and the useful data is
+        // usually in the CURRENT, still-open month, which the month picker can't
+        // select. S16 now reads a trailing window ending yesterday, so in-progress
+        // awareness spend surfaces even when a completed month is selected.
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-17 12:00:00', self::TZ));
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+
+        // Awareness spend a few days ago — in the CURRENT month (July 2026), which
+        // is NOT a selectable complete month.
+        $this->seedAwarenessCountry($brand->id, '2026-07-10', 'US', 800);
+        $this->seedAwarenessCountry($brand->id, '2026-07-11', 'GB', 200);
+
+        Sanctum::actingAs($user);
+        // Selecting the last COMPLETE month (June, which has no awareness data): the
+        // section still shows the trailing-window July data instead of empty.
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S16?month=2026-06")
+            ->assertOk()->assertJsonPath('status', 'ok');
+
+        $this->assertEquals(1000.0, $res->json('totalSpend.value'));
+        $this->assertEquals('US', $res->json('topCountry'));
+        $this->assertEquals(80.0, $res->json('topSharePct.value'));
+        $this->assertTrue($res->json('window.trailing'));
+
+        CarbonImmutable::setTestNow();
+    }
+
     public function test_mom_shell_reports_s16_ready(): void
     {
         $user  = User::factory()->create(['role' => 'master_admin']);

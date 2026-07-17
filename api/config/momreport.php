@@ -33,10 +33,12 @@ return [
         // S3 "New vs returning evolution" retired (Kanwar, 2026-07-15) — the
         // new/returning percentage split lives in S-EX (Executive overview)
         // instead of a standalone section.
-        ['key' => 'S4',      'label' => 'Market revenue by tier',         'view' => 'both',  'enabled' => true],
+        // Default views aligned to Kanwar's finalised format (2026-07-17): the
+        // month-by-month matrices default to TABLE (their numbers are the point).
+        ['key' => 'S4',      'label' => 'Market revenue by tier',         'view' => 'table', 'enabled' => true],
         ['key' => 'S5',      'label' => 'Country revenue MoM',            'view' => 'table', 'enabled' => true],
-        ['key' => 'S6',      'label' => 'ROAS by country',                'view' => 'both',  'enabled' => true],
-        ['key' => 'S7',      'label' => 'Best categories MoM/YoY',        'view' => 'both',  'enabled' => true],
+        ['key' => 'S6',      'label' => 'ROAS by country',                'view' => 'table', 'enabled' => true],
+        ['key' => 'S7',      'label' => 'Best categories MoM/YoY',        'view' => 'table', 'enabled' => true],
         ['key' => 'S8',      'label' => 'Best sellers MoM',                'view' => 'table', 'enabled' => true],
         ['key' => 'S9',      'label' => 'Sessions & CR YoY',              'view' => 'chart', 'enabled' => true],
         ['key' => 'S10',     'label' => 'Funnel by country',              'view' => 'table', 'enabled' => true],
@@ -47,7 +49,7 @@ return [
         ['key' => 'S13',     'label' => 'Audience: new vs existing spend','view' => 'table', 'enabled' => true],
         ['key' => 'S14',     'label' => 'Placement mix',                  'view' => 'table', 'enabled' => true],
         ['key' => 'S15',     'label' => 'Gender mix',                     'view' => 'table', 'enabled' => true],
-        ['key' => 'S16',     'label' => 'Awareness country concentration','view' => 'both',  'enabled' => true],
+        ['key' => 'S16',     'label' => 'Awareness country concentration','view' => 'table', 'enabled' => true],
         ['key' => 'S17',     'label' => 'Landing spend x best sellers',   'view' => 'table', 'enabled' => true],
         ['key' => 'S18',     'label' => 'Klaviyo attribution + list growth', 'view' => 'both', 'enabled' => true],
         ['key' => 'S0',      'label' => 'Next steps',                     'view' => 'table', 'enabled' => true],
