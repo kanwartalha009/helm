@@ -199,15 +199,18 @@ final class MonthlyReport implements ReportType
             // Each section carries a readiness status so the SPA renders the whole
             // report structure, lighting up sections as their data lands.
             'sections' => [
+                // Financial matrix (Kanwar, 2026-07-17) — the SAME table the MoM
+                // report's S1 renders, reused so v1 and v2 never disagree. Trailing
+                // 6-month window; collapses in custom-range mode.
+                'financialMatrix' => $this->financialMatrixSection($filters, $brand, $reportMonth),
                 'salesEvolution' => $salesEvolution,
                 // Matrix sections collapse to range-vs-same-range-last-year when a
                 // custom range is active; otherwise the month-by-month grids.
                 'countryRevenue' => $isRange ? $this->commerceCollapse('country', $brand->id, $rangeWin, $rangeCmp, $filters->usd, 'No commerce-by-country data in the selected range.') : $this->commerceSection('country', $brand->id, $months, $filters->usd, $limit),
                 'categories'     => $isRange ? $this->commerceCollapse('category', $brand->id, $rangeWin, $rangeCmp, $filters->usd, 'No commerce-by-category data in the selected range.') : $this->commerceSection('category', $brand->id, $months, $filters->usd, $limit),
                 'bestSellers'    => $isRange ? $this->commerceCollapse('product', $brand->id, $rangeWin, $rangeCmp, $filters->usd, 'No commerce-by-product data in the selected range.') : $this->commerceSection('product', $brand->id, $months, $filters->usd, $limit),
-                'market'         => $isRange ? $this->regionCollapse($brand->id, $rangeWin, $rangeCmp, $filters->usd) : $this->marketSection($brand->id, $months, $filters->usd),
                 // Kanwar, 2026-07-17 — market revenue grouped by the brand's own TIER
-                // system (the same country tiers the MoM report uses), table only.
+                // system (the region-based "market" section was removed on request).
                 'marketTier'     => $isRange ? $this->tierCollapse($brand, $rangeWin, $rangeCmp, $filters->usd) : $this->tierRevenueSection($brand, $months, $filters->usd),
                 'gender'         => $this->genderSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
                 'channelMix'     => $this->channelMixSection($brand->id, $monthStart->toDateString(), $monthEnd->toDateString(), $filters->usd),
@@ -365,6 +368,35 @@ final class MonthlyReport implements ReportType
         }
 
         return $data === null ? ['status' => 'no_data'] : ['status' => 'ready', 'data' => $data];
+    }
+
+    /**
+     * The full financial matrix (Kanwar, 2026-07-17) — reuses the MoM report's
+     * S1 section so v1 and v2 render the IDENTICAL table (orders, AOV, %returns,
+     * revenue, spend, per-platform spend share, ROAS, new/returning customers,
+     * %ret, total, CAC, ROAS-nc, Captación, Ret Δ, Δ Revenue, Δ Budget). Trailing
+     * 6-month window (months=6); a custom range collapses to range-vs-YoY inside
+     * the S1 section itself. Fault-isolated — a failure degrades this one section.
+     */
+    private function financialMatrixSection(ReportFilters $filters, Brand $brand, string $reportMonth): array
+    {
+        $fmFilters = new ReportFilters(
+            period:  $filters->period,
+            from:    $filters->from,
+            to:      $filters->to,
+            compare: $filters->compare,
+            usd:     $filters->usd,
+            month:   $reportMonth,
+            months:  6,
+        );
+
+        try {
+            return app(\App\Reports\Mom\Sections\SFinancialMatrixSection::class)->build($brand, $fmFilters);
+        } catch (Throwable $e) {
+            Log::warning('monthly_report.section_failed', ['dimension' => 'financialMatrix', 'error' => $e->getMessage()]);
+
+            return ['status' => 'no_data'];
+        }
     }
 
     /**

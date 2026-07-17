@@ -457,6 +457,10 @@ export interface MonthlyReportData {
     acquisitionYoY: MonthlyKpi | null;
   };
   sections: {
+    // Financial matrix (Kanwar, 2026-07-17) — the MoM S1 payload, rendered by the
+    // shared S1 table renderer. Loosely typed (that renderer takes the raw shape).
+    // Optional so cached payloads render.
+    financialMatrix?: { status: string; rangeCollapse?: MonthlyReportSection['rangeCollapse']; note?: string; [k: string]: unknown };
     // Sales evolution (Kanwar, 2026-07-17). Optional so cached payloads render.
     salesEvolution?: MonthlySalesEvolution;
     countryRevenue: MonthlyReportSection;
@@ -464,7 +468,9 @@ export interface MonthlyReportData {
     bestSellers: MonthlyReportSection;
     roasByCountry: MonthlyReportSection;
     gender: MonthlyPlatformSection<MonthlyGenderRow>;
-    market: MonthlyReportSection;
+    // Region-based Market revenue was removed on request (Kanwar, 2026-07-17) in
+    // favour of Market revenue by tier. Optional so cached payloads still render.
+    market?: MonthlyReportSection;
     // Market revenue grouped by the brand's tier system (Kanwar, 2026-07-17).
     // Optional so pre-migration cached payloads still render.
     marketTier?: MonthlyReportSection;

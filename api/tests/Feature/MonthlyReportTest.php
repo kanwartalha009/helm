@@ -244,6 +244,26 @@ class MonthlyReportTest extends TestCase
         $this->assertEquals(4.0, $res->json('sections.funnelCountry.summary.cvr'));
     }
 
+    public function test_financial_matrix_section_reuses_the_mom_s1_table(): void
+    {
+        // Kanwar, 2026-07-17 — v1 gains the full financial matrix by reusing the
+        // MoM S1 section, so both reports show the identical table (last 6 months).
+        $user  = User::factory()->create(['role' => 'master_admin']);
+        $brand = $this->makeBrand();
+        $monthStart = $this->monthStart();
+
+        $this->seedDaily($brand->id, 'shopify', $monthStart->addDays(3)->toDateString(), ['total_sales' => 4000, 'refunds_amount' => 100, 'orders' => 40]);
+        $this->seedDaily($brand->id, 'meta', $monthStart->addDays(3)->toDateString(), ['spend' => 800, 'conversions' => 30, 'conversion_value' => 3600]);
+
+        Sanctum::actingAs($user);
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/monthly")->assertOk()
+            ->assertJsonPath('sections.financialMatrix.status', 'ok');
+
+        // The trailing-6-month current-year table is present with the report month.
+        $this->assertSame(6, $res->json('sections.financialMatrix.monthsWindow'));
+        $this->assertNotEmpty($res->json('sections.financialMatrix.currentYearRows'));
+    }
+
     public function test_sales_evolution_returns_a_daily_revenue_series(): void
     {
         // Kanwar, 2026-07-17 (item 3) — a daily revenue line for the report month.

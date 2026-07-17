@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { formatMoney, formatRoas } from '@/lib/formatters';
-import { Chip } from '@/components/ui';
+import { Button, Chip } from '@/components/ui';
+import { CountryTierDrawer } from '@/components/brands/CountryTierDrawer';
 import { REPORT_CSS } from './ReportDocument';
 import { StackedBar100, TrendLineChart } from './mom/charts';
-import { RangeCollapseTable } from './mom/sectionTables';
-import type { MonthlyChannelRow, MonthlyCustomerRow, MonthlyEmailSection, MonthlyFunnelRow, MonthlyFunnelSummary, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyPlatformSection, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySalesEvolution, MonthlySeriesData } from '@/types/reports';
+import { RangeCollapseTable, SECTION_TABLE_RENDERERS } from './mom/sectionTables';
+import type { MonthlyChannelRow, MonthlyCustomerRow, MonthlyEmailSection, MonthlyFunnelRow, MonthlyFunnelSummary, MonthlyGenderRow, MonthlyKpi, MonthlyLandingRow, MonthlyPlacementRow, MonthlyPlatformSection, MonthlyReportData, MonthlyReportSection, MonthlyRoasData, MonthlySalesEvolution, MonthlySectionStatus, MonthlySeriesData } from '@/types/reports';
 
 const DEFAULT_COMMENTARY =
   'Summarise the month for the store owner here — what moved, how it landed against targets, and the plan for next month. Editable before you send.';
@@ -123,12 +125,13 @@ export function MonthlyReportDocument({
         <span>Outcome columns are shaded by performance; cost metrics (CAC, CPM) are shaded so lower is greener. Counts, spend and share stay unshaded.</span>
       </div>
 
+      {sections.financialMatrix && <FinancialMatrixBlock section={sections.financialMatrix} currency={currency} editable={editable} />}
+
       {sections.salesEvolution && <SalesEvolutionBlock section={sections.salesEvolution} currency={currency} editable={editable} />}
 
       <div className="mrt-group"><span>Commerce</span></div>
-      <SectionBlock num="01" title="Market revenue" sub="Revenue grouped into markets, month over month." section={sections.market} currency={currency} editable={editable} />
       {sections.marketTier && (
-        <SectionBlock num="01b" title="Market revenue by tier" sub="Revenue grouped by the brand's own country tiers, month over month." section={sections.marketTier} currency={currency} editable={editable} />
+        <MarketTierBlock section={sections.marketTier} currency={currency} editable={editable} slug={brand.slug} />
       )}
       <SectionBlock num="02" title="Country revenue" sub="Revenue by country, rolled to calendar months." section={sections.countryRevenue} currency={currency} editable={editable} />
       <SectionBlock num="03" title="Best categories" sub="Revenue by product category, month over month." section={sections.categories} currency={currency} editable={editable} stackLabel="Revenue mix by product type · 100% stacked" foot="Product-tagged revenue only — orders without a product category are excluded, so this total runs below the order-level country and market totals above." />
@@ -636,6 +639,64 @@ function PlacementTable({ rows, currency }: { rows: MonthlyPlacementRow[]; curre
         </tbody>
       </table>
     </div>
+  );
+}
+
+// Financial matrix (Kanwar, 2026-07-17) — reuses the MoM report's S1 table
+// renderer so v1 and v2 show the IDENTICAL matrix. In custom-range mode the S1
+// payload carries `rangeCollapse` instead, drawn by the shared collapse table.
+function FinancialMatrixBlock({ section, currency }: { section: NonNullable<MonthlyReportData['sections']['financialMatrix']>; currency: string; editable: boolean }) {
+  const ok = section.status === 'ok';
+  return (
+    <section className="rpt-sec">
+      <div className="rpt-sec-head"><span className="rpt-sec-num">00</span><h2>Financial matrix</h2></div>
+      <div className="rpt-sec-sub">Orders, revenue, spend, ROAS, new vs returning customers, CAC and goal deltas — last 6 months.</div>
+      {ok && section.rangeCollapse ? (
+        <RangeCollapseTable data={section.rangeCollapse} currency={currency} />
+      ) : ok ? (
+        SECTION_TABLE_RENDERERS.S1?.(section, currency)
+      ) : (
+        <Ribbon status={(section.status === 'needs_source' ? 'needs_source' : 'no_data') as MonthlySectionStatus} note={section.note} />
+      )}
+    </section>
+  );
+}
+
+// Market revenue by tier (Kanwar, 2026-07-17) — replaces the region-based Market
+// revenue. Carries a "Manage tiers" button (editable view only) that opens the
+// SAME slide-over the MoM report / brand settings use; saving refetches the
+// report so the new grouping shows immediately.
+function MarketTierBlock({ section, currency, editable, slug }: { section: MonthlyReportSection; currency: string; editable: boolean; slug: string }) {
+  const [open, setOpen] = useState(false);
+  const qc = useQueryClient();
+  if (section.status === 'coming' && !editable) return null;
+  return (
+    <section className="rpt-sec">
+      <div className="rpt-sec-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span className="rpt-sec-num">01</span><h2>Market revenue by tier</h2></div>
+        {editable && <Button size="sm" variant="secondary" type="button" onClick={() => setOpen(true)}>Manage tiers</Button>}
+      </div>
+      <div className="rpt-sec-sub">Revenue grouped by the brand's own country tiers, month over month.</div>
+      {section.status === 'ready' && section.rangeCollapse ? (
+        <RangeCollapseTable data={section.rangeCollapse} currency={currency} />
+      ) : section.status === 'ready' && section.data ? (
+        <MoMTable data={section.data} currency={currency} />
+      ) : (
+        <Ribbon status={section.status} note={section.note} />
+      )}
+      {editable && (
+        <CountryTierDrawer
+          slug={slug}
+          canEdit
+          open={open}
+          onClose={() => {
+            setOpen(false);
+            // Tiers changed → refetch the report so the tier grouping updates.
+            qc.invalidateQueries({ queryKey: ['report', slug] });
+          }}
+        />
+      )}
+    </section>
   );
 }
 
