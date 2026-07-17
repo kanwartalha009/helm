@@ -37,7 +37,7 @@ final class SPlacementMixSection implements MomSection
     public function build(Brand $brand, ReportFilters $filters): array
     {
         $tz = $brand->timezone ?: 'UTC';
-        $window = $filters->monthWindow($tz);
+        $window = $filters->activeWindow($tz);
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }

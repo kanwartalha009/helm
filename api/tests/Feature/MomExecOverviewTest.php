@@ -211,6 +211,57 @@ class MomExecOverviewTest extends TestCase
         $this->assertEquals(250.0, $res2->json('tiles.emailRevenue.value'));
     }
 
+    public function test_sex_honors_a_custom_day_range_and_compares_the_same_range_last_year(): void
+    {
+        // Kanwar, 2026-07-17 — custom date ranges. A period='custom' from/to
+        // request narrows every range-compatible section (here S-EX) to that day
+        // window and, by default, compares the SAME dates a year earlier.
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
+        $this->actingMasterAdmin();
+        $brand = $this->makeBrand();
+
+        $seed = function (string $date, float $sales) use ($brand): void {
+            DB::table('daily_metrics')->insert([
+                'brand_id' => $brand->id, 'platform' => 'shopify', 'date' => $date,
+                'currency' => 'EUR', 'fx_rate_to_usd' => 1.0, 'is_complete' => true, 'pulled_at' => now(),
+                'total_sales' => $sales, 'refunds_amount' => 0, 'orders' => 1,
+            ]);
+        };
+        $seed('2026-06-05', 700); // inside Jun 1–14
+        $seed('2026-06-20', 300); // outside the range, same month
+        $seed('2025-06-05', 500); // same range, last year (the YoY comparison)
+
+        // Custom range Jun 1–14 2026 → revenue is ONLY the in-range 700, and the
+        // comparison is the same range in 2025 (500), not the whole month.
+        $range = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S-EX?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
+            ->assertOk()->assertJsonPath('status', 'ok');
+        $this->assertEquals(700.0, $range->json('tiles.revenue.value'));
+        $this->assertEquals(500.0, $range->json('tiles.revenue.compare'));
+
+        // Sanity: the whole month (month mode) sums both June days → 1000, proving
+        // the range genuinely narrows rather than the seed being incomplete.
+        $whole = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S-EX?month=2026-06")
+            ->assertOk()->assertJsonPath('status', 'ok');
+        $this->assertEquals(1000.0, $whole->json('tiles.revenue.value'));
+
+        CarbonImmutable::setTestNow();
+    }
+
+    public function test_month_by_month_matrix_gates_to_month_mode_under_a_custom_range(): void
+    {
+        // The matrix sections (here S1 financial matrix) stay month-bucketed, so a
+        // custom range with no month resolves to no complete month — an honest
+        // "pick a month" gate, never wrong numbers. (Collapse-to-range is a later slice.)
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
+        $this->actingMasterAdmin();
+        $brand = $this->makeBrand();
+
+        $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S1?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
+            ->assertOk()->assertJsonPath('status', 'no_data');
+
+        CarbonImmutable::setTestNow();
+    }
+
     protected function tearDown(): void
     {
         Mockery::close();

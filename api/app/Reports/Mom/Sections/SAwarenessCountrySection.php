@@ -42,7 +42,7 @@ final class SAwarenessCountrySection implements MomSection
     public function build(Brand $brand, ReportFilters $filters): array
     {
         $tz = $brand->timezone ?: 'UTC';
-        $window = $filters->monthWindow($tz);
+        $window = $filters->activeWindow($tz);
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }
@@ -57,7 +57,7 @@ final class SAwarenessCountrySection implements MomSection
             ];
         }
 
-        $compareWindow = $filters->compareMonthWindow($tz);
+        $compareWindow = $filters->activeComparisonWindow($tz);
         $cmp = $compareWindow !== null ? $this->countrySpend($brand->id, $compareWindow[0], $compareWindow[1]) : null;
 
         $threshold = (float) config('momreport.benchmarks.awareness_country_concentration_pct', 50.0);

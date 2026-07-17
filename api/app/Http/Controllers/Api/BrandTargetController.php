@@ -33,7 +33,42 @@ class BrandTargetController extends Controller
     {
         $this->authorize('view', $brand);
 
-        $data  = $request->validate(['month' => ['nullable', 'date_format:Y-m']]);
+        $data  = $request->validate([
+            'month' => ['nullable', 'date_format:Y-m'],
+            // Editor mode (Kanwar, 2026-07-17 — per-month goals): read the TRUE
+            // stored row for exactly the requested scope with NO standing-default
+            // fallback, so the goals drawer can tell an inherited default apart
+            // from a real per-month override. `exact` with a `month` reads that
+            // month's own row; `exact` with no `month` reads the standing default.
+            'exact' => ['nullable', 'boolean'],
+        ]);
+
+        if ((bool) ($data['exact'] ?? false)) {
+            $scopeMonth = $data['month'] ?? null; // null = the standing default itself
+            $target = BrandTarget::query()->where('brand_id', $brand->id)
+                ->when(
+                    $scopeMonth === null,
+                    static fn ($q) => $q->whereNull('month'),
+                    static fn ($q) => $q->where('month', $scopeMonth),
+                )
+                ->first();
+
+            return response()->json([
+                'month'  => $scopeMonth ?? '__default',
+                'exact'  => true,
+                'target' => $target === null ? null : [
+                    'revenueTarget' => $target->revenue_target,
+                    'spendCap'      => $target->spend_cap,
+                    'roasTarget'    => $target->roas_target,
+                    'merTarget'     => $target->mer_target,
+                    'isStandingDefault' => $target->month === null,
+                ],
+                // Pacing only makes sense against a concrete month, not the
+                // abstract standing default — null there rather than a guess.
+                'pacing' => $scopeMonth !== null ? $pacing->forBrand($brand, $scopeMonth) : null,
+            ]);
+        }
+
         $month = $data['month'] ?? CarbonImmutable::now($brand->timezone ?: 'UTC')->format('Y-m');
 
         // The goal in force: an override for this month, else the STANDING DEFAULT

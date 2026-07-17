@@ -1,48 +1,91 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button, Drawer } from '@/components/ui';
-import { useBrandTargets, useSaveBrandTargets } from '@/hooks/useTargets';
+import { useBrandTargets, useDeleteBrandTarget, useSaveBrandTargets } from '@/hooks/useTargets';
 import { toast } from '@/stores/toastStore';
 
 /**
  * M5 addendum (Kanwar, 2026-07-15 — "move goals from settings to sidebar as
  * well... in report section of goals connect so it will be easier to
  * manage"). Same slide-over pattern just built for country tiers
- * (CountryTierDrawer) — SUPERSEDES the old always-rendered GoalsSection.tsx
- * form on brand Settings (Bosco §A.2's original placement), which is now
- * retired. Two entry points share this ONE component: a "Manage goals"
- * button on brand Settings (GoalsSummary), and an "Edit goals" button
- * directly on the mom report's S-GOALS card (SGoals.tsx) — the report is now
- * the tighter loop: see the number, open the drawer, fix the target, close.
+ * (CountryTierDrawer). Two entry points share this ONE component: a "Manage
+ * goals" button on brand Settings (GoalsSummary), and an "Edit goals" button
+ * directly on the mom report's S-GOALS card (SGoals.tsx).
  *
- * Deliberately much simpler than CountryTierDrawer — goals are 3 scalar
- * fields (STANDING DEFAULT only, month omitted, same as the original
- * GoalsSection), not a list of rows needing add/remove/move semantics.
+ * Per-month goals (Kanwar, 2026-07-17 — "goals are monthly... allow to add
+ * future and previous months' goals, in the May report we're showing the July
+ * targets"): the drawer now has a SCOPE picker. Goals resolve as month-override
+ * -> standing default (Pacing/BrandTargetController), so a value set as the
+ * standing default silently applies to EVERY month — which is exactly how a
+ * "July" number ended up showing in the May report. The picker lets you set a
+ * goal for a specific past/current/future month, or the standing default, and
+ * reads each scope's TRUE stored value (exact mode, no fallback) so an
+ * inherited default is never mistaken for a real per-month goal. A Clear action
+ * removes a month's override (or the standing default itself).
  */
+function buildScopeOptions(defaultMonth?: string): { value: string; label: string }[] {
+  const now = new Date();
+  const opts: { value: string; label: string }[] = [
+    { value: '__default', label: 'Standing default (all months)' },
+  ];
+  const seen = new Set<string>();
+  const fmt = (d: Date) => d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  // Six months back through six months forward — covers a report you're
+  // catching up on and goals you're setting ahead.
+  for (let i = -6; i <= 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    seen.add(ym);
+    opts.push({ value: ym, label: fmt(d) });
+  }
+  // Always let the report's own month be selectable, even if it's outside the window.
+  if (defaultMonth && !seen.has(defaultMonth)) {
+    const [y, m] = defaultMonth.split('-').map(Number);
+    opts.push({ value: defaultMonth, label: fmt(new Date(y, m - 1, 1)) });
+  }
+  return opts;
+}
+
 export function GoalsDrawer({
   slug,
   canEdit,
   open,
   onClose,
+  defaultMonth,
 }: {
   slug: string | undefined;
   canEdit: boolean;
   open: boolean;
   onClose: () => void;
+  /** Preselect this month's scope (e.g. the month the mom report is showing). */
+  defaultMonth?: string;
 }) {
-  const { data } = useBrandTargets(slug);
+  const scopeOptions = useMemo(() => buildScopeOptions(defaultMonth), [defaultMonth]);
+  const [scope, setScope] = useState<string>(defaultMonth ?? '__default');
+  const scopeLabel = scopeOptions.find((o) => o.value === scope)?.label ?? scope;
+  const isDefaultScope = scope === '__default';
+
+  // Exact read of THIS scope's own stored row (no standing-default fallback).
+  const { data } = useBrandTargets(slug, isDefaultScope ? undefined : scope, true);
   const save = useSaveBrandTargets(slug);
+  const del = useDeleteBrandTarget(slug);
 
   const [revenue, setRevenue] = useState('');
   const [roas, setRoas] = useState('');
   const [spendCap, setSpendCap] = useState('');
 
-  const t = data?.target;
+  // Reset the scope to the report's month each time the drawer opens.
   useEffect(() => {
-    if (!open) return; // re-seed fresh every time the drawer opens, never mid-edit
+    if (open) setScope(defaultMonth ?? '__default');
+  }, [open, defaultMonth]);
+
+  const t = data?.target;
+  const hasStoredGoal = t != null;
+  useEffect(() => {
+    if (!open) return; // re-seed on open and whenever the scope's stored value changes
     setRevenue(t?.revenueTarget != null ? String(t.revenueTarget) : '');
     setRoas(t?.roasTarget != null ? String(t.roasTarget) : '');
     setSpendCap(t?.spendCap != null ? String(t.spendCap) : '');
-  }, [open, t?.revenueTarget, t?.roasTarget, t?.spendCap]);
+  }, [open, scope, t?.revenueTarget, t?.roasTarget, t?.spendCap]);
 
   const num = (s: string): number | null => (s.trim() === '' ? null : Number(s));
 
@@ -54,13 +97,39 @@ export function GoalsDrawer({
     }
 
     save.mutate(
-      // month omitted → the STANDING DEFAULT goal, same contract as before.
-      { revenue_target: num(revenue), roas_target: r, spend_cap: num(spendCap) },
       {
-        onSuccess: () => toast.success('Goals saved', 'Pacing and the report’s S-GOALS section pick this up immediately.'),
+        // Omit month for the standing default; otherwise set THIS month's goal.
+        month: isDefaultScope ? undefined : scope,
+        revenue_target: num(revenue),
+        roas_target: r,
+        spend_cap: num(spendCap),
+      },
+      {
+        onSuccess: () =>
+          toast.success(
+            'Goals saved',
+            isDefaultScope
+              ? 'Applies to every month without its own goal. Pacing and the report update immediately.'
+              : `Set for ${scopeLabel}. Pacing and that month's report update immediately.`,
+          ),
         onError: () => toast.error('Could not save goals', 'Admins and managers only.'),
       },
     );
+  };
+
+  const onClear = () => {
+    del.mutate(isDefaultScope ? '__default' : scope, {
+      onSuccess: () => {
+        setRevenue('');
+        setRoas('');
+        setSpendCap('');
+        toast.success(
+          'Goal cleared',
+          isDefaultScope ? 'The standing default is removed.' : `${scopeLabel}'s goal is removed.`,
+        );
+      },
+      onError: () => toast.error('Could not clear goal', 'Admins and managers only.'),
+    });
   };
 
   return (
@@ -71,12 +140,37 @@ export function GoalsDrawer({
       title="Goals"
       footer={
         canEdit ? (
-          <Button size="sm" variant="secondary" type="button" disabled={save.isPending} onClick={onSave}>
-            {save.isPending ? 'Saving…' : 'Save goals'}
-          </Button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Button size="sm" variant="secondary" type="button" disabled={save.isPending} onClick={onSave}>
+              {save.isPending ? 'Saving…' : 'Save goals'}
+            </Button>
+            {hasStoredGoal && (
+              <Button size="sm" variant="ghost" type="button" disabled={del.isPending} onClick={onClear}>
+                {del.isPending ? 'Clearing…' : 'Clear this goal'}
+              </Button>
+            )}
+          </div>
         ) : undefined
       }
     >
+      <div className="field" style={{ marginBottom: 12 }}>
+        <label className="field-label">Goal for</label>
+        <select className="input" value={scope} onChange={(e) => setScope(e.target.value)} disabled={!canEdit}>
+          {scopeOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <span className="field-hint">
+          {isDefaultScope
+            ? 'The fallback goal for any month without its own target. Set month-specific goals below to override it.'
+            : hasStoredGoal
+              ? `A goal set specifically for ${scopeLabel}.`
+              : `No goal set for ${scopeLabel} yet — until you set one, it inherits the standing default. Enter values to give this month its own target.`}
+        </span>
+      </div>
+
       <div className="field" style={{ marginBottom: 10 }}>
         <span className="field-hint">
           Used for pacing on the brand overview, the dashboard, and the mom report's S-GOALS section. Leave a field

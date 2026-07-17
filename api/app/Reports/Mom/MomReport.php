@@ -49,7 +49,12 @@ final class MomReport implements ReportType
         $tz  = $brand->timezone ?: 'UTC';
         $now = CarbonImmutable::now($tz);
 
-        $window = $filters->monthWindow($tz);
+        // The active window honours a custom day range (Kanwar, 2026-07-17) when
+        // one is set, else the selected month; either way the header names the
+        // exact window shown. Falls back to the last complete month only when
+        // nothing is selected at all.
+        $isRange = $filters->isCustomRange();
+        $window  = $filters->activeWindow($tz);
         if ($window !== null) {
             [$monthStart, $monthEnd] = [CarbonImmutable::parse($window[0], $tz), CarbonImmutable::parse($window[1], $tz)];
         } else {
@@ -57,7 +62,7 @@ final class MomReport implements ReportType
             $monthStart = $monthEnd->startOfMonth();
         }
 
-        $compareWindow = $filters->compareMonthWindow($tz);
+        $compareWindow = $filters->activeComparisonWindow($tz);
 
         $layout = $this->layouts->resolve($brand, $this->key());
         $sectionsManifest = array_map(
@@ -74,13 +79,21 @@ final class MomReport implements ReportType
                 'timezone'     => $brand->timezone,
             ],
             'currency' => $filters->usd ? 'USD' : ($brand->base_currency ?: 'USD'),
+            // `range` flags custom-range mode so the SPA can label the header as
+            // a date range and show the "month-by-month tables need a month"
+            // hint on the matrix sections rather than pretending they're empty.
+            'range' => $isRange,
             'month' => [
-                'label' => $monthStart->isoFormat('MMMM YYYY'),
+                'label' => $isRange
+                    ? $monthStart->isoFormat('D MMM YYYY') . ' – ' . $monthEnd->isoFormat('D MMM YYYY')
+                    : $monthStart->isoFormat('MMMM YYYY'),
                 'start' => $monthStart->toDateString(),
                 'end'   => $monthEnd->toDateString(),
             ],
             'compareMonth' => $compareWindow !== null ? [
-                'label' => CarbonImmutable::parse($compareWindow[0])->isoFormat('MMMM YYYY'),
+                'label' => $isRange
+                    ? CarbonImmutable::parse($compareWindow[0])->isoFormat('D MMM YYYY') . ' – ' . CarbonImmutable::parse($compareWindow[1])->isoFormat('D MMM YYYY')
+                    : CarbonImmutable::parse($compareWindow[0])->isoFormat('MMMM YYYY'),
                 'start' => $compareWindow[0],
                 'end'   => $compareWindow[1],
             ] : null,

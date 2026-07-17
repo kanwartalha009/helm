@@ -48,7 +48,7 @@ final class SSalesEvolutionSection implements MomSection
     public function build(Brand $brand, ReportFilters $filters): array
     {
         $tz = $brand->timezone ?: 'UTC';
-        $window = $filters->monthWindow($tz);
+        $window = $filters->activeWindow($tz);
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }
@@ -63,7 +63,7 @@ final class SSalesEvolutionSection implements MomSection
             ];
         }
 
-        $compareWindow = $filters->compareMonthWindow($tz);
+        $compareWindow = $filters->activeComparisonWindow($tz);
         $cmp = $compareWindow !== null ? $this->dailyRevenue($brand->id, $compareWindow[0], $compareWindow[1]) : null;
 
         $total = round(array_sum(array_column($cur, 'revenue')), 2);

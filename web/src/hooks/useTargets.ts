@@ -49,14 +49,24 @@ export interface TargetsResponse {
   pacing: Pacing | null;
 }
 
-export function useBrandTargets(slug: string | undefined, month?: string) {
+/**
+ * Read a brand's target for a month.
+ *
+ * `exact` (editor mode) reads the TRUE stored row for the scope with no
+ * standing-default fallback — a specific `month` reads that month's own row;
+ * `exact` with no `month` reads the standing default itself. Without `exact`
+ * (the default), the response is the RESOLVED goal in force (month override,
+ * else standing default), which is what the read-only cards want.
+ */
+export function useBrandTargets(slug: string | undefined, month?: string, exact = false) {
   return useQuery({
-    queryKey: ['brand', slug, 'targets', month ?? 'current'],
+    queryKey: ['brand', slug, 'targets', month ?? 'current', exact ? 'exact' : 'resolved'],
     enabled: !!slug,
     queryFn: async (): Promise<TargetsResponse> => {
-      const { data } = await api.get<TargetsResponse>(`/brands/${slug}/targets`, {
-        params: month ? { month } : {},
-      });
+      const params: Record<string, string> = {};
+      if (month) params.month = month;
+      if (exact) params.exact = '1';
+      const { data } = await api.get<TargetsResponse>(`/brands/${slug}/targets`, { params });
       return data;
     },
   });
@@ -74,6 +84,27 @@ export function useSaveBrandTargets(slug: string | undefined) {
       mer_target?: number | null;
     }) => {
       const { data } = await api.put(`/brands/${slug}/targets`, body);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['brand', slug, 'targets'] });
+      qc.invalidateQueries({ queryKey: ['brands-pacing'] });
+    },
+  });
+}
+
+/**
+ * Clear a brand's goal for a scope. Pass a 'Y-m' month to remove just that
+ * month's override, or '__default' to clear the standing default (matches the
+ * DELETE brands/{brand}/targets/{month} contract). Used by the goals drawer so
+ * a wrongly-set default (e.g. July numbers leaking into every month) can be
+ * removed without leaving the report.
+ */
+export function useDeleteBrandTarget(slug: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (scope: string) => {
+      const { data } = await api.delete(`/brands/${slug}/targets/${encodeURIComponent(scope)}`);
       return data;
     },
     onSuccess: () => {

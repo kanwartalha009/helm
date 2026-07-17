@@ -61,7 +61,11 @@ export function SGoalsCard({ slug, filters, label, currency }: { slug: string; f
 
       {hasGoal && SECTION_CHART_RENDERERS['S-GOALS'](data, currency)}
 
-      <GoalsDrawer slug={slug} canEdit={canEdit} open={open} onClose={() => setOpen(false)} />
+      {/* Default the drawer's scope to the month THIS report is showing, so
+          editing goals from (say) the May report sets May's goal — not the
+          standing default that was leaking one month's number into all of them
+          (Kanwar, 2026-07-17). */}
+      <GoalsDrawer slug={slug} canEdit={canEdit} open={open} onClose={() => setOpen(false)} defaultMonth={filters.month} />
     </Card>
   );
 }

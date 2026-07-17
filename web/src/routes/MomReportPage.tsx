@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { DataCoverageCard } from '@/components/brands/DataCoverageCard';
-import { MomFilterBar, toMomFilters, type CompareChoice } from '@/components/reports/mom/MomFilterBar';
+import { MomFilterBar, toMomFilters, type CompareChoice, type FilterMode, type RangeCompare } from '@/components/reports/mom/MomFilterBar';
 import { MomReportDocument } from '@/components/reports/mom/MomReportDocument';
-import { useMomReport } from '@/hooks/useMomReport';
+import { useMomReport, type MomFiltersInput } from '@/hooks/useMomReport';
 
 /**
  * REV2 (monthly-report-v2-mom.md) — the "mom" report's OWN route, deliberately
@@ -26,20 +26,34 @@ import { useMomReport } from '@/hooks/useMomReport';
  */
 export function MomReportPage() {
   const { slug } = useParams();
+  const [mode, setMode] = useState<FilterMode>('month');
   const [month, setMonth] = useState<string | undefined>(undefined);
   const [compareChoice, setCompareChoice] = useState<CompareChoice>('previous');
   const [customCompareMonth, setCustomCompareMonth] = useState('');
+  // Custom day-range state (Kanwar, 2026-07-17).
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [rangeCompare, setRangeCompare] = useState<RangeCompare>('last_year');
 
-  const filters = toMomFilters(month, compareChoice, customCompareMonth);
+  // A complete custom range wins; otherwise month mode. An incomplete range
+  // (missing from/to) falls back to month mode so the report never blanks out.
+  const filters: MomFiltersInput =
+    mode === 'range' && from && to
+      ? { period: 'custom', from, to, compare: rangeCompare }
+      : toMomFilters(month, compareChoice, customCompareMonth);
   const { data: shell, isLoading, isError, error } = useMomReport(slug, filters);
 
   // The route is reused across /brands/:slug/reports/mom param changes —
   // filter state must not leak from one brand to the next (same pattern as
   // ReportViewPage's slug/type reset effect).
   useEffect(() => {
+    setMode('month');
     setMonth(undefined);
     setCompareChoice('previous');
     setCustomCompareMonth('');
+    setFrom('');
+    setTo('');
+    setRangeCompare('last_year');
   }, [slug]);
 
   return (
@@ -51,12 +65,20 @@ export function MomReportPage() {
       {slug && <DataCoverageCard slug={slug} compact />}
       <MomFilterBar
         shell={shell}
+        mode={mode}
+        onModeChange={setMode}
         month={month}
         onMonthChange={setMonth}
         compareChoice={compareChoice}
         onCompareChoiceChange={setCompareChoice}
         customCompareMonth={customCompareMonth}
         onCustomCompareMonthChange={setCustomCompareMonth}
+        from={from}
+        to={to}
+        onFromChange={setFrom}
+        onToChange={setTo}
+        rangeCompare={rangeCompare}
+        onRangeCompareChange={setRangeCompare}
       />
 
       {isLoading && <div className="muted" style={{ padding: 24 }}>Building report…</div>}

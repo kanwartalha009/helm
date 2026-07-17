@@ -63,13 +63,13 @@ final class SExSection implements MomSection
     public function build(Brand $brand, ReportFilters $filters): array
     {
         $tz = $brand->timezone ?: 'UTC';
-        $window = $filters->monthWindow($tz);
+        $window = $filters->activeWindow($tz);
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }
         [$start, $end] = $window;
 
-        $compareWindow = $filters->compareMonthWindow($tz);
+        $compareWindow = $filters->activeComparisonWindow($tz);
         $cur = $this->metrics($brand->id, $start, $end);
         $cmp = $compareWindow !== null ? $this->metrics($brand->id, $compareWindow[0], $compareWindow[1]) : null;
 

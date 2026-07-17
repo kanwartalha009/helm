@@ -34,7 +34,7 @@ final class SFunnelCountrySection implements MomSection
     public function build(Brand $brand, ReportFilters $filters): array
     {
         $tz = $brand->timezone ?: 'UTC';
-        $window = $filters->monthWindow($tz);
+        $window = $filters->activeWindow($tz);
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }
@@ -49,7 +49,7 @@ final class SFunnelCountrySection implements MomSection
             ];
         }
 
-        $compareWindow = $filters->compareMonthWindow($tz);
+        $compareWindow = $filters->activeComparisonWindow($tz);
         $cmp = $compareWindow !== null ? $this->funnel($brand->id, $compareWindow[0], $compareWindow[1]) : null;
         $cmpByKey = $cmp !== null ? collect($cmp)->keyBy('key') : collect();
 

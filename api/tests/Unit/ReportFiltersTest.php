@@ -136,6 +136,58 @@ final class ReportFiltersTest extends TestCase
         $this->assertSame(['2026-06-01', '2026-06-30'], $june->monthWindow(self::TZ));
     }
 
+    public function test_custom_range_active_window_and_same_range_yoy_comparison(): void
+    {
+        // Kanwar, 2026-07-17 — custom day ranges. period='custom' with from/to is
+        // a range; the default comparison is the SAME calendar dates a year back
+        // ("first two weeks of the month, year over year").
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
+
+        $f = new ReportFilters(period: 'custom', from: '2026-06-01', to: '2026-06-14', compare: 'last_year', usd: false);
+        $this->assertTrue($f->isCustomRange());
+        $this->assertSame(['2026-06-01', '2026-06-14'], $f->activeWindow(self::TZ));
+        $this->assertSame(['2025-06-01', '2025-06-14'], $f->activeComparisonWindow(self::TZ)); // same dates last year
+        $this->assertSame('2026-06-01 – 2026-06-14', $f->activeWindowLabel(self::TZ));
+    }
+
+    public function test_custom_range_previous_period_is_the_equal_length_window_before(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
+
+        // 14-day range → previous period is the 14 days immediately before it.
+        $f = new ReportFilters(period: 'custom', from: '2026-06-15', to: '2026-06-28', compare: 'previous', usd: false);
+        $this->assertSame(['2026-06-01', '2026-06-14'], $f->activeComparisonWindow(self::TZ));
+
+        // compare='none' → no comparison window.
+        $none = new ReportFilters(period: 'custom', from: '2026-06-15', to: '2026-06-28', compare: 'none', usd: false);
+        $this->assertNull($none->activeComparisonWindow(self::TZ));
+    }
+
+    public function test_active_window_falls_back_to_month_mode_when_not_a_range(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
+
+        // No range → activeWindow == monthWindow, activeComparison == compareMonthWindow.
+        $f = ReportFilters::fromArray(['month' => '2026-06', 'compare' => 'last_year']);
+        $this->assertFalse($f->isCustomRange());
+        $this->assertSame($f->monthWindow(self::TZ), $f->activeWindow(self::TZ));
+        $this->assertSame($f->compareMonthWindow(self::TZ), $f->activeComparisonWindow(self::TZ));
+        $this->assertSame('2026-06', $f->activeWindowLabel(self::TZ));
+
+        // period='custom' but a missing endpoint is NOT a range (falls back to month mode).
+        $half = new ReportFilters(period: 'custom', from: '2026-06-01', to: null, compare: 'previous', usd: false, month: '2026-06');
+        $this->assertFalse($half->isCustomRange());
+        $this->assertSame(['2026-06-01', '2026-06-30'], $half->activeWindow(self::TZ));
+    }
+
+    public function test_fromarray_parses_a_custom_range(): void
+    {
+        $f = ReportFilters::fromArray(['period' => 'custom', 'from' => '2026-06-01', 'to' => '2026-06-14', 'compare' => 'last_year']);
+        $this->assertTrue($f->isCustomRange());
+        $this->assertSame('2026-06-01', $f->from);
+        $this->assertSame('2026-06-14', $f->to);
+    }
+
     public function test_week_window_only_resolves_complete_weeks(): void
     {
         // 2026-07-10 is a Friday: the week of Mon 2026-07-06 is still running.

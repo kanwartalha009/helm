@@ -170,6 +170,58 @@ final class PacingTest extends TestCase
         $this->assertSame(1, BrandTarget::where('brand_id', $brand->id)->count());
     }
 
+    public function test_exact_read_returns_the_scopes_own_row_without_the_standing_default_fallback(): void
+    {
+        // Kanwar, 2026-07-17 — per-month goals. The goals drawer must tell an
+        // INHERITED standing default apart from a real per-month override, so a
+        // number set "for July" (stored as the standing default) is never
+        // mistaken for May's own goal in the editor. `exact` = no fallback.
+        $this->freezeMidJune();
+        $brand = $this->brand();
+        Sanctum::actingAs(User::factory()->create(['role' => 'master_admin']));
+
+        // A standing default (what the old UI could only write) + one real
+        // June override. May has NO override of its own.
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => null,      'revenue_target' => 30000]);
+        BrandTarget::create(['brand_id' => $brand->id, 'month' => '2026-06', 'revenue_target' => 60000]);
+
+        // Resolved read (cards): May inherits the standing default.
+        $resolvedMay = $this->getJson("/api/brands/{$brand->slug}/targets?month=2026-05")->assertOk()->json();
+        $this->assertEqualsWithDelta(30000.0, (float) $resolvedMay['target']['revenueTarget'], 0.001);
+        $this->assertTrue($resolvedMay['target']['isStandingDefault']);
+
+        // Exact read (editor): May has no row of its own → null, not the default.
+        $exactMay = $this->getJson("/api/brands/{$brand->slug}/targets?month=2026-05&exact=1")->assertOk()->json();
+        $this->assertNull($exactMay['target']);
+
+        // Exact read of June returns June's OWN number (not the default).
+        $exactJune = $this->getJson("/api/brands/{$brand->slug}/targets?month=2026-06&exact=1")->assertOk()->json();
+        $this->assertEqualsWithDelta(60000.0, (float) $exactJune['target']['revenueTarget'], 0.001);
+        $this->assertFalse($exactJune['target']['isStandingDefault']);
+
+        // Exact read with NO month returns the standing default itself.
+        $exactDefault = $this->getJson("/api/brands/{$brand->slug}/targets?exact=1")->assertOk()->json();
+        $this->assertEqualsWithDelta(30000.0, (float) $exactDefault['target']['revenueTarget'], 0.001);
+        $this->assertTrue($exactDefault['target']['isStandingDefault']);
+    }
+
+    public function test_a_future_month_goal_can_be_set_and_is_read_back_exactly(): void
+    {
+        // "allow to add future months and previous months goals" — a goal set
+        // for a month ahead is stored against that month and read back on its own.
+        $this->freezeMidJune();
+        $brand = $this->brand();
+        Sanctum::actingAs(User::factory()->create(['role' => 'master_admin']));
+
+        $this->putJson("/api/brands/{$brand->slug}/targets", ['month' => '2026-09', 'revenue_target' => 75000])
+            ->assertCreated();
+
+        $exact = $this->getJson("/api/brands/{$brand->slug}/targets?month=2026-09&exact=1")->assertOk()->json();
+        $this->assertEqualsWithDelta(75000.0, (float) $exact['target']['revenueTarget'], 0.001);
+        // A different month with no goal stays empty (no bleed).
+        $this->assertNull($this->getJson("/api/brands/{$brand->slug}/targets?month=2026-08&exact=1")->assertOk()->json('target'));
+    }
+
     // ---------------------------------------------------------------------
     // Bosco spec 2026-07-12 §A — standing goals, USD-correct ROAS, "needs €X/day"
     // ---------------------------------------------------------------------

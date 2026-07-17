@@ -201,6 +201,92 @@ final class ReportFilters
         return [$start->toDateString(), $end->toDateString()];
     }
 
+    /**
+     * Custom day-range mode (Kanwar, 2026-07-17 — "possibility to filter by
+     * custom ranges... compare the first 2 weeks of the month year over year").
+     * Active only when period='custom' AND both from/to are set; otherwise the
+     * MoM report stays in its normal whole-month mode. One predicate so every
+     * section and the shell agree on when a range is in force.
+     */
+    public function isCustomRange(): bool
+    {
+        return $this->period === 'custom' && $this->from !== null && $this->to !== null;
+    }
+
+    /**
+     * A section's PRIMARY window: the custom day range when one is active
+     * (window() already clamps `to` to yesterday so a partial today is never
+     * shown), else the selected month via monthWindow() — null when that month
+     * is unset/incomplete. Every range-compatible section reads THIS instead of
+     * monthWindow() so a custom range flows through without each re-deriving it;
+     * month mode is byte-for-byte the old monthWindow() behaviour.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    public function activeWindow(string $tz): ?array
+    {
+        if ($this->isCustomRange()) {
+            [$s, $e] = $this->window($tz);
+
+            return $s <= $e ? [$s, $e] : null; // a `from` after the clamped `to` is not a window
+        }
+
+        return $this->monthWindow($tz);
+    }
+
+    /**
+     * The comparison window that matches activeWindow(). For a custom range the
+     * default is the SAME calendar dates one year earlier (YoY — the whole point
+     * of the feature), with compare='previous' giving the equal-length window
+     * immediately before, and compare='none' giving nothing. For month mode it
+     * is the existing compareMonthWindow(). Returns null (not [null,null]) when
+     * there is nothing to compare, matching compareMonthWindow()'s contract so
+     * callers keep their `!== null` guard unchanged.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    public function activeComparisonWindow(string $tz): ?array
+    {
+        if (! $this->isCustomRange()) {
+            return $this->compareMonthWindow($tz);
+        }
+
+        if ($this->compare === 'none') {
+            return null;
+        }
+
+        [$s, $e] = $this->window($tz);
+        $start = CarbonImmutable::parse($s);
+        $end   = CarbonImmutable::parse($e);
+
+        if ($this->compare === 'previous') {
+            $len       = $start->diffInDays($end) + 1;
+            $prevEnd   = $start->subDay();
+            $prevStart = $prevEnd->subDays($len - 1);
+
+            return [$prevStart->toDateString(), $prevEnd->toDateString()];
+        }
+
+        // 'previous'/'last_year' both handled; anything else (defaulted) → YoY.
+        return [$start->subYear()->toDateString(), $end->subYear()->toDateString()];
+    }
+
+    /**
+     * Display label for the active window: the literal day range in range mode
+     * (e.g. "2026-06-01 – 2026-06-14"), else the 'Y-m' month (or null when
+     * unset). The shell renders this so the header names exactly what's shown.
+     */
+    public function activeWindowLabel(string $tz): ?string
+    {
+        if ($this->isCustomRange()) {
+            [$s, $e] = $this->window($tz);
+
+            return $s . ' – ' . $e;
+        }
+
+        return $this->month;
+    }
+
     public function periodLabel(): string
     {
         return match ($this->period) {

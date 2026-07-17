@@ -16,6 +16,12 @@ export interface MomFiltersInput {
   month?: string;
   compare: 'previous' | 'last_year';
   compareMonth?: string; // REV2 R3 "Custom" — explicit second month, overrides `compare`'s derivation
+  // Custom day-range mode (Kanwar, 2026-07-17). When period='custom' with from/to,
+  // the report is driven by an arbitrary day range compared to the same range a
+  // year earlier (or the prior period), and `month`/`compareMonth` are ignored.
+  period?: 'custom';
+  from?: string; // Y-m-d
+  to?: string; // Y-m-d
 }
 
 export interface MomSectionManifestEntry {
@@ -32,6 +38,8 @@ export interface MomReportShell {
   reportType: 'mom';
   brand: { name: string; slug: string; baseCurrency: string; timezone: string };
   currency: string;
+  /** True when a custom day range is active (vs whole-month mode). */
+  range?: boolean;
   month: { label: string; start: string; end: string };
   compareMonth: { label: string; start: string; end: string } | null;
   availableMonths: { key: string; label: string }[];
@@ -44,6 +52,14 @@ export interface MomReportShell {
 // section fetch already uses — one place computes this, never two.
 export function toQuery(filters: MomFiltersInput): Record<string, string> {
   const q: Record<string, string> = { compare: filters.compare };
+  // Custom range takes precedence and omits month/compareMonth — the backend
+  // reads period/from/to and compares the same range one year earlier.
+  if (filters.period === 'custom' && filters.from && filters.to) {
+    q.period = 'custom';
+    q.from = filters.from;
+    q.to = filters.to;
+    return q;
+  }
   if (filters.month) q.month = filters.month;
   if (filters.compareMonth) q.compare_month = filters.compareMonth;
   return q;

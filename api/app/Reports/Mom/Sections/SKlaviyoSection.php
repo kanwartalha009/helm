@@ -65,7 +65,7 @@ final class SKlaviyoSection implements MomSection
         }
 
         $tz = $brand->timezone ?: 'UTC';
-        $window = $filters->monthWindow($tz);
+        $window = $filters->activeWindow($tz);
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
         }
@@ -80,7 +80,7 @@ final class SKlaviyoSection implements MomSection
             ];
         }
 
-        $compareWindow = $filters->compareMonthWindow($tz);
+        $compareWindow = $filters->activeComparisonWindow($tz);
         $cmp = $compareWindow !== null ? $this->metrics($brand->id, $compareWindow[0], $compareWindow[1]) : null;
 
         $benchmark = (float) config('momreport.benchmarks.klaviyo_revenue_pct_benchmark', 50.0);
