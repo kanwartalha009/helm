@@ -56,6 +56,23 @@ export function MomReportPage() {
     setRangeCompare('last_year');
   }, [slug]);
 
+  // Default the month to the last CLOSED month as soon as the shell loads
+  // (Kanwar, 2026-07-20 — "data for last closed month June is not showing").
+  // The dropdown *displayed* the first available month (June) via its `value`
+  // fallback, but the `month` STATE stayed undefined until the user actively
+  // changed the select — so every section fetched with no `month` param and
+  // the shared filter resolved activeWindow() to null → each section returned
+  // no_data and the report looked empty. Setting the state to the shell's
+  // default month (the same June the picker shows, which the shell already
+  // anchors to the last complete month) makes sections fetch the real window
+  // AND keeps the vs-previous-month comparison working. Only fills the initial
+  // blank; never overrides a month the user has since chosen.
+  useEffect(() => {
+    if (mode !== 'month' || month !== undefined || !shell) return;
+    const def = shell.availableMonths[0]?.key ?? shell.month.start.slice(0, 7);
+    if (def) setMonth(def);
+  }, [shell, mode, month]);
+
   return (
     <AppLayout title="MoM Strategy Report">
       {/* M5 (monthly-report-v2-mom.md §M5) — "Report view embeds the existing
