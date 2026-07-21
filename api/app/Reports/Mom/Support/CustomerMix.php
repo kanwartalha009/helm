@@ -91,6 +91,41 @@ final class CustomerMix
     }
 
     /**
+     * REAL new-vs-returning SALES split for ONE window (Kanwar, 2026-07-21).
+     *
+     * The counts above have always been real; the *revenue* split was the only
+     * estimated part (new ≈ count × blended AOV). Shopify DOES expose real
+     * revenue by customer type via the `sales` dimension `new_or_returning_customer`
+     * (verified live) — this wraps RevenueFetcher::customerTypeSalesForWindow to
+     * surface it as the shared source S2 reads, so the estimate is replaced with
+     * Shopify's own figures wherever they're available.
+     *
+     * Same honesty contract as forMonth(): no active Shopify connection / missing
+     * scope / any transport or parse failure → null, and the caller keeps the
+     * clearly-labelled modeled estimate. Never a fabricated zero split.
+     *
+     * @return array{new: array{net: float, total: float}, returning: array{net: float, total: float}}|null
+     */
+    public function salesSplitForMonth(Brand $brand, string $start, string $end): ?array
+    {
+        $conn = PlatformConnection::query()
+            ->where('brand_id', $brand->id)
+            ->where('platform', 'shopify')
+            ->where('status', 'active')
+            ->first();
+
+        if ($conn === null) {
+            return null; // not connected → honestly absent, no external call made
+        }
+
+        try {
+            return $this->revenue->customerTypeSalesForWindow($conn, $start, $end);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * New-vs-returning customer counts for EVERY month in a window, in ONE bounded
      * ShopifyQL call (customersByMonthRange groups by month natively — a 24-month
      * window is still a single call, not 24). Used by the S1 financial matrix,

@@ -8,7 +8,6 @@ use App\Models\Brand;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Support\CountryRevenueSpend;
-use App\Reports\Mom\Support\RangeCollapse;
 use App\Reports\Mom\Support\WeekSplit;
 use App\Services\CountryTiers;
 use Carbon\CarbonImmutable;
@@ -137,8 +136,13 @@ final class STierRevenueSection implements MomSection
         ];
     }
 
-    /** Collapse S4 to tier revenue over the custom range vs the same range last year. */
-    /** Week-on-week tier revenue across the custom range. */
+    /**
+     * Week-on-week tier revenue across the custom range (Kanwar, 2026-07-21).
+     * Emits the SAME payload shape as the month-by-month build() — tier rows with
+     * a per-week `monthly[]` plus Total / Share / ROAS / ΔYoY / ΔMoM — with
+     * `weekly => true` and `weekHeaders`, so the existing S4 renderer draws every
+     * column with weeks as the periods.
+     */
     private function weekly(Brand $brand, ReportFilters $filters, string $tz): array
     {
         $range = $filters->activeWindow($tz);
@@ -157,31 +161,56 @@ final class STierRevenueSection implements MomSection
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No commerce-by-country data in the selected range.'];
         }
 
+        // Same range one year earlier, rolled up by tier, for ΔYoY.
+        $priorStart = CarbonImmutable::parse($range[0], $tz)->subYear()->toDateString();
+        $priorEnd   = CarbonImmutable::parse($range[1], $tz)->subYear()->toDateString();
+        $priorByTier = $this->rollUp($joiner->compute($brand->id, $priorStart, $priorEnd), $tierDefs);
+
         $perWeek = [];
         foreach ($weeks as $w) {
             $perWeek[] = $this->rollUp($joiner->compute($brand->id, $w['start'], $w['end']), $tierDefs);
         }
 
-        $groups = [];
+        $totalRevenue = array_sum(array_column($rangeByTier, 'revenue'));
+
+        $rows = [];
         foreach ($rangeByTier as $key => $t) {
             $cells = [];
             foreach ($perWeek as $wk) {
                 $cells[] = isset($wk[$key]) ? round((float) $wk[$key]['revenue'], 2) : null;
             }
-            $groups[] = ['label' => $t['label'], 'weekly' => $cells, 'total' => round((float) $t['revenue'], 2)];
+            $rev   = (float) $t['revenue'];
+            $spend = (float) $t['spend'];
+
+            $rows[] = [
+                'tierKey' => $key,
+                'label'   => $t['label'],
+                'color'   => $t['color'],
+                'monthly' => $cells,
+                'revenue' => round($rev, 2),
+                'share'   => $totalRevenue > 0.0 ? round($rev / $totalRevenue * 100, 1) : null,
+                'spend'   => round($spend, 2),
+                'roas'    => $spend > 0.0 ? round($rev / $spend, 2) : null,
+                'deltaMoMPct' => WeekSplit::lastWeekDelta($cells),
+                'deltaYoYPct' => $this->delta($rev, isset($priorByTier[$key]) ? (float) $priorByTier[$key]['revenue'] : null),
+            ];
         }
+        usort($rows, static fn (array $a, array $b): int => $b['revenue'] <=> $a['revenue']);
+
+        $periods = WeekSplit::periods($weeks);
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
             'range'  => true,
-            'rangeCollapse' => RangeCollapse::weeklyRevenueByGroup(
-                'Tier',
-                $weeks,
-                $groups,
-                'Week-on-week revenue by tier',
-                WeekSplit::note($weeks),
-            ),
+            'weekly' => true,
+            'months' => $periods['months'],
+            'monthLabels' => $periods['monthLabels'],
+            'weekHeaders' => $periods['weekHeaders'],
+            'monthsWindow' => count($weeks),
+            'total'  => round($totalRevenue, 2),
+            'rows'   => $rows,
+            'note'   => WeekSplit::note($weeks),
         ];
     }
 

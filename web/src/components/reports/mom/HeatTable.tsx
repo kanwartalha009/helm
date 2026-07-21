@@ -15,7 +15,8 @@ import { gradeColumn, heatCellStyle, type HeatGrade } from './heat';
  */
 export interface HeatColumn<R> {
   key: string;
-  label: string;
+  // ReactNode so a period column can carry a two-line "W23 / 1–7 Jun" header.
+  label: ReactNode;
   align?: 'left' | 'right';
   render: (row: R, index: number, rows: R[]) => ReactNode;
   /** Column-wide min-max grading (v1's gradeCol) — grades this cell against every OTHER row's value in the same column. */

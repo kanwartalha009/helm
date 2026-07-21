@@ -123,9 +123,9 @@ export const SECTION_CHART_RENDERERS: Record<string, (payload: any, currency: st
   },
 
   // Total sales evolution — total revenue at the top, x-axis = days of the
-  // month, y-axis = sales (Kanwar, 2026-07-15). Below it, the MODELED new-vs-
-  // returning sales split (Shopify can't split sales by customer type; see the
-  // backend docblock — this uses v1's new × AOV estimate).
+  // month, y-axis = sales (Kanwar, 2026-07-15). Below it, the new-vs-returning
+  // sales split — REAL Shopify figures where available (basis:'verified'), with
+  // the blended-AOV estimate kept only as a fallback (see the backend docblock).
   S2: (p, currency) => {
     const series: { day: number; revenue: number }[] = p.series ?? [];
     const compare: { day: number; revenue: number }[] | null = p.compareSeries ?? null;
@@ -318,9 +318,14 @@ function monthName(ym: string | null | undefined): string | null {
  * series is readable instead of flattening against the larger one on a shared
  * scale (Kanwar: "make 2 separate graphs so preview will be easy to see
  * numbers against y-axis"). Both use the app's blue accent for consistency
- * with the sales / revenue charts. Shopify can't split sales by customer type,
- * so each day's revenue is allocated by the month's modeled new-share (v1's
- * new × AOV basis), clearly marked "Modeled".
+ * with the sales / revenue charts.
+ *
+ * The headline amounts are now REAL where available (basis:'verified' — Shopify's
+ * own New/Returning sales) and render without the "~"; when the live split can't
+ * be fetched they fall back to the blended-AOV estimate (basis:'modeled', shown
+ * with "~" and a "Modeled" chip). The DAILY graphs still allocate each day's
+ * revenue by the month's new-share (Shopify reports the split monthly, not
+ * daily), so they sum to the monthly split whichever basis is in play.
  */
 function ModeledCustomerSplit({
   split,
@@ -328,9 +333,10 @@ function ModeledCustomerSplit({
   currency,
 }: {
   split: {
+    basis?: string;
     method?: string;
-    new: { customers: number; sales: number; pct: number | null };
-    returning: { customers: number; sales: number; pct: number | null };
+    new: { customers: number | null; sales: number; pct: number | null };
+    returning: { customers: number | null; sales: number; pct: number | null };
   };
   daily: { day: number; new: number; returning: number }[] | null;
   currency: string;
@@ -339,6 +345,9 @@ function ModeledCustomerSplit({
   const r = split.returning;
   const BLUE = '#3B5BFB'; // app accent — same as the sales / revenue charts
   const hasDaily = daily != null && daily.length > 0;
+  // 'verified' = Shopify's own customer-type figures (real); anything else is the
+  // blended-AOV estimate. Only the estimate gets the "~" and the Modeled chip.
+  const verified = split.basis === 'verified';
   // Same day-label thinning as the sales chart above: day 1, every 5th, last.
   const dayLabels = (daily ?? []).map((d, i) =>
     i === 0 || i === (daily?.length ?? 0) - 1 || d.day % 5 === 0 ? String(d.day) : '',
@@ -348,12 +357,22 @@ function ModeledCustomerSplit({
     <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <div className="muted text-sm">New vs returning customer sales</div>
-        <span className="chip" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.4 }}>Modeled — estimate</span>
+        <span
+          className="chip"
+          style={{
+            fontSize: 9,
+            textTransform: 'uppercase',
+            letterSpacing: 0.4,
+            ...(verified ? { background: 'rgba(16,185,129,0.12)', color: '#059669', borderColor: 'rgba(16,185,129,0.3)' } : {}),
+          }}
+        >
+          {verified ? 'Verified — Shopify' : 'Modeled — estimate'}
+        </span>
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
         <div style={{ flex: '1 1 45%', minWidth: 280 }}>
-          <SplitAmount label="New customer sales" sales={n.sales} customers={n.customers} pct={n.pct} currency={currency} />
+          <SplitAmount label="New customer sales" sales={n.sales} customers={n.customers} pct={n.pct} currency={currency} approx={!verified} />
           {hasDaily && (
             <TrendLineChart
               labels={dayLabels}
@@ -366,7 +385,7 @@ function ModeledCustomerSplit({
           )}
         </div>
         <div style={{ flex: '1 1 45%', minWidth: 280 }}>
-          <SplitAmount label="Returning customer sales" sales={r.sales} customers={r.customers} pct={r.pct} currency={currency} />
+          <SplitAmount label="Returning customer sales" sales={r.sales} customers={r.customers} pct={r.pct} currency={currency} approx={!verified} />
           {hasDaily && (
             <TrendLineChart
               labels={dayLabels}
@@ -400,20 +419,24 @@ function SplitAmount({
   customers,
   pct,
   currency,
+  approx = true,
 }: {
   label: string;
   sales: number;
-  customers: number;
+  customers: number | null;
   pct: number | null;
   currency: string;
+  // The "~" prefix means the amount is estimated. Verified (real Shopify)
+  // figures drop it so the client reads them as exact.
+  approx?: boolean;
 }) {
   return (
     <div style={{ marginBottom: 8 }}>
       <div className="muted" style={EYEBROW}>{label}</div>
-      <div style={METRIC_VALUE}>~{formatMoney(sales, currency, { whole: true })}</div>
+      <div style={METRIC_VALUE}>{approx ? '~' : ''}{formatMoney(sales, currency, { whole: true })}</div>
       <div className="muted" style={{ fontSize: 11 }}>
-        {customers.toLocaleString()} {customers === 1 ? 'customer' : 'customers'}
-        {pct != null ? ` · ${pct.toFixed(1)}%` : ''}
+        {customers != null ? `${customers.toLocaleString()} ${customers === 1 ? 'customer' : 'customers'}` : ''}
+        {pct != null ? `${customers != null ? ' · ' : ''}${pct.toFixed(1)}%` : ''}
       </div>
     </div>
   );

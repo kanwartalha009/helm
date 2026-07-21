@@ -10,21 +10,42 @@ const pctChange = (a: number | null | undefined, b: number | null | undefined): 
 /** A signed percent, e.g. +12.3% / −4.0% / — . */
 const deltaFmt = (v: number | null | undefined): string => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
 
+export interface WeekHeader { week: number | null; label: string }
+
 /**
- * Build one column per month from a payload's `months`/`monthLabels`, reading
- * `row.monthly[i]`. By default each cell is graded by its month-over-month
+ * A period-column header. In custom-range (weekly) mode it's the two-line
+ * "W23 / 1–7 Jun" heading; in month mode it's the plain month label. Shared so
+ * every matrix's period columns read identically.
+ */
+function periodHeader(monthLabel: string, wk: WeekHeader | undefined): React.ReactNode {
+  if (!wk) return monthLabel;
+  return (
+    <div style={{ lineHeight: 1.15 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text, #111827)' }}>
+        {wk.week != null ? `W${wk.week}` : wk.label}
+      </div>
+      <div style={{ fontSize: 10, fontWeight: 400 }}>{wk.label}</div>
+    </div>
+  );
+}
+
+/**
+ * Build one column per period from a payload's `months`/`monthLabels`, reading
+ * `row.monthly[i]`. By default each cell is graded by its period-over-period
  * change (green climbing / red dropping) so momentum reads down the row —
- * pass `gradeCell` to grade differently (e.g. vs a benchmark).
+ * pass `gradeCell` to grade differently (e.g. vs a benchmark). `weekHeaders`
+ * (custom-range mode) swaps the header for the two-line "W23 / 1–7 Jun" form.
  */
 function monthColumns(
   months: string[],
   monthLabels: string[],
   fmt: (v: number | null | undefined) => string,
   gradeCell?: (row: any, i: number) => HeatGrade,
+  weekHeaders?: WeekHeader[],
 ): HeatColumn<any>[] {
   return months.map((ym, i) => ({
     key: `m_${ym}`,
-    label: monthLabels[i] ?? ym,
+    label: periodHeader(monthLabels[i] ?? ym, weekHeaders?.[i]),
     align: 'right',
     render: (r) => fmt(r.monthly?.[i]),
     gradeOf: (r) => (gradeCell ? gradeCell(r, i) : i === 0 ? '' : heatFromDeltaPct(pctChange(r.monthly?.[i], r.monthly?.[i - 1]))),
@@ -127,9 +148,13 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     const adPlatforms: string[] = Array.isArray(p.adPlatforms) ? p.adPlatforms : ['google', 'meta', 'tiktok'];
     const platformLabel: Record<string, string> = { google: 'Google %', meta: 'Meta %', tiktok: 'TikTok %' };
     const platformField: Record<string, string> = { google: 'googleSharePct', meta: 'metaSharePct', tiktok: 'tiktokSharePct' };
+    // Custom-range (weekly) mode: rows are ISO weeks, not months — one table
+    // (no prior-year block), and the period column shows the two-line "W23".
+    const weekly = p.weekly === true;
+    const weekHeaders: WeekHeader[] = Array.isArray(p.weekHeaders) ? p.weekHeaders : [];
     const columns = (): HeatColumn<any>[] => {
       const cols: HeatColumn<any>[] = [
-        { key: 'label', label: 'Month', render: (r) => r.label ?? r.month },
+        { key: 'label', label: weekly ? 'Week' : 'Month', render: (r, i) => (weekly ? periodHeader(r.label ?? r.month, weekHeaders[i]) : (r.label ?? r.month)) },
         { key: 'orders', label: 'Orders', align: 'right', render: (r) => (r.orders ?? 0).toLocaleString(), heat: { mode: 'column', dir: 'high', value: (r) => r.orders } },
         { key: 'aov', label: 'AOV', align: 'right', render: (r) => money(r.aov), heat: { mode: 'column', dir: 'high', value: (r) => r.aov } },
         { key: 'returnsPct', label: '% Returns', align: 'right', render: (r) => pct1(r.returnsPct), heat: { mode: 'column', dir: 'low', value: (r) => r.returnsPct } },
@@ -164,6 +189,27 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     };
     const okRows = (rows: any[]) => rows.filter((r) => r.status === 'ok');
     const hasRoasNc = [...(p.currentYearRows ?? []), ...(p.priorYearRows ?? [])].some((r: any) => r.roasNc != null);
+
+    // Weekly: a single week-by-week table (no prior-year block), previewRows so
+    // long ranges collapse to a "view full table" popup like the other matrices.
+    if (weekly) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ overflowX: 'auto' }}>
+            <HeatTable
+              columns={columns()}
+              rows={okRows(p.currentYearRows ?? [])}
+              rowKey={(r) => r.month}
+              title="Week-on-week financial matrix"
+              previewRows={14}
+            />
+          </div>
+          <div className="muted" style={{ fontSize: 10, fontStyle: 'italic' }}>
+            New / Returning / %Ret / Total / CAC / ROAS-nc need whole calendar months and show in month mode. Δ Revenue / Δ Budget are week-over-week.
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -206,12 +252,13 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     const rows: any[] = p.rows ?? [];
     const months: string[] = Array.isArray(p.months) ? p.months : [];
     const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
+    const weekHeaders: WeekHeader[] | undefined = Array.isArray(p.weekHeaders) ? p.weekHeaders : undefined;
 
     const columns: HeatColumn<any>[] = [{ key: 'label', label: 'Tier', render: (r) => r.label }];
     months.forEach((ym, i) => {
       columns.push({
         key: `m_${ym}`,
-        label: monthLabels[i] ?? ym,
+        label: periodHeader(monthLabels[i] ?? ym, weekHeaders?.[i]),
         align: 'right',
         render: (r) => compact(r.monthly?.[i]),
         gradeOf: (r) => (i === 0 ? '' : heatFromDeltaPct(pctChange(r.monthly?.[i], r.monthly?.[i - 1]))),
@@ -242,6 +289,7 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     const rows: any[] = p.rows ?? [];
     const months: string[] = Array.isArray(p.months) ? p.months : [];
     const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
+    const weekHeaders: WeekHeader[] | undefined = Array.isArray(p.weekHeaders) ? p.weekHeaders : undefined;
     const blended = p.total?.spend > 0 ? p.total.revenue / p.total.spend : null;
 
     const columns: HeatColumn<any>[] = [
@@ -251,10 +299,10 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     months.forEach((ym, i) => {
       columns.push({
         key: `m_${ym}`,
-        label: monthLabels[i] ?? ym,
+        label: periodHeader(monthLabels[i] ?? ym, weekHeaders?.[i]),
         align: 'right',
         render: (r) => compact(r.monthly?.[i]),
-        // Color each month cell by its change vs the previous month in the row.
+        // Color each period cell by its change vs the previous period in the row.
         gradeOf: (r) => (i === 0 ? '' : heatFromDeltaPct(pctChange(r.monthly?.[i], r.monthly?.[i - 1]))),
       });
     });
@@ -289,6 +337,7 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     const rows: any[] = p.rows ?? [];
     const months: string[] = Array.isArray(p.months) ? p.months : [];
     const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
+    const weekHeaders: WeekHeader[] | undefined = Array.isArray(p.weekHeaders) ? p.weekHeaders : undefined;
     const benchmark: number | null = typeof p.benchmark === 'number' ? p.benchmark : null;
 
     const columns: HeatColumn<any>[] = [
@@ -298,7 +347,7 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     months.forEach((ym, i) => {
       columns.push({
         key: `m_${ym}`,
-        label: monthLabels[i] ?? ym,
+        label: periodHeader(monthLabels[i] ?? ym, weekHeaders?.[i]),
         align: 'right',
         render: (r) => (r.monthly?.[i] == null ? '—' : formatRoas(r.monthly[i])),
         gradeOf: (r) => heatVsBenchmark(r.monthly?.[i], benchmark),
@@ -334,7 +383,7 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
     const columns: HeatColumn<any>[] = [
       { key: 'label', label: 'Category', render: (r) => r.label },
-      ...monthColumns(months, monthLabels, compact),
+      ...monthColumns(months, monthLabels, compact, undefined, Array.isArray(p.weekHeaders) ? p.weekHeaders : undefined),
       { key: 'revenue', label: 'Total', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
       { key: 'share', label: 'Share', align: 'right', render: (r) => (r.share == null ? '—' : `${r.share.toFixed(1)}%`) },
       { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => deltaFmt(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },
@@ -354,7 +403,7 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
     const monthLabels: string[] = Array.isArray(p.monthLabels) ? p.monthLabels : months;
     const columns: HeatColumn<any>[] = [
       { key: 'label', label: 'Product', render: (r) => r.label },
-      ...monthColumns(months, monthLabels, compact),
+      ...monthColumns(months, monthLabels, compact, undefined, Array.isArray(p.weekHeaders) ? p.weekHeaders : undefined),
       { key: 'revenue', label: 'Total', align: 'right', render: (r) => money(r.revenue), heat: { mode: 'column', dir: 'high', value: (r) => r.revenue } },
       { key: 'share', label: 'Share', align: 'right', render: (r) => (r.share == null ? '—' : `${r.share.toFixed(1)}%`) },
       { key: 'deltaYoYPct', label: 'Δ YoY', align: 'right', render: (r) => deltaFmt(r.deltaYoYPct), gradeOf: (r) => heatFromDeltaPct(r.deltaYoYPct) },

@@ -8,7 +8,7 @@ use App\Models\Brand;
 use App\Models\ProductCatalog;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
-use App\Reports\Mom\Support\RangeCollapse;
+use App\Reports\Mom\Support\WeeklyBreakdownMatrix;
 use App\Reports\Mom\Support\WeekSplit;
 use App\Reports\Support\CommerceBreakdown;
 use Carbon\CarbonImmutable;
@@ -47,7 +47,7 @@ final class SCategoriesSection implements MomSection
         // Custom range (Kanwar, 2026-07-20): week-on-week category revenue — one
         // column per ISO week across the range (running month included).
         if ($filters->isCustomRange()) {
-            return $this->weekly($brand, $filters, $tz, 'category', 8, 'Week-on-week revenue by category');
+            return $this->weekly($brand, $filters, $tz, 'category', 8);
         }
 
         $window = $filters->monthWindow($tz);
@@ -104,15 +104,17 @@ final class SCategoriesSection implements MomSection
         ];
     }
 
-    /** Collapse S7 to category revenue over the custom range vs the same range last year. */
     /**
-     * Week-on-week revenue by commerce dimension (category/product) across the
-     * custom range. The displayed groups are the range's top-N (plus an Other
-     * tail); each week's per-key revenue is pulled with a wide limit so a group
-     * that isn't top-N in a given week still lands in its own cell rather than
-     * hiding inside that week's Other.
+     * Week-on-week revenue by category across the custom range (Kanwar, 2026-07-21).
+     * Emits the SAME payload shape as the month-by-month build() — category rows
+     * with a per-week `monthly[]` plus Total / Share / ΔYoY / ΔMoM + the stock
+     * flag — with `weekly => true` and `weekHeaders`, so the existing S7 renderer
+     * draws every column with weeks as the periods. Displayed groups are the
+     * range's top-N (plus an Other tail); each week's per-key revenue is pulled
+     * with a wide limit so a group that isn't top-N in a given week still lands in
+     * its own cell rather than hiding inside that week's Other.
      */
-    private function weekly(Brand $brand, ReportFilters $filters, string $tz, string $dimension, int $limit, string $title): array
+    private function weekly(Brand $brand, ReportFilters $filters, string $tz, string $dimension, int $limit): array
     {
         $range = $filters->activeWindow($tz);
         if ($range === null) {
@@ -123,66 +125,48 @@ final class SCategoriesSection implements MomSection
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
         }
 
-        $bd = new CommerceBreakdown();
-        $rangeBd = $bd->forDimension($brand->id, $dimension, $range[0], $range[1], null, null, $filters->usd, $limit);
-        if ($rangeBd === null) {
+        $scaffold = WeeklyBreakdownMatrix::build(
+            new CommerceBreakdown(),
+            $brand->id,
+            $dimension,
+            $range,
+            $weeks,
+            $filters->usd,
+            $limit,
+            $tz,
+        );
+        if ($scaffold === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No commerce data in the selected range.'];
         }
 
-        // Wide per-week per-key revenue + each week's own total (for the Other row).
-        $perWeekMap = [];
-        $perWeekTotal = [];
-        foreach ($weeks as $i => $w) {
-            $wb = $bd->forDimension($brand->id, $dimension, $w['start'], $w['end'], null, null, $filters->usd, 500);
-            $map = [];
-            foreach (($wb['rows'] ?? []) as $r) {
-                if (isset($r['key'])) {
-                    $map[$r['key']] = (float) $r['revenue'];
-                }
-            }
-            $perWeekMap[$i] = $map;
-            $perWeekTotal[$i] = (float) ($wb['total']['revenue'] ?? 0.0);
-        }
+        // Stock presence per category (product_type) — same join as month mode.
+        $stockByCategory = ProductCatalog::query()
+            ->where('brand_id', $brand->id)
+            ->whereNotNull('product_type')
+            ->groupBy('product_type')
+            ->selectRaw('product_type, COALESCE(SUM(total_inventory), 0) AS stock')
+            ->pluck('stock', 'product_type');
 
-        $topKeys = [];
-        foreach ($rangeBd['rows'] as $r) {
-            if (isset($r['key'])) {
-                $topKeys[] = $r['key'];
-            }
-        }
+        $rows = array_map(function (array $row) use ($stockByCategory): array {
+            $stock = $stockByCategory[$row['label']] ?? $stockByCategory[$row['key'] ?? ''] ?? null;
+            $row['stock'] = $stock !== null ? (int) $stock : null;
+            $row['lowStock'] = $stock !== null ? $stock <= self::LOW_STOCK_FLOOR : null;
 
-        $groups = [];
-        foreach ($rangeBd['rows'] as $r) {
-            $cells = [];
-            if (isset($r['key'])) {
-                foreach ($weeks as $i => $_) {
-                    $cells[] = array_key_exists($r['key'], $perWeekMap[$i]) ? round($perWeekMap[$i][$r['key']], 2) : null;
-                }
-            } else {
-                // The synthetic "Other" tail: each week's total minus the top-N keys.
-                foreach ($weeks as $i => $_) {
-                    $sumTop = 0.0;
-                    foreach ($topKeys as $k) {
-                        $sumTop += $perWeekMap[$i][$k] ?? 0.0;
-                    }
-                    $other = round($perWeekTotal[$i] - $sumTop, 2);
-                    $cells[] = $other > 0.009 ? $other : null;
-                }
-            }
-            $groups[] = ['label' => $r['label'], 'weekly' => $cells, 'total' => round((float) $r['revenue'], 2)];
-        }
+            return $row;
+        }, $scaffold['rows']);
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
             'range'  => true,
-            'rangeCollapse' => RangeCollapse::weeklyRevenueByGroup(
-                'Segment',
-                $weeks,
-                $groups,
-                $title,
-                WeekSplit::note($weeks),
-            ),
+            'weekly' => true,
+            'months' => $scaffold['months'],
+            'monthLabels' => $scaffold['monthLabels'],
+            'weekHeaders' => $scaffold['weekHeaders'],
+            'monthsWindow' => count($weeks),
+            'rows'   => $rows,
+            'total'  => $scaffold['total'],
+            'note'   => WeekSplit::note($weeks),
         ];
     }
 }

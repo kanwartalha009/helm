@@ -134,6 +134,58 @@ class MomExecOverviewTest extends TestCase
         $this->assertEquals(400.0, $daily->first()['returning']);
     }
 
+    public function test_s2_uses_real_shopify_customer_type_split_when_available(): void
+    {
+        // Kanwar, 2026-07-21: client wanted ACTUAL new-vs-returning revenue, not
+        // the estimate. Shopify DOES expose it (dimension new_or_returning_customer),
+        // so when the live split resolves, S2 carries Shopify's OWN figures and is
+        // labelled 'verified' — NOT the blended-AOV estimate.
+        $this->actingMasterAdmin();
+        $brand = $this->makeBrand();
+        $this->seedShopifyConnection($brand);
+
+        $ym = $this->monthStart()->format('Y-m');
+        $mock = Mockery::mock(RevenueFetcher::class);
+        // Counts still come from the same source (real).
+        $mock->shouldReceive('customersByMonthRange')
+            ->andReturn([$ym => ['total' => null, 'net' => null, 'orders' => 120, 'customers' => 100, 'returning' => 40]]);
+        // The REAL revenue split by customer type (Shopify's own net/total sales).
+        $mock->shouldReceive('customerTypeSalesForWindow')
+            ->andReturn(['new' => ['net' => 1800.0, 'total' => 2000.0], 'returning' => ['net' => 900.0, 'total' => 1000.0]]);
+        $this->app->instance(RevenueFetcher::class, $mock);
+
+        DB::table('daily_metrics')->insert([
+            'brand_id' => $brand->id, 'platform' => 'shopify', 'date' => $this->monthStart()->addDays(3)->toDateString(),
+            'currency' => 'EUR', 'fx_rate_to_usd' => 1.0, 'is_complete' => true, 'pulled_at' => now(),
+            'total_sales' => 1000, 'refunds_amount' => 0, 'orders' => 100,
+        ]);
+
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S2?month={$ym}")
+            ->assertOk()->assertJsonPath('status', 'ok');
+
+        // Verified, not modeled — the whole point of the client request.
+        $this->assertSame('verified', $res->json('customerSalesSplit.basis'));
+        // Displays Shopify's own total_sales per type (the figure the client
+        // checks against in Shopify Analytics) plus net for after-returns.
+        $this->assertEquals(2000.0, $res->json('customerSalesSplit.new.sales'));
+        $this->assertEquals(1000.0, $res->json('customerSalesSplit.returning.sales'));
+        $this->assertEquals(1800.0, $res->json('customerSalesSplit.new.net'));
+        $this->assertEquals(900.0, $res->json('customerSalesSplit.returning.net'));
+        // % is each type's SHARE OF SALES: new 2000/3000 = 66.7, returning 33.3.
+        $this->assertEquals(66.7, $res->json('customerSalesSplit.new.pct'));
+        $this->assertEquals(33.3, $res->json('customerSalesSplit.returning.pct'));
+        // Customer counts still real (from CustomerMix): new = 100 − 40 = 60.
+        $this->assertEquals(60, $res->json('customerSalesSplit.new.customers'));
+        $this->assertEquals(40, $res->json('customerSalesSplit.returning.customers'));
+
+        // Daily series allocates real revenue by the REAL new-share (2000/3000):
+        // the one seeded day (rev 1000) → new ≈ 666.67, returning ≈ 333.33.
+        $daily = collect($res->json('customerSalesDaily'));
+        $this->assertCount(1, $daily);
+        $this->assertEqualsWithDelta(666.67, $daily->first()['new'], 0.01);
+        $this->assertEqualsWithDelta(333.33, $daily->first()['returning'], 0.01);
+    }
+
     public function test_sex_wires_new_vs_returning_and_cac_from_customer_split(): void
     {
         $this->actingMasterAdmin();
@@ -272,27 +324,32 @@ class MomExecOverviewTest extends TestCase
         $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S1?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
             ->assertOk()->assertJsonPath('status', 'ok')->assertJsonPath('range', true);
 
-        // Columns: Metric + one per week + Total = 4.
-        $columns = $res->json('rangeCollapse.columns');
-        $this->assertCount(4, $columns);
-        $this->assertSame('Metric', $columns[0]);
-        $this->assertSame('Total', $columns[3]);
-
-        // Weekly headers carry the ISO week-of-year for the "W23 / 1–7 Jun" header.
-        // Jun 1 2026 is a Monday in ISO week 23; the second week is 24.
-        $this->assertTrue($res->json('rangeCollapse.weekly'));
-        $weekHeaders = $res->json('rangeCollapse.weekHeaders');
+        // Weekly full-parity payload (Kanwar, 2026-07-21): the matrix now renders
+        // through the SAME S1 renderer as month mode — one ROW PER WEEK in
+        // currentYearRows (all the detailed columns), with weekHeaders carrying
+        // the ISO week for the two-line "W23 / 1–7 Jun" header. Jun 1 2026 is a
+        // Monday in ISO week 23; the second week is 24.
+        $this->assertTrue($res->json('weekly'));
+        $weekHeaders = $res->json('weekHeaders');
         $this->assertCount(2, $weekHeaders);
         $this->assertSame(23, $weekHeaders[0]['week']);
         $this->assertSame(24, $weekHeaders[1]['week']);
 
-        // Revenue row: [label, wk1=700, wk2=0, total=700].
-        $revenueRow = collect($res->json('rangeCollapse.rows'))->first(fn ($r) => $r[0]['v'] === 'Revenue');
-        $this->assertNotNull($revenueRow);
-        $this->assertCount(4, $revenueRow);
-        $this->assertEquals(700.0, $revenueRow[1]['v']);
-        $this->assertEquals(0.0, $revenueRow[2]['v']);
-        $this->assertEquals(700.0, $revenueRow[3]['v']); // range total, not summed last-year
+        $rows = $res->json('currentYearRows');
+        $this->assertCount(2, $rows);
+        $this->assertSame('ok', $rows[0]['status']);
+        $this->assertSame('2026-06-01', $rows[0]['month']); // week-start rowKey
+        $this->assertEquals(700.0, $rows[0]['revenue']);    // week 1 (Jun 1–7)
+        $this->assertEquals(0.0, $rows[1]['revenue']);      // week 2 (Jun 8–14)
+        // Δ Revenue is WEEK-over-week: wk1 has no prior week (null), wk2 = (0−700)/700 = −100%.
+        $this->assertNull($rows[0]['deltaRevenuePct']);
+        $this->assertEquals(-100.0, $rows[1]['deltaRevenuePct']);
+        // Customer-split columns need whole months → null (render "—"), never faked.
+        $this->assertNull($rows[0]['new']);
+        $this->assertNull($rows[0]['cac']);
+        // Weekly is a single table — no prior-year block, and the goal column hides.
+        $this->assertSame([], $res->json('priorYearRows'));
+        $this->assertFalse($res->json('hasGoals'));
 
         CarbonImmutable::setTestNow();
     }
@@ -322,22 +379,65 @@ class MomExecOverviewTest extends TestCase
         $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S7?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
             ->assertOk()->assertJsonPath('status', 'ok')->assertJsonPath('range', true);
 
-        // Segment + 2 weeks + Total = 4 columns.
-        $this->assertCount(4, $res->json('rangeCollapse.columns'));
+        // Weekly full-parity payload (Kanwar, 2026-07-21): the SAME S7 renderer as
+        // month mode — per-segment rows with a per-week `monthly[]` + Total/Share/
+        // ΔYoY/ΔMoM — driven by `months` / `weekHeaders`, with weeks as the periods.
+        $this->assertTrue($res->json('weekly'));
+        $this->assertCount(2, $res->json('weekHeaders'));
+        $this->assertCount(2, $res->json('months'));
 
-        // Bags row: [label, wk1=800, wk2=null, total=800].
-        $bags = collect($res->json('rangeCollapse.rows'))->first(fn ($r) => $r[0]['v'] === 'Bags');
+        // Bags row: monthly = [wk1 800, wk2 null], window Total 800.
+        $bags = collect($res->json('rows'))->first(fn ($r) => $r['label'] === 'Bags');
         $this->assertNotNull($bags);
-        $this->assertEquals(800.0, $bags[1]['v']);
-        $this->assertNull($bags[2]['v']);
-        $this->assertEquals(800.0, $bags[3]['v']);
+        $this->assertEquals(800.0, $bags['monthly'][0]);
+        $this->assertNull($bags['monthly'][1]);
+        $this->assertEquals(800.0, $bags['revenue']);
+        // Share is a PERCENT of the range total (Bags 800 of 1000) = 80%.
+        $this->assertEquals(80.0, $bags['share']);
+    }
 
-        // The Total footer sums the segments: wk1 = 1000 (800+200), total 1000.
-        $footer = $res->json('rangeCollapse.footer');
-        $this->assertNotNull($footer);
-        $this->assertSame('Total', $footer[0]['v']);
-        $this->assertEquals(1000.0, $footer[1]['v']);
-        $this->assertEquals(1000.0, $footer[3]['v']);
+    public function test_country_revenue_splits_into_week_on_week_matrix_under_a_custom_range(): void
+    {
+        // Kanwar, 2026-07-21 — S5 country revenue MoM under a custom range now
+        // renders the SAME detailed matrix as month mode (compact per-week cells
+        // + Total/Share/ROAS/ΔYoY/ΔMoM + "view full table" popup), just with weeks
+        // as the periods — no more the stripped-down collapse table.
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
+        $this->actingMasterAdmin();
+        $brand = $this->makeBrand();
+
+        $seedCountry = function (string $date, string $iso, float $sales) use ($brand): void {
+            DB::table('commerce_daily_metrics')->insert([
+                'brand_id' => $brand->id, 'date' => $date, 'dimension_type' => 'country',
+                'dimension_key' => $iso, 'dimension_label' => $iso, 'orders' => 1,
+                'total_sales' => $sales, 'refunds_amount' => 0, 'currency' => 'EUR',
+                'fx_rate_to_usd' => 1.0, 'is_complete' => true, 'pulled_at' => now(),
+            ]);
+        };
+        $seedCountry('2026-06-03', 'ES', 600);  // week 1 (Jun 1–7)
+        $seedCountry('2026-06-10', 'ES', 400);  // week 2 (Jun 8–14)
+        $seedCountry('2026-06-04', 'FR', 200);  // week 1
+        $seedCountry('2026-06-20', 'ES', 900);  // outside the range
+
+        $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S5?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
+            ->assertOk()->assertJsonPath('status', 'ok')->assertJsonPath('range', true);
+
+        $this->assertTrue($res->json('weekly'));
+        $this->assertCount(2, $res->json('weekHeaders'));
+        $this->assertSame(23, $res->json('weekHeaders.0.week'));
+
+        // ES leads (1000 over the range): per-week monthly [600, 400], Total 1000.
+        $es = collect($res->json('rows'))->first(fn ($r) => $r['iso2'] === 'ES');
+        $this->assertNotNull($es);
+        $this->assertEquals(600.0, $es['monthly'][0]);
+        $this->assertEquals(400.0, $es['monthly'][1]);
+        $this->assertEquals(1000.0, $es['revenue']);
+        // Share of the range total (ES 1000 of 1200) = 83.3%.
+        $this->assertEquals(83.3, $es['sharePct']);
+        // ΔMoM is last-week-vs-prev-week: (400 − 600) / 600 = −33.3%.
+        $this->assertEquals(-33.3, $es['deltaMoMPct']);
+
+        CarbonImmutable::setTestNow();
     }
 
     protected function tearDown(): void

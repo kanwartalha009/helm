@@ -938,6 +938,113 @@ GQL;
     }
 
     /**
+     * REAL new-vs-returning SALES split for one window (Kanwar, 2026-07-21 —
+     * client wanted actual numbers, not the estimate). Shopify DOES expose this:
+     * the `sales` schema dimension is `new_or_returning_customer` (values "New" /
+     * "Returning") — verified live via shopify:diagnose-customer-type. Our first
+     * probe missed it only because it bundled an unproven metric (`units_sold`)
+     * into every query, so a bad metric masqueraded as a bad dimension.
+     *
+     * One ShopifyQL call, grouped by that dimension, returning Shopify's OWN
+     * net_sales + total_sales per type — the exact figures the merchant sees in
+     * Analytics > Reports (so the report reconciles to what the client checks
+     * against). Only the two proven-valid metrics are requested, so a parseError
+     * can only mean the dimension is unavailable on this store/plan.
+     *
+     * Same honesty contract as customersByMonthRange(): any missing connection /
+     * scope / transport / parse failure → null (caller keeps the modeled estimate
+     * and labels it as such), NEVER a fabricated zero. A window with only one of
+     * the two rows still returns what Shopify gave (the missing side is 0.0 only
+     * when Shopify itself reports no sales of that type in a window it DID answer).
+     *
+     * @return array{new: array{net: float, total: float}, returning: array{net: float, total: float}}|null
+     */
+    public function customerTypeSalesForWindow(PlatformConnection $conn, string $sinceStr, string $untilStr): ?array
+    {
+        $client  = $this->makeClient($conn, timeoutSeconds: self::REPORT_CONTEXT_TIMEOUT_SECS);
+        $channel = str_replace("'", '', $this->shopifyqlChannel());
+        $ql = 'FROM sales SHOW net_sales, total_sales GROUP BY new_or_returning_customer '
+            . "SINCE {$sinceStr} UNTIL {$untilStr} "
+            . "WHERE sales_channel = '{$channel}'";
+
+        $gql = <<<'GQL'
+query ($q: String!) {
+  shopifyqlQuery(query: $q) {
+    tableData { columns { name } rows }
+    parseErrors
+  }
+}
+GQL;
+
+        try {
+            $data = $client->graphql($gql, ['q' => $ql], self::SHOPIFYQL_API_VERSION);
+        } catch (Throwable $e) {
+            Log::warning('shopify.shopifyql.request_failed', ['error' => $e->getMessage(), 'ql' => $ql]);
+
+            return null;
+        }
+
+        $resp = $data['shopifyqlQuery'] ?? null;
+        if (! is_array($resp)) {
+            return null;
+        }
+        if (! empty($resp['parseErrors'])) {
+            $pe = $resp['parseErrors'];
+            Log::warning('shopify.shopifyql.parse_error', ['parseErrors' => is_array($pe) ? json_encode($pe) : (string) $pe, 'ql' => $ql]);
+
+            return null;
+        }
+
+        $columns = $resp['tableData']['columns'] ?? [];
+        $rows    = $resp['tableData']['rows'] ?? [];
+        if (! is_array($rows) || $rows === []) {
+            return null;
+        }
+
+        // The dimension column is whichever column isn't one of the two metrics.
+        $metricCols = ['net_sales', 'total_sales'];
+        $dimCol = null;
+        foreach ($columns as $c) {
+            $name = (string) ($c['name'] ?? '');
+            if ($name !== '' && ! in_array($name, $metricCols, true)) {
+                $dimCol = $name;
+                break;
+            }
+        }
+        if ($dimCol === null) {
+            return null;
+        }
+
+        $split = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            // Shopify returns "New" / "Returning"; normalise defensively.
+            $label = strtolower(trim((string) ($row[$dimCol] ?? '')));
+            $bucket = str_starts_with($label, 'new') || str_starts_with($label, 'first')
+                ? 'new'
+                : (str_starts_with($label, 'return') || str_starts_with($label, 'repeat') ? 'returning' : null);
+            if ($bucket === null) {
+                continue;
+            }
+            $split[$bucket] = [
+                'net'   => isset($row['net_sales']) ? round((float) $row['net_sales'], 2) : 0.0,
+                'total' => isset($row['total_sales']) ? round((float) $row['total_sales'], 2) : 0.0,
+            ];
+        }
+
+        // Need at least one recognised bucket; fill the other with zeros only when
+        // Shopify answered the window but reported none of that type.
+        if (! isset($split['new']) && ! isset($split['returning'])) {
+            return null;
+        }
+        $split += ['new' => ['net' => 0.0, 'total' => 0.0], 'returning' => ['net' => 0.0, 'total' => 0.0]];
+
+        return ['new' => $split['new'], 'returning' => $split['returning']];
+    }
+
+    /**
      * Inventory stock + sell-through for one dimension (product_title or
      * product_type) over a trailing window — powers the dead-stock report. One
      * ShopifyQL `FROM inventory` call, one row per dimension value (no day

@@ -66,6 +66,52 @@ final class WeekSplit
         return count($weeks) > self::SOFT_MAX_WEEKS;
     }
 
+    /**
+     * Period scaffolding for the weekly matrices (Kanwar, 2026-07-21) — the SAME
+     * `months` / `monthLabels` keys the month-by-month matrices emit, so the
+     * existing S1/S4/S5/S6/S7/S8 frontend renderers draw the weekly view with no
+     * new code. `months` carries each week's START date (the per-period key /
+     * x-axis), `monthLabels` the compact "1–7 Jun" label, and `weekHeaders` the
+     * {week,label} pairs the two-line "W23 / 1–7 Jun" period header reads. Emit
+     * these alongside `weekly => true` and each row's `monthly` = per-week cells.
+     *
+     * @param array<int, array{start:string,end:string,label:string,week:int}> $weeks
+     * @return array{months: array<int,string>, monthLabels: array<int,string>, weekHeaders: array<int,array{week:int,label:string}>}
+     */
+    public static function periods(array $weeks): array
+    {
+        return [
+            'months'      => array_column($weeks, 'start'),
+            'monthLabels' => array_column($weeks, 'label'),
+            'weekHeaders' => array_map(
+                static fn (array $w): array => ['week' => $w['week'], 'label' => $w['label']],
+                $weeks,
+            ),
+        ];
+    }
+
+    /**
+     * ΔMoM-equivalent for a weekly row: the last week vs the week before it (the
+     * momentum column), null-safe. Mirrors the month matrices' "last month vs the
+     * month before" so the Δ column reads identically in both modes.
+     *
+     * @param array<int, float|null> $cells per-week values aligned to windows()
+     */
+    public static function lastWeekDelta(array $cells): ?float
+    {
+        $n = count($cells);
+        if ($n < 2) {
+            return null;
+        }
+        $last = $cells[$n - 1] ?? null;
+        $prev = $cells[$n - 2] ?? null;
+        if ($last === null || $prev === null || (float) $prev === 0.0) {
+            return null;
+        }
+
+        return round(($last - $prev) / $prev * 100, 1);
+    }
+
     /** Shared honesty note for the weekly matrices — week count + the partial-final-week caveat. */
     public static function note(array $weeks): string
     {

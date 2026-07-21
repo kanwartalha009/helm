@@ -8,7 +8,6 @@ use App\Models\Brand;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Support\CountryRevenueSpend;
-use App\Reports\Mom\Support\RangeCollapse;
 use App\Reports\Mom\Support\WeekSplit;
 use App\Services\CountryTiers;
 use Carbon\CarbonImmutable;
@@ -173,7 +172,14 @@ final class SCountryRevenueSection implements MomSection
         ];
     }
 
-    /** Week-on-week revenue by country across the custom range. */
+    /**
+     * Week-on-week revenue by country across the custom range (Kanwar, 2026-07-21).
+     * Emits the SAME payload shape as the month-by-month build() — rows with a
+     * per-period `monthly[]` (one cell per ISO week), plus Total / Share / ROAS /
+     * ΔYoY / ΔMoM summary columns — with `weekly => true` and `weekHeaders`, so the
+     * existing S5 frontend renderer draws every column (compact cells + "view full
+     * table" popup) exactly like month mode, just with weeks as the periods.
+     */
     private function weekly(Brand $brand, ReportFilters $filters, string $tz): array
     {
         $range = $filters->activeWindow($tz);
@@ -191,31 +197,86 @@ final class SCountryRevenueSection implements MomSection
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No commerce-by-country data in the selected range.'];
         }
 
+        // Same range one year earlier — a single windowed compute per country for
+        // the ΔYoY column (window total vs the same window last year).
+        $priorStart = CarbonImmutable::parse($range[0], $tz)->subYear()->toDateString();
+        $priorEnd   = CarbonImmutable::parse($range[1], $tz)->subYear()->toDateString();
+        $priorYear  = $joiner->compute($brand->id, $priorStart, $priorEnd);
+
         $perWeek = [];
         foreach ($weeks as $w) {
             $perWeek[] = $joiner->compute($brand->id, $w['start'], $w['end']);
         }
 
-        $groups = [];
+        $tiers = (new CountryTiers())->resolve($brand);
+        $floor = (float) config('momreport.benchmarks.roas_alarm_floor', 1.5);
+
+        $totalRevenue = 0.0;
+        $totalSpend   = 0.0;
+        foreach ($rangeC as $c) {
+            $totalRevenue += (float) $c['revenue'];
+            $totalSpend   += (float) $c['spend'];
+        }
+
+        $rows = [];
+        $roasValues = [];
         foreach ($rangeC as $key => $c) {
             $cells = [];
             foreach ($perWeek as $wk) {
                 $cells[] = isset($wk[$key]) ? round((float) $wk[$key]['revenue'], 2) : null;
             }
-            $groups[] = ['label' => $c['label'], 'weekly' => $cells, 'total' => round((float) $c['revenue'], 2)];
+            $rev   = (float) $c['revenue'];
+            $spend = (float) $c['spend'];
+            $roas  = $spend > 0.0 ? round($rev / $spend, 2) : null;
+            if ($roas !== null && $spend >= $totalSpend * self::MIN_SPEND_SHARE_FOR_STATUS) {
+                $roasValues[] = $roas;
+            }
+
+            $rows[] = [
+                'iso2'      => $c['iso2'],
+                'label'     => $c['label'],
+                'tier'      => $tiers[$c['iso2']]['tierKey'] ?? null,
+                'tierLabel' => $tiers[$c['iso2']]['label'] ?? 'Other',
+                'monthly'   => $cells, // one cell per ISO week, aligned to `months`
+                'revenue'   => round($rev, 2),
+                'spend'     => round($spend, 2),
+                'sharePct'  => $totalRevenue > 0.0 ? round($rev / $totalRevenue * 100, 1) : null,
+                'spendPct'  => $totalSpend > 0.0 ? round($spend / $totalSpend * 100, 1) : null,
+                'roas'      => $roas,
+                'deltaYoYPct' => $this->delta($rev, isset($priorYear[$key]) ? (float) $priorYear[$key]['revenue'] : null),
+                'deltaMoMPct' => WeekSplit::lastWeekDelta($cells), // last week vs the week before
+            ];
         }
+
+        // Same top-quartile TOP logic as month mode, for the suggested title.
+        sort($roasValues);
+        $topQuartileFloor = $roasValues !== [] ? $roasValues[(int) floor(count($roasValues) * 0.75)] : null;
+        $topCountries = [];
+        foreach ($rows as $row) {
+            $eligible = $row['roas'] !== null && $row['spend'] >= $totalSpend * self::MIN_SPEND_SHARE_FOR_STATUS;
+            if ($eligible && $row['roas'] >= $floor && $topQuartileFloor !== null && $row['roas'] >= $topQuartileFloor) {
+                $topCountries[] = $row['label'];
+            }
+        }
+
+        usort($rows, static fn (array $a, array $b): int => $b['revenue'] <=> $a['revenue']);
+
+        $periods = WeekSplit::periods($weeks);
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
             'range'  => true,
-            'rangeCollapse' => RangeCollapse::weeklyRevenueByGroup(
-                'Country',
-                $weeks,
-                $groups,
-                'Week-on-week revenue by country',
-                WeekSplit::note($weeks),
-            ),
+            'weekly' => true,
+            'months' => $periods['months'],
+            'monthLabels' => $periods['monthLabels'],
+            'weekHeaders' => $periods['weekHeaders'],
+            'monthsWindow' => count($weeks),
+            'total'  => ['revenue' => round($totalRevenue, 2), 'spend' => round($totalSpend, 2)],
+            'rows'   => $rows,
+            'suggestedTitle' => $topCountries !== [] ? 'Push ' . implode(', ', array_slice($topCountries, 0, 3)) : null,
+            'benchmarks' => ['roasAlarmFloor' => $floor],
+            'note'   => WeekSplit::note($weeks),
         ];
     }
 

@@ -285,6 +285,12 @@ export function SectionBody({
           primary view, the chart is the secondary/visual-summary view. */}
       {showTable && <div>{table}</div>}
       {showChart && <div>{chart}</div>}
+      {/* Weekly (custom-range) honesty note — week count + the partial-final-week
+          caveat — carried on the same monthly-shaped payload the matrices now use
+          (Kanwar, 2026-07-21). Only shown in weekly mode; month mode has none. */}
+      {payload.weekly === true && typeof payload.note === 'string' && (
+        <div className="muted" style={{ fontSize: 11, fontStyle: 'italic' }}>{payload.note}</div>
+      )}
     </div>
   );
 }

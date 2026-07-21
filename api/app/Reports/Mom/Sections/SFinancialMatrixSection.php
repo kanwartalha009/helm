@@ -11,7 +11,6 @@ use App\Models\PlatformConnection;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Support\CustomerMix;
-use App\Reports\Mom\Support\RangeCollapse;
 use App\Reports\Mom\Support\WeekSplit;
 use Carbon\CarbonImmutable;
 
@@ -330,8 +329,20 @@ final class SFinancialMatrixSection implements MomSection
         ];
     }
 
-    /** Collapse S1 to headline financials over the custom range vs the same range last year. */
-    /** Week-on-week headline financials across the custom range — one metric per row, one column per week. */
+    /**
+     * Week-on-week financial matrix across the custom range (Kanwar, 2026-07-21).
+     * Emits the SAME payload shape as the month-by-month build() — one ROW PER
+     * WEEK in `currentYearRows`, carrying the same headline columns (Orders / AOV
+     * / %Returns / Revenue / Spend / platform shares / ROAS + week-over-week Δ
+     * Revenue / Δ Budget) — with `weekly => true` and `weekHeaders`, so the
+     * existing S1 renderer draws the full detailed matrix with weeks as the rows
+     * (its weekly branch: one table, no prior-year block, "view full table" popup).
+     *
+     * Customer-split columns (New / Returning / %Ret / Total / CAC / ROAS-nc) and
+     * the Goal column need whole calendar months (the ShopifyQL customer feed is
+     * month-granular), so they're left null here — the renderer shows "—" and its
+     * own note says they appear in month mode — never approximated.
+     */
     private function weekly(Brand $brand, ReportFilters $filters, string $tz): array
     {
         $range = $filters->activeWindow($tz);
@@ -353,39 +364,69 @@ final class SFinancialMatrixSection implements MomSection
             $perWeek[] = $this->rangeAggregate($brand->id, $w['start'], $w['end']);
         }
 
-        $revCells = $spendCells = $roasCells = $orderCells = $aovCells = [];
-        foreach ($perWeek as $wk) {
-            $revCells[]   = round((float) $wk['revenue'], 2);
-            $spendCells[] = round((float) $wk['spend'], 2);
-            $roasCells[]  = $wk['spend'] > 0.0 ? round($wk['revenue'] / $wk['spend'], 2) : null;
-            $orderCells[] = (int) $wk['orders'];
-            $aovCells[]   = $wk['orders'] > 0 ? round($wk['revenue'] / $wk['orders'], 2) : null;
+        $rows = [];
+        $prev = null;
+        foreach ($weeks as $i => $w) {
+            $wk    = $perWeek[$i];
+            $rev   = (float) $wk['revenue'];
+            $spend = (float) $wk['spend'];
+            $orders = (int) $wk['orders'];
+
+            $rows[] = [
+                'month'  => $w['start'], // unique per-week rowKey (the renderer reads r.month)
+                'label'  => $w['label'], // "1–7 Jun"; weekHeaders[i] adds the "W23" line
+                'status' => 'ok',
+                'orders' => $orders,
+                'aov'    => $orders > 0 ? round($rev / $orders, 2) : null,
+                'returnsPct' => $rev > 0.0 ? round(abs((float) $wk['refunds']) / $rev * 100, 1) : null,
+                'revenue' => round($rev, 2),
+                'spend'   => round($spend, 2),
+                'googleSharePct' => $spend > 0.0 ? round((float) $wk['googleSpend'] / $spend * 100, 1) : null,
+                'metaSharePct'   => $spend > 0.0 ? round((float) $wk['metaSpend'] / $spend * 100, 1) : null,
+                'tiktokSharePct' => $spend > 0.0 ? round((float) $wk['tiktokSpend'] / $spend * 100, 1) : null,
+                'roas'    => $spend > 0.0 ? round($rev / $spend, 2) : null,
+                // Customer-split + goal columns need whole months → null (renders "—").
+                'new'            => null,
+                'returning'      => null,
+                'retPctCustomers' => null,
+                'totalCustomers' => null,
+                'cac'            => null,
+                'roasNc'         => null,
+                'goalPct'        => null,
+                'captacionMoMPct' => null,
+                'retentionMoMPct' => null,
+                // Δ Revenue / Δ Budget are WEEK-over-week (vs the previous week).
+                'deltaRevenuePct' => $prev !== null ? $this->pctDelta($rev, (float) $prev['revenue']) : null,
+                'deltaSpendPct'   => $prev !== null ? $this->pctDelta($spend, (float) $prev['spend']) : null,
+            ];
+            $prev = $wk;
         }
 
-        $rows = [
-            ['label' => 'Revenue',      'format' => 'money', 'cells' => $revCells,   'total' => round((float) $total['revenue'], 2)],
-            ['label' => 'Ad spend',     'format' => 'money', 'cells' => $spendCells, 'total' => round((float) $total['spend'], 2)],
-            ['label' => 'Blended ROAS', 'format' => 'ratio', 'cells' => $roasCells,  'total' => $total['spend'] > 0.0 ? round($total['revenue'] / $total['spend'], 2) : null],
-            ['label' => 'Orders',       'format' => 'count', 'cells' => $orderCells, 'total' => (int) $total['orders']],
-            ['label' => 'AOV',          'format' => 'money', 'cells' => $aovCells,   'total' => $total['orders'] > 0 ? round($total['revenue'] / $total['orders'], 2) : null],
-        ];
+        $periods = WeekSplit::periods($weeks);
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
             'range'  => true,
-            'rangeCollapse' => RangeCollapse::weekly(
-                'Metric',
-                $weeks,
-                $rows,
-                null, // rows are mixed formats (money/ratio/count) — no single summable footer
-                'Week-on-week performance',
-                WeekSplit::note($weeks) . ' Total is the range figure (ROAS/AOV recomputed, not summed). New / Returning / CAC need whole months and show in month mode.',
-            ),
+            'weekly' => true,
+            'weekHeaders' => $periods['weekHeaders'],
+            'monthsWindow' => count($weeks),
+            'currentYearRows' => $rows,
+            'priorYearRows'   => [], // weekly is a single table — no prior-year block
+            // Which platform-share columns to show (connected OR any spend in the range).
+            'adPlatforms' => $this->adPlatforms($brand->id, $perWeek),
+            'hasGoals' => false, // goal needs whole-month targets; hidden in weekly
+            'note'   => WeekSplit::note($weeks)
+                . ' Δ Revenue / Δ Budget are week-over-week. New / Returning / %Ret / Total / CAC / ROAS-nc need whole months and show in month mode.',
         ];
     }
 
-    /** @return array{revenue: float, orders: int, spend: float} range totals (D-005 revenue, all ad platforms). */
+    /**
+     * @return array{revenue: float, orders: int, refunds: float, spend: float, googleSpend: float, metaSpend: float, tiktokSpend: float}
+     *   range totals (D-005 revenue, refunds for %Returns, and per-platform spend
+     *   for the share columns — so the weekly matrix carries the same columns as
+     *   month mode).
+     */
     private function rangeAggregate(int $brandId, string $start, string $end): array
     {
         $revCol = '(COALESCE(total_sales, 0) + COALESCE(refunds_amount, 0))'; // D-005
@@ -394,19 +435,30 @@ final class SFinancialMatrixSection implements MomSection
             ->where('brand_id', $brandId)
             ->where('platform', 'shopify')
             ->whereBetween('date', [$start, $end])
-            ->selectRaw("COALESCE(SUM({$revCol}), 0) AS revenue, COALESCE(SUM(orders), 0) AS orders")
+            ->selectRaw("COALESCE(SUM({$revCol}), 0) AS revenue, COALESCE(SUM(orders), 0) AS orders, COALESCE(SUM(refunds_amount), 0) AS refunds")
             ->first();
 
-        $spend = (float) DailyMetric::query()
+        // Per-platform spend in one grouped query (for the Google/Meta/TikTok share columns).
+        $byPlatform = DailyMetric::query()
             ->where('brand_id', $brandId)
             ->whereIn('platform', self::AD_PLATFORMS)
             ->whereBetween('date', [$start, $end])
-            ->sum('spend');
+            ->groupBy('platform')
+            ->selectRaw('platform, COALESCE(SUM(spend), 0) AS spend')
+            ->pluck('spend', 'platform');
+
+        $google = (float) ($byPlatform['google'] ?? 0);
+        $meta   = (float) ($byPlatform['meta'] ?? 0);
+        $tiktok = (float) ($byPlatform['tiktok'] ?? 0);
 
         return [
             'revenue' => (float) ($shop->revenue ?? 0),
             'orders'  => (int) ($shop->orders ?? 0),
-            'spend'   => $spend,
+            'refunds' => (float) ($shop->refunds ?? 0),
+            'spend'   => $google + $meta + $tiktok,
+            'googleSpend' => $google,
+            'metaSpend'   => $meta,
+            'tiktokSpend' => $tiktok,
         ];
     }
 
