@@ -379,8 +379,13 @@ class AuthController extends Controller
 
         Cache::put('helm.mfa.enroll.' . $user->id, $secret, now()->addMinutes(10));
 
-        $issuer = (string) config('app.name', 'Helm');
-        $otpauth = $g2fa->getQRCodeUrl($issuer, $user->email, $secret);
+        // White-label the authenticator label: use the workspace's agency name
+        // (same source as UserResource::agencyName / the shell wordmark) so the
+        // code shows up under the client's brand, not "Helm". Falls back to the
+        // configured app name only when no branding is set.
+        $branding = (array) WorkspaceSetting::getValue('report_branding', []);
+        $issuer   = trim((string) ($branding['agency_name'] ?? '')) ?: (string) config('app.name', 'Roasdriven');
+        $otpauth  = $g2fa->getQRCodeUrl($issuer, $user->email, $secret);
 
         // Render the QR as inline SVG so the SPA can <img src={dataUri}/> it.
         $renderer = new ImageRenderer(new RendererStyle(220, 1), new SvgImageBackEnd());
@@ -392,6 +397,7 @@ class AuthController extends Controller
             'secret'       => $secret,
             'otpauthUrl'   => $otpauth,
             'qrCodeSvg'    => $qrSvg,
+            'issuer'       => $issuer, // the white-label name shown in the authenticator app
             'instructions' => 'Scan this in your authenticator app, then submit the 6-digit code to confirm enrollment.',
         ]);
     }

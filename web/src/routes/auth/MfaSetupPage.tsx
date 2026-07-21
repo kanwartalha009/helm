@@ -168,6 +168,7 @@ export function MfaSetupPage() {
   }
 
   const { secret, qrCodeSvg } = setupState.data;
+  const issuer = setupState.data.issuer || APP_NAME;
 
   return (
     <AuthLayout homeTo="/dashboard">
@@ -215,7 +216,7 @@ export function MfaSetupPage() {
             {secret}
           </div>
           <p className="text-xs muted mt-8">
-            Account name: <span className="mono">{APP_NAME}</span> · Type: <span className="mono">Time-based (TOTP)</span> · Digits: <span className="mono">6</span>
+            Account name: <span className="mono">{issuer}</span> · Type: <span className="mono">Time-based (TOTP)</span> · Digits: <span className="mono">6</span>
           </p>
         </details>
 

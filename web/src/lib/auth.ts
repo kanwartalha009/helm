@@ -48,6 +48,8 @@ export interface MfaSetupResponse {
   secret: string;
   otpauthUrl: string;
   qrCodeSvg: string;
+  // White-label name shown in the authenticator app (the workspace agency name).
+  issuer?: string;
   instructions: string;
 }
 

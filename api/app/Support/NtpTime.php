@@ -40,9 +40,18 @@ final class NtpTime
 
         $ttl = max(60, (int) config('helm.mfa.ntp.cache_ttl', 3600));
 
-        return (int) Cache::remember(self::CACHE_KEY, now()->addSeconds($ttl), function (): int {
-            return $this->queryOffset();
-        });
+        // Never let a clock-sync problem break authentication: any failure here
+        // (cache driver, network, a disabled socket function) falls back to the
+        // raw system clock (offset 0).
+        try {
+            return (int) Cache::remember(self::CACHE_KEY, now()->addSeconds($ttl), function (): int {
+                return $this->queryOffset();
+            });
+        } catch (Throwable $e) {
+            Log::warning('mfa.ntp.offset_unavailable', ['error' => $e->getMessage()]);
+
+            return 0;
+        }
     }
 
     /** Corrected wall-clock time (UNIX seconds, float) — system time plus the NTP offset. */
@@ -82,14 +91,17 @@ final class NtpTime
         $timeout = max(1, (int) config('helm.mfa.ntp.timeout', 2));
         $maxAbs  = max(1, (int) config('helm.mfa.ntp.max_offset', 3600));
 
-        $sock = @stream_socket_client("udp://{$host}:123", $errno, $errstr, $timeout);
-        if ($sock === false) {
-            Log::warning('mfa.ntp.connect_failed', ['host' => $host, 'error' => $errstr]);
-
-            return 0;
-        }
-
+        $sock = null;
         try {
+            // Inside the try so a disabled `stream_socket_client` (some managed
+            // hosts restrict it) degrades to offset 0 instead of a 500.
+            $sock = @stream_socket_client("udp://{$host}:123", $errno, $errstr, $timeout);
+            if ($sock === false) {
+                Log::warning('mfa.ntp.connect_failed', ['host' => $host, 'error' => $errstr]);
+
+                return 0;
+            }
+
             stream_set_timeout($sock, $timeout);
 
             // Request: LI = 0, VN = 3, Mode = 3 (client) in the first byte, rest zero.
@@ -132,7 +144,9 @@ final class NtpTime
 
             return 0;
         } finally {
-            @fclose($sock);
+            if (is_resource($sock)) {
+                @fclose($sock);
+            }
         }
     }
 }

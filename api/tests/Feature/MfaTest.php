@@ -199,4 +199,18 @@ class MfaTest extends TestCase
         $this->assertNull($user->mfa_secret);
         $this->assertNull($user->mfa_recovery_codes);
     }
+
+    public function test_setup_uses_the_white_label_agency_name_as_the_totp_issuer(): void
+    {
+        \App\Models\WorkspaceSetting::setValue('report_branding', ['agency_name' => 'Acme Ads']);
+
+        $user = $this->user(['mfa_secret' => null]);
+        Sanctum::actingAs($user);
+
+        $res = $this->postJson('/api/auth/mfa/setup')->assertOk();
+        $this->assertSame('Acme Ads', $res->json('issuer'));
+        // The otpauth URI the QR encodes carries the white-label issuer, not "Helm".
+        $this->assertStringContainsString('Acme%20Ads', $res->json('otpauthUrl'));
+        $this->assertStringNotContainsStringIgnoringCase('helm', $res->json('otpauthUrl'));
+    }
 }
