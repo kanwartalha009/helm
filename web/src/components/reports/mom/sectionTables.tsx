@@ -167,21 +167,32 @@ export const SECTION_TABLE_RENDERERS: Record<string, (payload: any, currency: st
         if (field) cols.push({ key: field, label: platformLabel[pf] ?? pf, align: 'right', render: (r) => share(r[field]) });
       });
       cols.push({ key: 'roas', label: 'ROAS', align: 'right', render: (r) => (r.roas == null ? '—' : formatRoas(r.roas)), heat: { mode: 'column', dir: 'high', value: (r) => r.roas } });
-      // Customer split — real Shopify counts; '—' when the counts aren't available.
+      // Customer-split + Goal + Captación/Ret columns need whole calendar months
+      // (the Shopify customer feed is month-granular). In weekly mode they'd be a
+      // wall of empty "—" cells, so we DROP them entirely (Kanwar, 2026-07-21 —
+      // "in custom range i see empty cells") and the footnote says where they live.
+      if (!weekly) {
+        // Customer split — real Shopify counts; '—' when the counts aren't available.
+        cols.push(
+          { key: 'new', label: 'New', align: 'right', render: (r) => count(r.new), heat: { mode: 'column', dir: 'high', value: (r) => r.new } },
+          { key: 'returning', label: 'Returning', align: 'right', render: (r) => count(r.returning), heat: { mode: 'column', dir: 'high', value: (r) => r.returning } },
+          { key: 'retPctCustomers', label: '% Ret', align: 'right', render: (r) => pct1(r.retPctCustomers) },
+          { key: 'totalCustomers', label: 'Total', align: 'right', render: (r) => count(r.totalCustomers), heat: { mode: 'column', dir: 'high', value: (r) => r.totalCustomers } },
+          { key: 'cac', label: 'CAC', align: 'right', render: (r) => money(r.cac), heat: { mode: 'column', dir: 'low', value: (r) => r.cac } },
+          { key: 'roasNc', label: 'ROAS-nc*', align: 'right', render: (r) => (r.roasNc == null ? '—' : formatRoas(r.roasNc)), heat: { mode: 'column', dir: 'high', value: (r) => r.roasNc } },
+        );
+        // Goal column only when the brand has a target (backend `hasGoals`).
+        if (p.hasGoals) cols.push({ key: 'goalPct', label: 'Goal', align: 'right', render: (r) => delta(r.goalPct), gradeOf: (r) => heatFromDeltaPct(r.goalPct) });
+      }
+      // Comparison columns. Captación / Ret Δ are month-only (customer counts); the
+      // revenue/budget deltas apply in both modes (week-over-week in weekly mode).
+      if (!weekly) {
+        cols.push(
+          { key: 'captacionMoMPct', label: 'Captación', align: 'right', render: (r) => delta(r.captacionMoMPct), gradeOf: (r) => heatFromDeltaPct(r.captacionMoMPct) },
+          { key: 'retentionMoMPct', label: 'Ret Δ', align: 'right', render: (r) => delta(r.retentionMoMPct), gradeOf: (r) => heatFromDeltaPct(r.retentionMoMPct) },
+        );
+      }
       cols.push(
-        { key: 'new', label: 'New', align: 'right', render: (r) => count(r.new), heat: { mode: 'column', dir: 'high', value: (r) => r.new } },
-        { key: 'returning', label: 'Returning', align: 'right', render: (r) => count(r.returning), heat: { mode: 'column', dir: 'high', value: (r) => r.returning } },
-        { key: 'retPctCustomers', label: '% Ret', align: 'right', render: (r) => pct1(r.retPctCustomers) },
-        { key: 'totalCustomers', label: 'Total', align: 'right', render: (r) => count(r.totalCustomers), heat: { mode: 'column', dir: 'high', value: (r) => r.totalCustomers } },
-        { key: 'cac', label: 'CAC', align: 'right', render: (r) => money(r.cac), heat: { mode: 'column', dir: 'low', value: (r) => r.cac } },
-        { key: 'roasNc', label: 'ROAS-nc*', align: 'right', render: (r) => (r.roasNc == null ? '—' : formatRoas(r.roasNc)), heat: { mode: 'column', dir: 'high', value: (r) => r.roasNc } },
-      );
-      // Goal column only when the brand has a target (backend `hasGoals`).
-      if (p.hasGoals) cols.push({ key: 'goalPct', label: 'Goal', align: 'right', render: (r) => delta(r.goalPct), gradeOf: (r) => heatFromDeltaPct(r.goalPct) });
-      // Comparison columns — month-over-month.
-      cols.push(
-        { key: 'captacionMoMPct', label: 'Captación', align: 'right', render: (r) => delta(r.captacionMoMPct), gradeOf: (r) => heatFromDeltaPct(r.captacionMoMPct) },
-        { key: 'retentionMoMPct', label: 'Ret Δ', align: 'right', render: (r) => delta(r.retentionMoMPct), gradeOf: (r) => heatFromDeltaPct(r.retentionMoMPct) },
         { key: 'revMoM', label: 'Δ Revenue', align: 'right', render: (r) => delta(r.deltaRevenuePct), gradeOf: (r) => heatFromDeltaPct(r.deltaRevenuePct) },
         { key: 'budgetMoM', label: 'Δ Budget', align: 'right', render: (r) => delta(r.deltaSpendPct), gradeOf: (r) => heatFromDeltaPct(r.deltaSpendPct) },
       );

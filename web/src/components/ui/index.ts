@@ -14,6 +14,7 @@ export { PageEmptyState } from './PageEmptyState';
 export { PageHeader } from './PageHeader';
 export { Popover, PopoverItem, PopoverLabel, PopoverDivider } from './Popover';
 export { Segmented } from './Segmented';
+export { Skeleton, SectionSkeleton } from './Skeleton';
 export { Stepper } from './Stepper';
 export { Tabs } from './Tabs';
 export { Tag, Dot } from './Tag';

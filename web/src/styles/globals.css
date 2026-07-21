@@ -2070,3 +2070,29 @@ td.col-group-start {
 :where(div):has(> table) > table {
   min-width: 100%;
 }
+
+/* Section lazy-load skeletons (Kanwar, 2026-07-21) — every MoM report section
+   fetches on its OWN request, and cards now fetch lazily as they scroll into
+   view (so opening the report no longer fires ~19 requests at once and trips
+   the API rate limit). While a card is pending — off-screen or fetching — it
+   shows an animated shimmer placeholder instead of a bare "Loading…", so the
+   page has stable height and reads as actively loading. Gradient adapts to the
+   theme via the surface tokens, so it works in light and dark. */
+@keyframes helm-shimmer {
+  0%   { background-position: -800px 0; }
+  100% { background-position: 800px 0; }
+}
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-subtle, #f5f5f4) 25%,
+    var(--border, #e7e5e4) 50%,
+    var(--surface-subtle, #f5f5f4) 75%
+  );
+  background-size: 800px 100%;
+  animation: helm-shimmer 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}

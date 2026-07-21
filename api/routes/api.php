@@ -343,8 +343,20 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         // section-streamed architecture M0 exists to teach. `mom` is fixed in
         // the path (not a {type} param) — section-per-request is a mom-specific
         // concept, not a generic ReportType capability.
-        Route::get('brands/{brand}/reports/mom/sections/{key}',             [MomSectionController::class, 'show']);
-        Route::get('brands/{brand}/reports/mom/sections/{key}/commentary',  [MomSectionController::class, 'showCommentary']);
+        // Read-only, idempotent section fetches get a MUCH higher rate budget than
+        // the 60/min group default (Kanwar, 2026-07-21): the report is section-
+        // streamed, so one open fires ~19 of these at once. The frontend now loads
+        // them lazily as cards scroll in, but a wide window + fast filter changes
+        // can still burst — 300/min of cacheable GETs is safe and keeps the report
+        // from ever hitting "Too Many Attempts". Mutations stay at the 60/min group
+        // rate; only these two GETs are lifted (via withoutMiddleware on the group's
+        // throttle, so the higher route-level throttle is the only one that binds).
+        Route::get('brands/{brand}/reports/mom/sections/{key}', [MomSectionController::class, 'show'])
+            ->withoutMiddleware('throttle:60,1')
+            ->middleware('throttle:300,1');
+        Route::get('brands/{brand}/reports/mom/sections/{key}/commentary', [MomSectionController::class, 'showCommentary'])
+            ->withoutMiddleware('throttle:60,1')
+            ->middleware('throttle:300,1');
         // Saving commentary is NOT role-gated at the route — any user with access
         // to the brand can collaborate on the shared notes; the controller's
         // `comment` authorization (BrandPolicy::comment) does the per-brand access

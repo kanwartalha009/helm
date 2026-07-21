@@ -74,6 +74,11 @@ export function useMomReport(slug: string | undefined, filters: MomFiltersInput)
       const { data } = await api.get<MomReportShell>(`/brands/${slug}/reports/mom`, { params: q });
       return data;
     },
+    // Keep the shell cached so reopening the report renders the section manifest
+    // instantly from cache (Kanwar, 2026-07-21) instead of blocking on a refetch.
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -104,6 +109,14 @@ export function useMomSection<T = Record<string, unknown>>(
     // A section that failed (status: 'no_data'/'needs_source') is still a
     // valid, successful response — never retried as if it were a network error.
     retry: false,
+    // Cache each section so reopening the report (or scrolling back to it) shows
+    // the data INSTANTLY from cache instead of re-fetching — the other half of
+    // the rate-limit fix (Kanwar, 2026-07-21): fewer opens = fewer requests. Five
+    // minutes fresh, kept 30, and no refetch on window focus so tabbing away and
+    // back doesn't re-hammer the API.
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 }
 

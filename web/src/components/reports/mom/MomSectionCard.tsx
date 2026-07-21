@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Card, Button, Segmented } from '@/components/ui';
+import { Card, Button, Segmented, SectionSkeleton } from '@/components/ui';
+import { useInView } from '@/hooks/useInView';
 import { useTriggerBackfill } from '@/hooks/useApiData';
 import type { MomFiltersInput, MomSectionManifestEntry } from '@/hooks/useMomReport';
 import { useMomCommentary, useMomSection, useSaveMomCommentary } from '@/hooks/useMomReport';
@@ -116,7 +117,20 @@ function MetricSectionCard({
     if (hasPlatformControl && platform) p.platform = platform;
     return Object.keys(p).length ? p : undefined;
   })();
-  const { data, isLoading, isError, refetch, isRefetching } = useMomSection(slug, section.key, filters, section.ready, extraParams);
+  // Lazy load (Kanwar, 2026-07-21): a section only fetches once its card scrolls
+  // near the viewport. Opening the report used to fire every section's request
+  // at once (~19+shell), tripping the API rate limit so half the sections failed
+  // with "Too Many Attempts". Now the top few load immediately and the rest
+  // stream in as the user scrolls — spread out, so the limit is never hit. The
+  // flag latches on, so a loaded section never re-fetches when scrolled past.
+  const { ref: inViewRef, inView } = useInView<HTMLDivElement>();
+  const { data, isLoading, isError, refetch, isRefetching } = useMomSection(
+    slug,
+    section.key,
+    filters,
+    section.ready && inView,
+    extraParams,
+  );
   // TikTok only appears in the toggle when the section reports it's available —
   // an active TikTok connection OR real TikTok breakdown data for this brand/
   // window (Kanwar, 2026-07-17 — "if tiktok is not connected then only show
@@ -147,75 +161,83 @@ function MetricSectionCard({
   // an honest non-'ok' status, which still shows its note/backfill affordance.
   if (data && (data as any).hidden === true) return null;
 
+  // Pending = not yet loaded and not errored. Covers BOTH "off-screen, not
+  // fetched yet" (query disabled until inView) and "in view, fetch in flight".
+  // Either way the card shows an animated shimmer with a stable height so the
+  // page doesn't jump and the lazy-load observer has a real target to watch.
+  const pending = !data && !isError;
+
   return (
-    <Card style={{ padding: 18 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <SectionHeader label={section.label} sub={data?.status && data.status !== 'ok' ? statusNote(data) : undefined} />
-        {(showMonthsControl || showBenchmarkControl || showPlatformControl) && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            {showMonthsControl && <Segmented options={MONTHS_OPTIONS} value={monthsWindow} onChange={setMonthsWindow} />}
-            {showBenchmarkControl && (
-              <>
-                <span className="muted text-sm">Benchmark</span>
-                <Segmented options={BENCHMARK_OPTIONS} value={benchmark} onChange={setBenchmark} />
-              </>
-            )}
-            {showPlatformControl && <Segmented options={platformOptions} value={platform} onChange={setPlatform} />}
-          </div>
-        )}
-      </div>
-
-      {isLoading && <div className="muted text-sm">Loading…</div>}
-
-      {/* A real fetch failure (network/5xx) is distinct from the backend's own
-          honest non-'ok' statuses below — those are successful 200s. Retry
-          here re-fires just THIS section's query, never the whole report. */}
-      {isError && !isLoading && (
-        <div className="muted text-sm" style={{ padding: '8px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span>Couldn’t load this section.</span>
-          <Button size="sm" variant="ghost" type="button" disabled={isRefetching} onClick={() => refetch()}>
-            {isRefetching ? 'Retrying…' : 'Retry'}
-          </Button>
-        </div>
-      )}
-
-      {data && data.status === 'ok' && (
-        <SectionBody payload={data} sectionKey={section.key} view={section.view} currency={currency} />
-      )}
-
-      {data && data.status !== 'ok' && (
-        <div className="muted text-sm" style={{ padding: '8px 0' }}>
-          <div>{(data as any).note ?? statusNote(data)}</div>
-          {/* M5 — the section's own backfillDataset hint (from
-              MomSectionRegistry::datasetFor(), attached by MomSectionController
-              only on 'needs_source') drives the SAME backfill-dataset
-              endpoint/job v1's DataCoverageCard already triggers. No dataset
-              hint (e.g. S16's genuine schema gap) means no button — never a
-              CTA that would 202 into a job that can't fill the gap. */}
-          {data.status === 'needs_source' && (data as any).backfillDataset && (
-            <Button
-              size="sm"
-              variant="secondary"
-              type="button"
-              style={{ marginTop: 6 }}
-              disabled={backfill.isPending}
-              onClick={() => backfill.mutate((data as any).backfillDataset)}
-            >
-              {backfill.isPending ? 'Starting backfill…' : 'Backfill this data'}
-            </Button>
+    <div ref={inViewRef}>
+      <Card style={{ padding: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <SectionHeader label={section.label} sub={data?.status && data.status !== 'ok' ? statusNote(data) : undefined} />
+          {(showMonthsControl || showBenchmarkControl || showPlatformControl) && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {showMonthsControl && <Segmented options={MONTHS_OPTIONS} value={monthsWindow} onChange={setMonthsWindow} />}
+              {showBenchmarkControl && (
+                <>
+                  <span className="muted text-sm">Benchmark</span>
+                  <Segmented options={BENCHMARK_OPTIONS} value={benchmark} onChange={setBenchmark} />
+                </>
+              )}
+              {showPlatformControl && <Segmented options={platformOptions} value={platform} onChange={setPlatform} />}
+            </div>
           )}
         </div>
-      )}
 
-      {data && data.status === 'ok' && (
-        <div style={{ marginTop: 10 }}>
-          <Button size="sm" variant="ghost" type="button" onClick={() => setShowNotes((s) => !s)}>
-            {showNotes ? 'Hide notes' : 'Commentary & To-Do'}
-          </Button>
-          {showNotes && filters.month && <CommentaryEditor slug={slug} sectionKey={section.key} month={filters.month} />}
-        </div>
-      )}
-    </Card>
+        {pending && <SectionSkeleton />}
+
+        {/* A real fetch failure (network/5xx) is distinct from the backend's own
+            honest non-'ok' statuses below — those are successful 200s. Retry
+            here re-fires just THIS section's query, never the whole report. */}
+        {isError && !data && (
+          <div className="muted text-sm" style={{ padding: '8px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Couldn’t load this section.</span>
+            <Button size="sm" variant="ghost" type="button" disabled={isRefetching} onClick={() => refetch()}>
+              {isRefetching ? 'Retrying…' : 'Retry'}
+            </Button>
+          </div>
+        )}
+
+        {data && data.status === 'ok' && (
+          <SectionBody payload={data} sectionKey={section.key} view={section.view} currency={currency} />
+        )}
+
+        {data && data.status !== 'ok' && (
+          <div className="muted text-sm" style={{ padding: '8px 0' }}>
+            <div>{(data as any).note ?? statusNote(data)}</div>
+            {/* M5 — the section's own backfillDataset hint (from
+                MomSectionRegistry::datasetFor(), attached by MomSectionController
+                only on 'needs_source') drives the SAME backfill-dataset
+                endpoint/job v1's DataCoverageCard already triggers. No dataset
+                hint (e.g. S16's genuine schema gap) means no button — never a
+                CTA that would 202 into a job that can't fill the gap. */}
+            {data.status === 'needs_source' && (data as any).backfillDataset && (
+              <Button
+                size="sm"
+                variant="secondary"
+                type="button"
+                style={{ marginTop: 6 }}
+                disabled={backfill.isPending}
+                onClick={() => backfill.mutate((data as any).backfillDataset)}
+              >
+                {backfill.isPending ? 'Starting backfill…' : 'Backfill this data'}
+              </Button>
+            )}
+          </div>
+        )}
+
+        {data && data.status === 'ok' && (
+          <div style={{ marginTop: 10 }}>
+            <Button size="sm" variant="ghost" type="button" onClick={() => setShowNotes((s) => !s)}>
+              {showNotes ? 'Hide notes' : 'Commentary & To-Do'}
+            </Button>
+            {showNotes && filters.month && <CommentaryEditor slug={slug} sectionKey={section.key} month={filters.month} />}
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 

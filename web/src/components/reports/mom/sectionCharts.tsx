@@ -355,19 +355,11 @@ function ModeledCustomerSplit({
 
   return (
     <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+      {/* No status badge here (Kanwar, 2026-07-21) — the basis is conveyed by the
+          method footnote below and the "~" on estimated amounts; a chip read as
+          clutter. `verified` still drives whether the amounts show the "~". */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <div className="muted text-sm">New vs returning customer sales</div>
-        <span
-          className="chip"
-          style={{
-            fontSize: 9,
-            textTransform: 'uppercase',
-            letterSpacing: 0.4,
-            ...(verified ? { background: 'rgba(16,185,129,0.12)', color: '#059669', borderColor: 'rgba(16,185,129,0.3)' } : {}),
-          }}
-        >
-          {verified ? 'Verified — Shopify' : 'Modeled — estimate'}
-        </span>
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
