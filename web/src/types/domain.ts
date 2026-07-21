@@ -29,6 +29,8 @@ export interface User {
   // True for a master_admin who hasn't enrolled MFA yet — AuthGate forces
   // them to /mfa/setup before any app route renders.
   mfaRequired?: boolean;
+  // Single-use backup codes still available (0 when MFA is off).
+  mfaRecoveryCodesRemaining?: number;
   accessibleBrandIds: number[];
   notificationPrefs: {
     daily_sync_digest: boolean;

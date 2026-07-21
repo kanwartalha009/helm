@@ -29,11 +29,15 @@ class UserResource extends JsonResource
             'displayInitials'        => $this->display_initials ?: mb_substr($this->name ?: '?', 0, 1),
             'timezone'               => $this->timezone ?? 'UTC',
             'mfaEnabled'             => (bool) $this->mfa_secret,
+            // How many single-use recovery codes remain — the UI nudges the user
+            // to regenerate when this runs low. 0 when MFA is off / none issued.
+            'mfaRecoveryCodesRemaining' => is_array($this->mfa_recovery_codes) ? count($this->mfa_recovery_codes) : 0,
             // Spec §08: MFA is mandatory for master_admin. AuthGate forces
-            // enrollment when this is true (post-onboarding). Gated by a config
-            // kill-switch (HELM_REQUIRE_ADMIN_MFA) so enforcement can be released
-            // if enrollment ever can't be completed — anti-lockout.
-            'mfaRequired'            => (bool) config('helm.require_admin_mfa', true)
+            // enrollment when this is true (post-onboarding). Gated by the
+            // HELM_REQUIRE_ADMIN_MFA kill-switch so enforcement can be released
+            // in an emergency — anti-lockout. (No default here: the config key
+            // always exists, and its own default is `true`.)
+            'mfaRequired'            => (bool) config('helm.require_admin_mfa')
                 && $this->role === 'master_admin'
                 && ! $this->mfa_secret,
             'accessibleBrandIds'     => $this->accessibleBrandIds(),

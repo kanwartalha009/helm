@@ -26,13 +26,18 @@ export async function login(email: string, password: string): Promise<LoginRespo
 export interface MfaVerifyChallengeResponse {
   user: User;
   token: string;
+  // True when the user signed in with a single-use recovery code.
+  recoveryUsed?: boolean;
 }
 
 export async function verifyMfaChallenge(input: {
   pending_token: string;
+  // A 6-digit TOTP OR a single-use recovery code — the backend detects which.
   code: string;
 }): Promise<MfaVerifyChallengeResponse> {
-  const { data } = await api.post<MfaVerifyChallengeResponse>('/auth/mfa/verify', input);
+  // Public login-challenge endpoint (distinct from the authenticated
+  // enrollment /auth/mfa/verify) — the pending_token is the bearer of trust.
+  const { data } = await api.post<MfaVerifyChallengeResponse>('/auth/mfa/challenge', input);
   if (data.token) {
     localStorage.setItem(TOKEN_KEY, data.token);
   }
@@ -51,8 +56,24 @@ export async function mfaSetup(): Promise<MfaSetupResponse> {
   return data;
 }
 
-export async function mfaVerifyEnrollment(code: string): Promise<{ enabled: boolean; user: User }> {
-  const { data } = await api.post<{ enabled: boolean; user: User }>('/auth/mfa/verify', { code });
+export interface MfaEnrollmentResponse {
+  enabled: boolean;
+  // Shown to the user exactly once, right after enrollment.
+  recoveryCodes: string[];
+  user: User;
+}
+
+export async function mfaVerifyEnrollment(code: string): Promise<MfaEnrollmentResponse> {
+  const { data } = await api.post<MfaEnrollmentResponse>('/auth/mfa/verify', { code });
+  return data;
+}
+
+export async function mfaRegenerateRecoveryCodes(
+  currentPassword: string,
+): Promise<{ recoveryCodes: string[]; user: User }> {
+  const { data } = await api.post<{ recoveryCodes: string[]; user: User }>('/auth/mfa/recovery-codes', {
+    current_password: currentPassword,
+  });
   return data;
 }
 

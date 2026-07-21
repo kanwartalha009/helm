@@ -25,6 +25,9 @@ export function MfaSetupPage() {
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  // After a successful enroll the server returns single-use recovery codes,
+  // shown here exactly once before the user continues.
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,17 +51,97 @@ export function MfaSetupPage() {
     setVerifyError(null);
     setSubmitting(true);
     try {
-      const { user } = await mfaVerifyEnrollment(code);
+      const { user, recoveryCodes: codes } = await mfaVerifyEnrollment(code);
       // Refresh the cached current user so AuthGate's MFA gate releases
       // immediately (mfaRequired flips false) instead of bouncing back here.
       queryClient.setQueryData(['auth', 'me'], user);
-      toast.success('MFA enabled', 'You’ll be asked for a code on your next sign-in.');
-      navigate('/profile', { replace: true });
+      // Show the recovery codes step (don't navigate yet) — this is the only
+      // time the plaintext codes are ever available.
+      setRecoveryCodes(codes ?? []);
     } catch (err: any) {
       setVerifyError(err?.response?.data?.message ?? err.message ?? 'Verification failed.');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const copyCodes = () => {
+    if (!recoveryCodes) return;
+    navigator.clipboard?.writeText(recoveryCodes.join('\n')).then(
+      () => toast.success('Copied', 'Recovery codes copied to your clipboard.'),
+      () => toast.error('Copy failed', 'Select and copy the codes manually.'),
+    );
+  };
+
+  const downloadCodes = () => {
+    if (!recoveryCodes) return;
+    const body = `${APP_NAME} — two-factor recovery codes\nGenerated ${new Date().toISOString()}\n\n${recoveryCodes.join('\n')}\n\nEach code works once. Keep them somewhere safe and private.\n`;
+    const url = URL.createObjectURL(new Blob([body], { type: 'text/plain' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'helm-recovery-codes.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Step 2 — recovery codes. Shown once, gated behind an explicit acknowledge.
+  if (recoveryCodes) {
+    return (
+      <AuthLayout homeTo="/dashboard">
+        <div className="auth-card" style={{ maxWidth: 460 }}>
+          <div style={{ textAlign: 'center', marginBottom: 20 }}>
+            <Tag style={{ marginBottom: 16 }}>Save your recovery codes</Tag>
+            <h2>Two-factor is on</h2>
+            <p className="mt-8 text-sm">
+              Store these codes somewhere safe. Each one signs you in <strong>once</strong> if you lose
+              your authenticator. This is the only time they&rsquo;re shown.
+            </p>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 8,
+              padding: 16,
+              background: 'var(--surface-subtle)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 14,
+              letterSpacing: '0.04em',
+              marginBottom: 16,
+            }}
+          >
+            {recoveryCodes.map((c) => (
+              <span key={c} style={{ textAlign: 'center', color: 'var(--text)' }}>{c}</span>
+            ))}
+          </div>
+
+          <div className="flex gap-12" style={{ marginBottom: 20 }}>
+            <Button type="button" variant="secondary" size="sm" className="w-full" onClick={copyCodes}>
+              Copy
+            </Button>
+            <Button type="button" variant="secondary" size="sm" className="w-full" onClick={downloadCodes}>
+              Download .txt
+            </Button>
+          </div>
+
+          <Button
+            type="button"
+            variant="primary"
+            size="lg"
+            className="w-full"
+            onClick={() => {
+              toast.success('MFA enabled', 'You’ll be asked for a code on your next sign-in.');
+              navigate('/profile', { replace: true });
+            }}
+          >
+            I&rsquo;ve saved my recovery codes
+          </Button>
+        </div>
+      </AuthLayout>
+    );
   };
 
   if (setupState.loading) {

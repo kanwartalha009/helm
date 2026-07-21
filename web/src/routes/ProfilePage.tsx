@@ -5,7 +5,7 @@ import { AppLayout } from '@/components/shell/AppLayout';
 import { Avatar, Banner, Button, Card, Dot, Modal, Input, PageHeader, Tag } from '@/components/ui';
 import { useAuditLogs } from '@/hooks/useApiData';
 import { useCurrentUser } from '@/hooks/useSettings';
-import { mfaDisable } from '@/lib/auth';
+import { mfaDisable, mfaRegenerateRecoveryCodes } from '@/lib/auth';
 import { toast } from '@/stores/toastStore';
 
 const ROLE_LABEL: Record<string, string> = {
@@ -127,6 +127,22 @@ export function ProfilePage() {
               </Link>
             )}
           </div>
+          {user.mfaEnabled && (
+            <div className="list-row">
+              <div className="list-row-main">
+                <div className="list-row-title">Recovery codes</div>
+                <div
+                  className="list-row-sub"
+                  style={{ color: (user.mfaRecoveryCodesRemaining ?? 0) <= 2 ? 'var(--warning)' : undefined }}
+                >
+                  {(user.mfaRecoveryCodesRemaining ?? 0)} single-use code
+                  {(user.mfaRecoveryCodesRemaining ?? 0) === 1 ? '' : 's'} left
+                  {(user.mfaRecoveryCodesRemaining ?? 0) <= 2 ? ' · running low, regenerate soon' : ''}
+                </div>
+              </div>
+              <RecoveryCodesButton />
+            </div>
+          )}
           <div className="list-row">
             <div className="list-row-main">
               <div className="list-row-title">Last sign-in</div>
@@ -261,6 +277,106 @@ function DisableMfaButton() {
             autoFocus
             required
           />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/**
+ * "Regenerate recovery codes" — password-gated, then shows the fresh set once
+ * (copy / download). Regenerating invalidates the previous codes.
+ */
+function RecoveryCodesButton() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [codes, setCodes] = useState<string[] | null>(null);
+
+  const reset = () => { setOpen(false); setPassword(''); setError(null); setCodes(null); };
+
+  const onConfirm = async () => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const { recoveryCodes, user } = await mfaRegenerateRecoveryCodes(password);
+      qc.setQueryData(['auth', 'me'], user);
+      setCodes(recoveryCodes);
+      setPassword('');
+    } catch (err: any) {
+      setError(err?.response?.data?.message ?? err.message ?? 'Could not regenerate codes.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const copy = () => {
+    if (codes) navigator.clipboard?.writeText(codes.join('\n')).then(
+      () => toast.success('Copied', 'Recovery codes copied.'),
+      () => toast.error('Copy failed', 'Copy them manually.'),
+    );
+  };
+
+  return (
+    <>
+      <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+        Regenerate
+      </Button>
+      {open && (
+        <Modal
+          open
+          onClose={reset}
+          title={codes ? 'Your new recovery codes' : 'Regenerate recovery codes?'}
+          footer={
+            codes ? (
+              <>
+                <Button size="sm" variant="secondary" onClick={copy}>Copy</Button>
+                <Button size="sm" variant="primary" onClick={reset}>I’ve saved them</Button>
+              </>
+            ) : (
+              <>
+                <Button size="sm" variant="ghost" onClick={reset} disabled={submitting}>Cancel</Button>
+                <Button size="sm" variant="primary" onClick={onConfirm} disabled={!password || submitting}>
+                  {submitting ? 'Generating…' : 'Regenerate'}
+                </Button>
+              </>
+            )
+          }
+        >
+          {codes ? (
+            <>
+              <Banner variant="info" className="mb-16">
+                These replace your old codes, which no longer work. Each new code signs you in once.
+                This is the only time they’re shown.
+              </Banner>
+              <div
+                style={{
+                  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: 14,
+                  background: 'var(--surface-subtle)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)', fontFamily: 'var(--font-mono)', fontSize: 14, letterSpacing: '0.04em',
+                }}
+              >
+                {codes.map((c) => <span key={c} style={{ textAlign: 'center' }}>{c}</span>)}
+              </div>
+            </>
+          ) : (
+            <>
+              <Banner variant="warning" className="mb-16">
+                Your current recovery codes will stop working. Save the new set somewhere safe.
+              </Banner>
+              {error && <Banner variant="warning" className="mb-16">{error}</Banner>}
+              <Input
+                label="Confirm with your password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoFocus
+                required
+              />
+            </>
+          )}
         </Modal>
       )}
     </>

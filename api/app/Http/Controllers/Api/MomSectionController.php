@@ -97,9 +97,12 @@ class MomSectionController extends Controller
 
     public function saveCommentary(Request $request, Brand $brand, string $key): JsonResponse
     {
-        // Editorial content shapes what the client hears in the meeting — same
-        // gate as LLM narrative editing on other reports (admin/manager only).
-        $this->authorize('update', $brand);
+        // Collaborative notes: any user with access to the brand can add/edit the
+        // shared, DB-backed commentary + To-Do (Kanwar, 2026-07-20). Broader than
+        // the admin/manager `update` gate that guards brand settings — the point
+        // is that team members A, B and C can all contribute to the same monthly
+        // note. Persistence is unchanged (brand+month+section, never per-user).
+        $this->authorize('comment', $brand);
 
         $data = $request->validate([
             'month'         => ['required', 'date_format:Y-m'],

@@ -11,6 +11,8 @@ use App\Http\Resources\UserResource;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Models\WorkspaceSetting;
+use App\Support\NtpTime;
+use App\Support\RecoveryCodes;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
@@ -20,6 +22,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -409,12 +412,13 @@ class AuthController extends Controller
     public function mfaVerify(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'code'          => ['required', 'string', 'size:6'],
+            // 6-digit TOTP OR a recovery code (e.g. "ab2cd-ef3gh"); the branch
+            // below decides which. Wider than size:6 so recovery codes fit.
+            'code'          => ['required', 'string', 'max:32'],
             'pending_token' => ['sometimes', 'string'],
         ]);
 
-        $g2fa = new Google2FA();
-        $code = $data['code'];
+        $code = trim($data['code']);
 
         // Login-challenge mode — used by the MfaVerifyPage after a 200-with-
         // pending_token from /auth/login.
@@ -429,32 +433,50 @@ class AuthController extends Controller
             if (! $user || ! $user->mfa_secret) {
                 return response()->json(['message' => 'MFA is not configured for this account.'], 422);
             }
-            // window=2 → accept the code for ±60s around the server clock, so a
-            // small clock drift or slow entry doesn't reject a valid code. If
-            // the server clock is grossly off (minutes), sync it via NTP.
-            if (! $g2fa->verifyKey($user->mfa_secret, $code, 2)) {
+
+            $rlKey = 'mfa-verify:' . $user->id;
+            if (($limited = $this->rateLimited($rlKey)) !== null) {
+                return $limited;
+            }
+
+            // A recovery code (single-use) OR a TOTP from the authenticator.
+            $viaRecovery = false;
+            if (RecoveryCodes::looksLikeRecoveryCode($code)) {
+                $remaining = RecoveryCodes::consume($user->mfa_recovery_codes ?? [], $code);
+                if ($remaining === null) {
+                    RateLimiter::hit($rlKey, 300);
+                    return response()->json(['message' => 'That recovery code is not valid or has already been used.'], 422);
+                }
+                $user->mfa_recovery_codes = $remaining;
+                $viaRecovery = true;
+            } elseif (! $this->verifyTotp($user->mfa_secret, $code, (int) $user->id)) {
+                RateLimiter::hit($rlKey, 300);
                 return response()->json(['message' => 'That code didn’t match. Try the next one your app shows.'], 422);
             }
 
-            $user->update([
+            RateLimiter::clear($rlKey);
+
+            $user->forceFill([
                 'last_login_at' => now(),
                 'last_login_ip' => $request->ip(),
-            ]);
+            ])->save();
 
             AuditLog::create([
                 'actor_user_id' => $user->id,
-                'action'        => 'auth.mfa.verified',
+                'action'        => $viaRecovery ? 'auth.mfa.recovery_used' : 'auth.mfa.verified',
                 'target_type'   => 'user',
                 'target_id'     => $user->id,
-                'metadata'      => null,
+                'metadata'      => $viaRecovery ? ['remaining' => count($user->mfa_recovery_codes ?? [])] : null,
                 'ip'            => $request->ip(),
                 'user_agent'    => $request->userAgent(),
             ]);
 
             $token = $user->createToken('helm-spa')->plainTextToken;
             return response()->json([
-                'user'  => new UserResource($user),
+                'user'  => new UserResource($user->fresh()),
                 'token' => $token,
+                // So the SPA can warn "you have N recovery codes left" after a recovery login.
+                'recoveryUsed' => $viaRecovery,
             ]);
         }
 
@@ -462,20 +484,33 @@ class AuthController extends Controller
         $user = $request->user();
         abort_unless($user, 401);
 
+        $rlKey = 'mfa-enroll:' . $user->id;
+        if (($limited = $this->rateLimited($rlKey)) !== null) {
+            return $limited;
+        }
+
         $pendingSecret = Cache::get('helm.mfa.enroll.' . $user->id);
         if (! $pendingSecret) {
             return response()->json([
                 'message' => 'Your enrollment secret expired. Restart MFA setup.',
             ], 410);
         }
-        // window=2 → ±60s tolerance around the server clock (see note above).
-        if (! $g2fa->verifyKey($pendingSecret, $code, 2)) {
+        if (! $this->verifyTotp($pendingSecret, $code, (int) $user->id)) {
+            RateLimiter::hit($rlKey, 300);
             return response()->json([
                 'message' => 'That code didn’t match. Try the next one your app shows.',
             ], 422);
         }
 
-        $user->update(['mfa_secret' => $pendingSecret]);
+        RateLimiter::clear($rlKey);
+
+        // Issue recovery codes ON enrollment — the only time the plaintext is
+        // ever available. Stored hashed; shown to the user exactly once.
+        $recoveryCodes = RecoveryCodes::generate();
+        $user->update([
+            'mfa_secret'         => $pendingSecret,
+            'mfa_recovery_codes' => RecoveryCodes::hashAll($recoveryCodes),
+        ]);
         Cache::forget('helm.mfa.enroll.' . $user->id);
 
         AuditLog::create([
@@ -489,8 +524,103 @@ class AuthController extends Controller
         ]);
 
         return response()->json([
-            'enabled' => true,
-            'user'    => new UserResource($user->fresh()),
+            'enabled'       => true,
+            'recoveryCodes' => $recoveryCodes,
+            'user'          => new UserResource($user->fresh()),
+        ]);
+    }
+
+    /**
+     * Verify a TOTP code against an NTP-corrected clock, with single-use
+     * replay protection. google2fa's verifyKey() takes a time-STEP (not
+     * seconds) and returns the matched step (int) on success, false on
+     * failure; we feed it the NTP-corrected step and the last accepted step so
+     * a code can never be replayed within (or before) its window.
+     */
+    private function verifyTotp(string $secret, string $code, int $userId): bool
+    {
+        // A recovery code must never be accepted here (this path is TOTP only).
+        if (preg_match('/^\d{6}$/', $code) !== 1) {
+            return false;
+        }
+
+        $g2fa   = new Google2FA();
+        $window = max(1, (int) config('helm.mfa.window', 1));
+        $step   = app(NtpTime::class)->timeStep();
+
+        $lastKey = 'helm.mfa.laststep.' . $userId;
+        $last    = Cache::get($lastKey);
+        // Always pass a NON-NULL oldTimestamp so verifyKey returns the absolute
+        // matched step (with a null oldTimestamp it returns bare `true`, which
+        // is useless for replay tracking). With no prior step, baseline one full
+        // window before "now" so the check window itself stays unrestricted.
+        $oldStep = is_int($last) ? $last : ($step - $window - 1);
+
+        $matched = $g2fa->verifyKey($secret, $code, $window, $step, $oldStep);
+        if ($matched === false) {
+            return false;
+        }
+
+        // Replay protection: remember the accepted step; a later verify only
+        // accepts a strictly newer step (verifyKey's oldTimestamp contract).
+        Cache::put($lastKey, (int) $matched, now()->addMinutes(5));
+
+        return true;
+    }
+
+    /** Shared 5-attempts / 5-minute lock on MFA verification. Returns a 429 response when locked, else null. */
+    private function rateLimited(string $key): ?JsonResponse
+    {
+        if (RateLimiter::tooManyAttempts($key, 5)) {
+            $seconds = RateLimiter::availableIn($key);
+            return response()->json([
+                'message' => "Too many attempts. Wait {$seconds}s and try again.",
+            ], 429);
+        }
+
+        return null;
+    }
+
+    /**
+     * POST /api/auth/mfa/recovery-codes
+     *
+     * Regenerate the signed-in user's recovery codes (invalidating the old
+     * set). Password-gated like disable, since a stolen session shouldn't be
+     * able to mint fresh backup codes. Returns the new plaintext codes once.
+     */
+    public function mfaRecoveryCodes(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user, 401);
+
+        $data = $request->validate([
+            'current_password' => ['required', 'string'],
+        ]);
+
+        if (! Hash::check($data['current_password'], $user->password)) {
+            return response()->json(['message' => 'Current password is incorrect.'], 422);
+        }
+
+        if (! $user->mfa_secret) {
+            return response()->json(['message' => 'MFA is not enabled.'], 409);
+        }
+
+        $recoveryCodes = RecoveryCodes::generate();
+        $user->update(['mfa_recovery_codes' => RecoveryCodes::hashAll($recoveryCodes)]);
+
+        AuditLog::create([
+            'actor_user_id' => $user->id,
+            'action'        => 'auth.mfa.recovery_regenerated',
+            'target_type'   => 'user',
+            'target_id'     => $user->id,
+            'metadata'      => null,
+            'ip'            => $request->ip(),
+            'user_agent'    => $request->userAgent(),
+        ]);
+
+        return response()->json([
+            'recoveryCodes' => $recoveryCodes,
+            'user'          => new UserResource($user->fresh()),
         ]);
     }
 
@@ -517,7 +647,7 @@ class AuthController extends Controller
             return response()->json(['message' => 'MFA is not enabled.'], 409);
         }
 
-        $user->update(['mfa_secret' => null]);
+        $user->update(['mfa_secret' => null, 'mfa_recovery_codes' => null]);
 
         AuditLog::create([
             'actor_user_id' => $user->id,

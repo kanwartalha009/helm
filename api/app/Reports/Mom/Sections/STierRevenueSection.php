@@ -9,6 +9,7 @@ use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Support\CountryRevenueSpend;
 use App\Reports\Mom\Support\RangeCollapse;
+use App\Reports\Mom\Support\WeekSplit;
 use App\Services\CountryTiers;
 use Carbon\CarbonImmutable;
 
@@ -35,11 +36,11 @@ final class STierRevenueSection implements MomSection
     {
         $tz = $brand->timezone ?: 'UTC';
 
-        // Custom range (Kanwar, 2026-07-17): a sub-month range can't be a monthly
-        // matrix, so collapse to the tier revenue over the range vs the same range
-        // last year.
+        // Custom range (Kanwar, 2026-07-20): week-on-week tier revenue — one
+        // column per ISO week across the range (running month included) instead
+        // of monthly columns.
         if ($filters->isCustomRange()) {
-            return $this->rangeCollapse($brand, $filters, $tz);
+            return $this->weekly($brand, $filters, $tz);
         }
 
         $window = $filters->monthWindow($tz);
@@ -137,11 +138,15 @@ final class STierRevenueSection implements MomSection
     }
 
     /** Collapse S4 to tier revenue over the custom range vs the same range last year. */
-    private function rangeCollapse(Brand $brand, ReportFilters $filters, string $tz): array
+    /** Week-on-week tier revenue across the custom range. */
+    private function weekly(Brand $brand, ReportFilters $filters, string $tz): array
     {
         $range = $filters->activeWindow($tz);
-        $cmp   = $filters->activeComparisonWindow($tz);
         if ($range === null) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
+        }
+        $weeks = WeekSplit::windows($range[0], $range[1], $tz);
+        if ($weeks === []) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
         }
 
@@ -151,21 +156,31 @@ final class STierRevenueSection implements MomSection
         if ($rangeByTier === []) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No commerce-by-country data in the selected range.'];
         }
-        $yoyByTier = $cmp !== null ? $this->rollUp($joiner->compute($brand->id, $cmp[0], $cmp[1]), $tierDefs) : [];
+
+        $perWeek = [];
+        foreach ($weeks as $w) {
+            $perWeek[] = $this->rollUp($joiner->compute($brand->id, $w['start'], $w['end']), $tierDefs);
+        }
 
         $groups = [];
         foreach ($rangeByTier as $key => $t) {
-            $groups[] = ['label' => $t['label'], 'value' => $t['revenue'], 'compare' => $yoyByTier[$key]['revenue'] ?? null];
+            $cells = [];
+            foreach ($perWeek as $wk) {
+                $cells[] = isset($wk[$key]) ? round((float) $wk[$key]['revenue'], 2) : null;
+            }
+            $groups[] = ['label' => $t['label'], 'weekly' => $cells, 'total' => round((float) $t['revenue'], 2)];
         }
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
             'range'  => true,
-            'rangeCollapse' => RangeCollapse::revenueByGroup(
-                RangeCollapse::label($range[0], $range[1]),
-                $cmp !== null ? RangeCollapse::label($cmp[0], $cmp[1]) : 'Last year',
+            'rangeCollapse' => RangeCollapse::weeklyRevenueByGroup(
+                'Tier',
+                array_column($weeks, 'label'),
                 $groups,
+                'Week-on-week revenue by tier',
+                WeekSplit::note($weeks),
             ),
         ];
     }

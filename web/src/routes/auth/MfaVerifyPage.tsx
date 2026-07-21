@@ -18,6 +18,7 @@ import { toast } from '@/stores/toastStore';
  */
 export function MfaVerifyPage() {
   const navigate = useNavigate();
+  const [mode, setMode] = useState<'totp' | 'recovery'>('totp');
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,15 +34,28 @@ export function MfaVerifyPage() {
     setPendingToken(token);
   }, [navigate]);
 
+  const ready = mode === 'totp' ? code.length === 6 : code.trim().length >= 8;
+
+  const switchMode = (next: 'totp' | 'recovery') => {
+    setMode(next);
+    setCode('');
+    setError(null);
+  };
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pendingToken || code.length !== 6) return;
+    if (!pendingToken || !ready) return;
     setError(null);
     setSubmitting(true);
     try {
-      const res = await verifyMfaChallenge({ pending_token: pendingToken, code });
+      const res = await verifyMfaChallenge({ pending_token: pendingToken, code: code.trim() });
       sessionStorage.removeItem('helm.mfa.pending');
-      toast.success('Signed in', `Welcome back, ${res.user.name}.`);
+      if (res.recoveryUsed) {
+        const left = res.user.mfaRecoveryCodesRemaining ?? 0;
+        toast.success('Signed in with a recovery code', `${left} recovery code${left === 1 ? '' : 's'} left — regenerate them in your profile.`);
+      } else {
+        toast.success('Signed in', `Welcome back, ${res.user.name}.`);
+      }
       navigate('/dashboard', { replace: true });
     } catch (err: any) {
       const status = err?.response?.status;
@@ -64,10 +78,11 @@ export function MfaVerifyPage() {
       <div className="auth-card" style={{ maxWidth: 420 }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <Tag style={{ marginBottom: 16 }}>Two-factor auth</Tag>
-          <h2>Enter your 6-digit code</h2>
+          <h2>{mode === 'totp' ? 'Enter your 6-digit code' : 'Enter a recovery code'}</h2>
           <p className="mt-8 text-sm">
-            Open your authenticator app (Google Authenticator, Authy, 1Password) and enter the
-            current code for {APP_NAME}.
+            {mode === 'totp'
+              ? <>Open your authenticator app (Google Authenticator, Authy, 1Password) and enter the current code for {APP_NAME}.</>
+              : <>Enter one of the single-use recovery codes you saved when you set up two-factor. Each code works once.</>}
           </p>
         </div>
 
@@ -78,44 +93,83 @@ export function MfaVerifyPage() {
         )}
 
         <form className="flex flex-col gap-12" onSubmit={onSubmit}>
-          <Input
-            label="6-digit code"
-            id="code"
-            type="text"
-            inputMode="numeric"
-            maxLength={6}
-            placeholder="000000"
-            autoComplete="one-time-code"
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            autoFocus
-            required
-            style={{
-              fontFamily: 'var(--font-mono)',
-              letterSpacing: '0.2em',
-              textAlign: 'center',
-              fontSize: 18,
-            }}
-          />
+          {mode === 'totp' ? (
+            <Input
+              label="6-digit code"
+              id="code"
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="000000"
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              autoFocus
+              required
+              style={{
+                fontFamily: 'var(--font-mono)',
+                letterSpacing: '0.2em',
+                textAlign: 'center',
+                fontSize: 18,
+              }}
+            />
+          ) : (
+            <Input
+              label="Recovery code"
+              id="code"
+              type="text"
+              maxLength={20}
+              placeholder="abcde-fghij"
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value.slice(0, 20))}
+              autoFocus
+              required
+              style={{
+                fontFamily: 'var(--font-mono)',
+                letterSpacing: '0.1em',
+                textAlign: 'center',
+                fontSize: 16,
+              }}
+            />
+          )}
           <Button
             type="submit"
             variant="primary"
             size="lg"
             className="w-full mt-8"
-            disabled={code.length !== 6 || submitting || !pendingToken}
+            disabled={!ready || submitting || !pendingToken}
           >
             {submitting ? 'Verifying…' : 'Verify & continue'}
           </Button>
         </form>
 
         <div className="mt-32" style={{ textAlign: 'center' }}>
-          <p className="text-xs muted">
-            Lost your authenticator?{' '}
-            <Link to="/login" style={{ color: 'var(--text)', fontWeight: 500 }}>
-              Ask your admin to reset MFA
-            </Link>
-            .
-          </p>
+          {mode === 'totp' ? (
+            <p className="text-xs muted">
+              Lost your authenticator?{' '}
+              <button
+                type="button"
+                onClick={() => switchMode('recovery')}
+                style={{ background: 'none', border: 0, padding: 0, color: 'var(--text)', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                Use a recovery code
+              </button>
+              .
+            </p>
+          ) : (
+            <p className="text-xs muted">
+              <button
+                type="button"
+                onClick={() => switchMode('totp')}
+                style={{ background: 'none', border: 0, padding: 0, color: 'var(--text)', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                ← Back to authenticator code
+              </button>
+              {' · '}Out of codes?{' '}
+              <Link to="/login" style={{ color: 'var(--text)', fontWeight: 500 }}>Ask your admin to reset MFA</Link>.
+            </p>
+          )}
         </div>
       </div>
     </AuthLayout>

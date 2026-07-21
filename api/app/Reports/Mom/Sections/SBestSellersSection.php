@@ -9,6 +9,7 @@ use App\Models\ProductCatalog;
 use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Support\RangeCollapse;
+use App\Reports\Mom\Support\WeekSplit;
 use App\Reports\Support\CommerceBreakdown;
 use Carbon\CarbonImmutable;
 
@@ -42,10 +43,10 @@ final class SBestSellersSection implements MomSection
     {
         $tz = $brand->timezone ?: 'UTC';
 
-        // Custom range (Kanwar, 2026-07-17): collapse to product revenue over the
-        // range vs the same range last year.
+        // Custom range (Kanwar, 2026-07-20): week-on-week product revenue — one
+        // column per ISO week across the range (running month included).
         if ($filters->isCustomRange()) {
-            return $this->rangeCollapse($brand, $filters, $tz);
+            return $this->weekly($brand, $filters, $tz, 'product', 10, 'Week-on-week revenue by product');
         }
 
         $window = $filters->monthWindow($tz);
@@ -101,41 +102,80 @@ final class SBestSellersSection implements MomSection
     }
 
     /** Collapse S8 to product revenue over the custom range vs the same range last year. */
-    private function rangeCollapse(Brand $brand, ReportFilters $filters, string $tz): array
+    /**
+     * Week-on-week revenue by product across the custom range — the displayed
+     * groups are the range's top-N (plus an Other tail); each week's per-key
+     * revenue is pulled with a wide limit so a product that isn't top-N in a
+     * given week still lands in its own cell rather than hiding inside Other.
+     */
+    private function weekly(Brand $brand, ReportFilters $filters, string $tz, string $dimension, int $limit, string $title): array
     {
         $range = $filters->activeWindow($tz);
-        $cmp   = $filters->activeComparisonWindow($tz);
         if ($range === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
         }
+        $weeks = WeekSplit::windows($range[0], $range[1], $tz);
+        if ($weeks === []) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
+        }
 
-        $bd = (new CommerceBreakdown())->forDimension(
-            $brand->id,
-            'product',
-            $range[0],
-            $range[1],
-            $cmp[0] ?? null,
-            $cmp[1] ?? null,
-            $filters->usd,
-            10,
-        );
-        if ($bd === null) {
-            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No commerce-by-product data in the selected range.'];
+        $bd = new CommerceBreakdown();
+        $rangeBd = $bd->forDimension($brand->id, $dimension, $range[0], $range[1], null, null, $filters->usd, $limit);
+        if ($rangeBd === null) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No commerce data in the selected range.'];
+        }
+
+        $perWeekMap = [];
+        $perWeekTotal = [];
+        foreach ($weeks as $i => $w) {
+            $wb = $bd->forDimension($brand->id, $dimension, $w['start'], $w['end'], null, null, $filters->usd, 500);
+            $map = [];
+            foreach (($wb['rows'] ?? []) as $r) {
+                if (isset($r['key'])) {
+                    $map[$r['key']] = (float) $r['revenue'];
+                }
+            }
+            $perWeekMap[$i] = $map;
+            $perWeekTotal[$i] = (float) ($wb['total']['revenue'] ?? 0.0);
+        }
+
+        $topKeys = [];
+        foreach ($rangeBd['rows'] as $r) {
+            if (isset($r['key'])) {
+                $topKeys[] = $r['key'];
+            }
         }
 
         $groups = [];
-        foreach ($bd['rows'] as $r) {
-            $groups[] = ['label' => $r['label'], 'value' => $r['revenue'], 'compare' => $r['previous']];
+        foreach ($rangeBd['rows'] as $r) {
+            $cells = [];
+            if (isset($r['key'])) {
+                foreach ($weeks as $i => $_) {
+                    $cells[] = array_key_exists($r['key'], $perWeekMap[$i]) ? round($perWeekMap[$i][$r['key']], 2) : null;
+                }
+            } else {
+                foreach ($weeks as $i => $_) {
+                    $sumTop = 0.0;
+                    foreach ($topKeys as $k) {
+                        $sumTop += $perWeekMap[$i][$k] ?? 0.0;
+                    }
+                    $other = round($perWeekTotal[$i] - $sumTop, 2);
+                    $cells[] = $other > 0.009 ? $other : null;
+                }
+            }
+            $groups[] = ['label' => $r['label'], 'weekly' => $cells, 'total' => round((float) $r['revenue'], 2)];
         }
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
             'range'  => true,
-            'rangeCollapse' => RangeCollapse::revenueByGroup(
-                RangeCollapse::label($range[0], $range[1]),
-                $cmp !== null ? RangeCollapse::label($cmp[0], $cmp[1]) : 'Last year',
+            'rangeCollapse' => RangeCollapse::weeklyRevenueByGroup(
+                'Segment',
+                array_column($weeks, 'label'),
                 $groups,
+                $title,
+                WeekSplit::note($weeks),
             ),
         ];
     }

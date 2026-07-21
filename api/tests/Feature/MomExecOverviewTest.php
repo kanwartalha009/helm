@@ -247,11 +247,13 @@ class MomExecOverviewTest extends TestCase
         CarbonImmutable::setTestNow();
     }
 
-    public function test_financial_matrix_collapses_to_range_vs_same_range_last_year(): void
+    public function test_financial_matrix_splits_into_week_on_week_columns_under_a_custom_range(): void
     {
-        // Kanwar, 2026-07-17 — the month-by-month matrices (here S1) COLLAPSE under
-        // a custom range: one "selected range vs same range last year" table, not a
-        // monthly grid. Revenue over Jun 1–14 = 700; the same range last year = 500.
+        // Kanwar, 2026-07-20 — under a custom range the matrices show WEEK-ON-WEEK
+        // columns (one ISO week per column) instead of a monthly grid or a single
+        // range-vs-last-year collapse. Jun 1 2026 is a Monday, so Jun 1–14 splits
+        // into exactly two weeks: Jun 1–7 and Jun 8–14. Revenue lands 700 in wk1,
+        // 0 in wk2, Total 700. Last-year data is irrelevant to a progression view.
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
         $this->actingMasterAdmin();
         $brand = $this->makeBrand();
@@ -263,27 +265,35 @@ class MomExecOverviewTest extends TestCase
                 'total_sales' => $sales, 'refunds_amount' => 0, 'orders' => 1,
             ]);
         };
-        $seed('2026-06-05', 700);
-        $seed('2026-06-20', 300); // outside the range
-        $seed('2025-06-05', 500); // same range last year
+        $seed('2026-06-05', 700);  // week 1 (Jun 1–7)
+        $seed('2026-06-20', 300);  // outside the range
+        $seed('2025-06-05', 500);  // same range last year — ignored in a weekly progression
 
         $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S1?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
             ->assertOk()->assertJsonPath('status', 'ok')->assertJsonPath('range', true);
 
-        // Revenue is the first collapse row: [label, range value, last-year value, Δ].
+        // Columns: Metric + one per week + Total = 4.
+        $columns = $res->json('rangeCollapse.columns');
+        $this->assertCount(4, $columns);
+        $this->assertSame('Metric', $columns[0]);
+        $this->assertSame('Total', $columns[3]);
+
+        // Revenue row: [label, wk1=700, wk2=0, total=700].
         $revenueRow = collect($res->json('rangeCollapse.rows'))->first(fn ($r) => $r[0]['v'] === 'Revenue');
         $this->assertNotNull($revenueRow);
+        $this->assertCount(4, $revenueRow);
         $this->assertEquals(700.0, $revenueRow[1]['v']);
-        $this->assertEquals(500.0, $revenueRow[2]['v']);
-        $this->assertEquals(40.0, $revenueRow[3]['v']); // (700-500)/500
+        $this->assertEquals(0.0, $revenueRow[2]['v']);
+        $this->assertEquals(700.0, $revenueRow[3]['v']); // range total, not summed last-year
 
         CarbonImmutable::setTestNow();
     }
 
-    public function test_categories_collapse_to_range_revenue_by_group_with_share_and_yoy(): void
+    public function test_categories_split_into_week_on_week_revenue_columns_under_a_custom_range(): void
     {
-        // Kanwar, 2026-07-17 — revenue-by-group collapse (S7 categories): each
-        // group's range revenue, the same range last year, Δ YoY and share.
+        // Kanwar, 2026-07-20 — S7 categories show week-on-week revenue per segment
+        // under a custom range. Bags 800 in week 1 (Jun 1–7), nothing in week 2,
+        // Total 800. A summed Total footer row sits under the segments.
         CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-07-20 12:00:00', self::TZ));
         $this->actingMasterAdmin();
         $brand = $this->makeBrand();
@@ -296,21 +306,30 @@ class MomExecOverviewTest extends TestCase
                 'fx_rate_to_usd' => 1.0, 'is_complete' => true, 'pulled_at' => now(),
             ]);
         };
-        $seedCat('2026-06-05', 'Bags', 800);
-        $seedCat('2026-06-06', 'Wallets', 200);
-        $seedCat('2026-06-20', 'Bags', 500);  // outside the range
-        $seedCat('2025-06-05', 'Bags', 400);   // Bags, same range last year
+        $seedCat('2026-06-05', 'Bags', 800);     // week 1
+        $seedCat('2026-06-06', 'Wallets', 200);  // week 1
+        $seedCat('2026-06-20', 'Bags', 500);     // outside the range
+        $seedCat('2025-06-05', 'Bags', 400);     // last year — ignored
 
         $res = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S7?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
             ->assertOk()->assertJsonPath('status', 'ok')->assertJsonPath('range', true);
 
-        // Bags is the top row: range 800, last year 400, Δ +100%, share 80% (of 1000).
+        // Segment + 2 weeks + Total = 4 columns.
+        $this->assertCount(4, $res->json('rangeCollapse.columns'));
+
+        // Bags row: [label, wk1=800, wk2=null, total=800].
         $bags = collect($res->json('rangeCollapse.rows'))->first(fn ($r) => $r[0]['v'] === 'Bags');
         $this->assertNotNull($bags);
         $this->assertEquals(800.0, $bags[1]['v']);
-        $this->assertEquals(400.0, $bags[2]['v']);
-        $this->assertEquals(100.0, $bags[3]['v']);
-        $this->assertEquals(80.0, $bags[4]['v']);
+        $this->assertNull($bags[2]['v']);
+        $this->assertEquals(800.0, $bags[3]['v']);
+
+        // The Total footer sums the segments: wk1 = 1000 (800+200), total 1000.
+        $footer = $res->json('rangeCollapse.footer');
+        $this->assertNotNull($footer);
+        $this->assertSame('Total', $footer[0]['v']);
+        $this->assertEquals(1000.0, $footer[1]['v']);
+        $this->assertEquals(1000.0, $footer[3]['v']);
     }
 
     protected function tearDown(): void

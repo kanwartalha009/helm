@@ -54,7 +54,11 @@ Route::prefix('auth')->group(function (): void {
     Route::post('login',  [AuthController::class, 'login']);
     // MFA challenge after a successful password — public because the user is
     // not yet authenticated; the pending_token is the bearer of trust here.
-    Route::post('mfa/verify', [AuthController::class, 'mfaVerify']);
+    // MUST be its own path: a duplicate `mfa/verify` here was shadowed by the
+    // authenticated enrollment route of the same name, so every login challenge
+    // 401'd — a real cause of "2FA didn't work". `mfaVerify` branches on
+    // pending_token, so it serves both paths.
+    Route::post('mfa/challenge', [AuthController::class, 'mfaVerify']);
     Route::post('password/forgot', [AuthController::class, 'forgotPassword'])
         ->middleware('throttle:5,1');
     Route::post('password/reset',  [AuthController::class, 'resetPassword'])
@@ -89,10 +93,13 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         Route::delete('avatar',   [AuthController::class, 'deleteAvatar']);
         Route::post('mfa/setup',   [AuthController::class, 'mfaSetup']);
         // Authenticated mfa/verify is the enrollment-confirmation variant —
-        // takes { code } only. The unauthenticated copy (above, public) handles
-        // the login-challenge variant with { code, pending_token }.
+        // takes { code } only. The login-challenge variant lives at the public
+        // `mfa/challenge` (above) with { code, pending_token }.
         Route::post('mfa/verify',  [AuthController::class, 'mfaVerify']);
         Route::post('mfa/disable', [AuthController::class, 'mfaDisable']);
+        // Regenerate single-use recovery codes (password-gated). Returns the
+        // new plaintext set once.
+        Route::post('mfa/recovery-codes', [AuthController::class, 'mfaRecoveryCodes']);
     });
 
     // Workspace settings — General tab (master_admin only).
@@ -338,11 +345,16 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         // concept, not a generic ReportType capability.
         Route::get('brands/{brand}/reports/mom/sections/{key}',             [MomSectionController::class, 'show']);
         Route::get('brands/{brand}/reports/mom/sections/{key}/commentary',  [MomSectionController::class, 'showCommentary']);
+        // Saving commentary is NOT role-gated at the route — any user with access
+        // to the brand can collaborate on the shared notes; the controller's
+        // `comment` authorization (BrandPolicy::comment) does the per-brand access
+        // check (Kanwar, 2026-07-20 — "team member A comments, team B/C edit").
+        Route::put('brands/{brand}/reports/mom/sections/{key}/commentary', [MomSectionController::class, 'saveCommentary']);
         Route::middleware('role:master_admin,manager')->group(function (): void {
-            Route::put('brands/{brand}/reports/mom/sections/{key}/commentary', [MomSectionController::class, 'saveCommentary']);
-            // M4 — S0 Next Steps checklist + S19 Novedades' per-brand copy.
-            // Fixed paths (not {key}) since each has its own request shape
-            // (items[] vs body), unlike the generic commentary endpoint above.
+            // M4 — S0 Next Steps checklist + S19 Novedades' per-brand copy stay
+            // admin/manager-only (agency-owned editorial), unlike the collaborative
+            // per-section commentary above. Fixed paths (not {key}) since each has
+            // its own request shape (items[] vs body).
             Route::put('brands/{brand}/reports/mom/next-steps', [MomSectionController::class, 'saveNextSteps']);
             Route::put('brands/{brand}/reports/mom/novedades',  [MomSectionController::class, 'saveNovedades']);
         });

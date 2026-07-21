@@ -44,7 +44,7 @@ class MfaResetCommand extends Command
             return self::SUCCESS;
         }
 
-        $user->update(['mfa_secret' => null]);
+        $user->update(['mfa_secret' => null, 'mfa_recovery_codes' => null]);
 
         AuditLog::create([
             'actor_user_id' => null,

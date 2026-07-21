@@ -30,17 +30,19 @@ class User extends Authenticatable
 
     protected $fillable = [
         'name', 'email', 'password', 'role', 'status',
-        'mfa_secret', 'last_login_at', 'last_login_ip',
+        'mfa_secret', 'mfa_recovery_codes', 'last_login_at', 'last_login_ip',
         'display_initials', 'timezone', 'notification_prefs',
         'onboarding_completed_at', 'avatar_path',
     ];
 
     protected $hidden = [
-        'password', 'remember_token', 'mfa_secret',
+        'password', 'remember_token', 'mfa_secret', 'mfa_recovery_codes',
     ];
 
     protected $casts = [
         'mfa_secret'              => 'encrypted',
+        // An array of BCRYPT HASHES of the recovery codes, encrypted at rest.
+        'mfa_recovery_codes'      => 'encrypted:array',
         'last_login_at'           => 'datetime',
         'onboarding_completed_at' => 'datetime',
         'password'                => 'hashed',

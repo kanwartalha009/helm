@@ -12,6 +12,7 @@ use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Support\CustomerMix;
 use App\Reports\Mom\Support\RangeCollapse;
+use App\Reports\Mom\Support\WeekSplit;
 use Carbon\CarbonImmutable;
 
 /**
@@ -62,13 +63,13 @@ final class SFinancialMatrixSection implements MomSection
     {
         $tz = $brand->timezone ?: 'UTC';
 
-        // Custom range (Kanwar, 2026-07-17): the monthly matrix can't be a
-        // sub-month window, so collapse to the headline financials over the range
-        // vs the same range last year. Customer-split columns need whole months
-        // (the ShopifyQL customer feed is month-granular) so they're omitted here
-        // with an honest note rather than approximated.
+        // Custom range (Kanwar, 2026-07-20): week-on-week headline financials —
+        // one column per ISO week across the range (running month included), each
+        // metric a row. Customer-split columns need whole months (the ShopifyQL
+        // customer feed is month-granular) so they're omitted here with an honest
+        // note rather than approximated.
         if ($filters->isCustomRange()) {
-            return $this->rangeCollapse($brand, $filters, $tz);
+            return $this->weekly($brand, $filters, $tz);
         }
 
         $window = $filters->monthWindow($tz);
@@ -330,53 +331,56 @@ final class SFinancialMatrixSection implements MomSection
     }
 
     /** Collapse S1 to headline financials over the custom range vs the same range last year. */
-    private function rangeCollapse(Brand $brand, ReportFilters $filters, string $tz): array
+    /** Week-on-week headline financials across the custom range — one metric per row, one column per week. */
+    private function weekly(Brand $brand, ReportFilters $filters, string $tz): array
     {
         $range = $filters->activeWindow($tz);
-        $cmp   = $filters->activeComparisonWindow($tz);
         if ($range === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
         }
+        $weeks = WeekSplit::windows($range[0], $range[1], $tz);
+        if ($weeks === []) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
+        }
 
-        $cur = $this->rangeAggregate($brand->id, $range[0], $range[1]);
-        if ($cur['revenue'] === 0.0 && $cur['spend'] === 0.0 && $cur['orders'] === 0) {
+        $total = $this->rangeAggregate($brand->id, $range[0], $range[1]);
+        if ($total['revenue'] === 0.0 && $total['spend'] === 0.0 && $total['orders'] === 0) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No Shopify/ad data in the selected range.'];
         }
-        $prev = $cmp !== null ? $this->rangeAggregate($brand->id, $cmp[0], $cmp[1]) : null;
 
-        $roas     = $cur['spend'] > 0.0 ? round($cur['revenue'] / $cur['spend'], 2) : null;
-        $prevRoas = ($prev !== null && $prev['spend'] > 0.0) ? round($prev['revenue'] / $prev['spend'], 2) : null;
-        $aov      = $cur['orders'] > 0 ? round($cur['revenue'] / $cur['orders'], 2) : null;
-        $prevAov  = ($prev !== null && $prev['orders'] > 0) ? round($prev['revenue'] / $prev['orders'], 2) : null;
+        $perWeek = [];
+        foreach ($weeks as $w) {
+            $perWeek[] = $this->rangeAggregate($brand->id, $w['start'], $w['end']);
+        }
 
-        $metric = static fn (string $label, float|int|null $v, float|int|null $p, string $f): array => [
-            RangeCollapse::cell($label, 'text'),
-            RangeCollapse::cell($v, $f),
-            RangeCollapse::cell($p, $f),
-            RangeCollapse::cell(RangeCollapse::delta($v, $p), 'delta'),
-        ];
+        $revCells = $spendCells = $roasCells = $orderCells = $aovCells = [];
+        foreach ($perWeek as $wk) {
+            $revCells[]   = round((float) $wk['revenue'], 2);
+            $spendCells[] = round((float) $wk['spend'], 2);
+            $roasCells[]  = $wk['spend'] > 0.0 ? round($wk['revenue'] / $wk['spend'], 2) : null;
+            $orderCells[] = (int) $wk['orders'];
+            $aovCells[]   = $wk['orders'] > 0 ? round($wk['revenue'] / $wk['orders'], 2) : null;
+        }
 
-        $rangeLabel   = RangeCollapse::label($range[0], $range[1]);
-        $compareLabel = $cmp !== null ? RangeCollapse::label($cmp[0], $cmp[1]) : 'Last year';
         $rows = [
-            $metric('Revenue',  round($cur['revenue'], 2), $prev !== null ? round($prev['revenue'], 2) : null, 'money'),
-            $metric('Ad spend', round($cur['spend'], 2),   $prev !== null ? round($prev['spend'], 2) : null,   'money'),
-            $metric('Blended ROAS', $roas, $prevRoas, 'ratio'),
-            $metric('Orders',   $cur['orders'], $prev !== null ? $prev['orders'] : null, 'count'),
-            $metric('AOV',      $aov, $prevAov, 'money'),
+            ['label' => 'Revenue',      'format' => 'money', 'cells' => $revCells,   'total' => round((float) $total['revenue'], 2)],
+            ['label' => 'Ad spend',     'format' => 'money', 'cells' => $spendCells, 'total' => round((float) $total['spend'], 2)],
+            ['label' => 'Blended ROAS', 'format' => 'ratio', 'cells' => $roasCells,  'total' => $total['spend'] > 0.0 ? round($total['revenue'] / $total['spend'], 2) : null],
+            ['label' => 'Orders',       'format' => 'count', 'cells' => $orderCells, 'total' => (int) $total['orders']],
+            ['label' => 'AOV',          'format' => 'money', 'cells' => $aovCells,   'total' => $total['orders'] > 0 ? round($total['revenue'] / $total['orders'], 2) : null],
         ];
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
             'range'  => true,
-            'rangeCollapse' => RangeCollapse::table(
-                $rangeLabel,
-                $compareLabel,
-                ['Metric', $rangeLabel, $compareLabel, 'Δ YoY'],
+            'rangeCollapse' => RangeCollapse::weekly(
+                'Metric',
+                array_column($weeks, 'label'),
                 $rows,
-                null,
-                'New / Returning / CAC columns need whole calendar months and show in month mode.',
+                null, // rows are mixed formats (money/ratio/count) — no single summable footer
+                'Week-on-week performance',
+                WeekSplit::note($weeks) . ' Total is the range figure (ROAS/AOV recomputed, not summed). New / Returning / CAC need whole months and show in month mode.',
             ),
         ];
     }

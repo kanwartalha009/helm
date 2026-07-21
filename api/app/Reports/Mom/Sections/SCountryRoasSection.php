@@ -9,6 +9,7 @@ use App\Reports\Contracts\ReportFilters;
 use App\Reports\Mom\Contracts\MomSection;
 use App\Reports\Mom\Support\CountryRevenueSpend;
 use App\Reports\Mom\Support\RangeCollapse;
+use App\Reports\Mom\Support\WeekSplit;
 use App\Services\CountryTiers;
 use Carbon\CarbonImmutable;
 
@@ -39,10 +40,10 @@ final class SCountryRoasSection implements MomSection
     {
         $tz = $brand->timezone ?: 'UTC';
 
-        // Custom range (Kanwar, 2026-07-17): collapse to ROAS by country over the
-        // range vs the same range last year.
+        // Custom range (Kanwar, 2026-07-20): week-on-week ROAS by country — one
+        // column per ISO week across the range (running month included).
         if ($filters->isCustomRange()) {
-            return $this->rangeCollapse($brand, $filters, $tz);
+            return $this->weekly($brand, $filters, $tz);
         }
 
         $window = $filters->monthWindow($tz);
@@ -156,54 +157,62 @@ final class SCountryRoasSection implements MomSection
     }
 
     /** Collapse S6 to ROAS by country over the custom range vs the same range last year. */
-    private function rangeCollapse(Brand $brand, ReportFilters $filters, string $tz): array
+    /** Week-on-week ROAS by country across the custom range (ROAS is a ratio — no summed footer). */
+    private function weekly(Brand $brand, ReportFilters $filters, string $tz): array
     {
         $range = $filters->activeWindow($tz);
-        $cmp   = $filters->activeComparisonWindow($tz);
         if ($range === null) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
+        }
+        $weeks = WeekSplit::windows($range[0], $range[1], $tz);
+        if ($weeks === []) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'Pick a start and end date.'];
         }
 
         $joiner = new CountryRevenueSpend();
         $rangeC = $joiner->compute($brand->id, $range[0], $range[1]);
-        $yoyC   = $cmp !== null ? $joiner->compute($brand->id, $cmp[0], $cmp[1]) : [];
 
+        // Countries with spend somewhere in the range (ROAS undefined without spend).
         $items = [];
         foreach ($rangeC as $key => $c) {
-            if ($c['spend'] <= 0.0) {
-                continue; // ROAS undefined without spend — omit, never a fake 0
+            if (($c['spend'] ?? 0.0) <= 0.0) {
+                continue;
             }
-            $roas = round($c['revenue'] / $c['spend'], 2);
-            $yc   = $yoyC[$key] ?? null;
-            $yoyRoas = ($yc !== null && $yc['spend'] > 0.0) ? round($yc['revenue'] / $yc['spend'], 2) : null;
-            $items[] = ['label' => $c['label'], 'roas' => $roas, 'yoyRoas' => $yoyRoas];
+            $items[$key] = ['label' => $c['label'], 'roas' => round($c['revenue'] / $c['spend'], 2)];
         }
         if ($items === []) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No ad spend by country in the selected range.'];
         }
-        usort($items, static fn (array $a, array $b): int => $b['roas'] <=> $a['roas']);
 
-        $rangeLabel   = RangeCollapse::label($range[0], $range[1]);
-        $compareLabel = $cmp !== null ? RangeCollapse::label($cmp[0], $cmp[1]) : 'Last year';
+        $perWeek = [];
+        foreach ($weeks as $w) {
+            $perWeek[] = $joiner->compute($brand->id, $w['start'], $w['end']);
+        }
+
+        // Sort countries by range ROAS, best first.
+        uasort($items, static fn (array $a, array $b): int => $b['roas'] <=> $a['roas']);
+
         $rows = [];
-        foreach ($items as $it) {
-            $rows[] = [
-                RangeCollapse::cell($it['label'], 'text'),
-                RangeCollapse::cell($it['roas'], 'ratio'),
-                RangeCollapse::cell($it['yoyRoas'], 'ratio'),
-                RangeCollapse::cell(RangeCollapse::delta($it['roas'], $it['yoyRoas']), 'delta'),
-            ];
+        foreach ($items as $key => $it) {
+            $cells = [];
+            foreach ($perWeek as $wk) {
+                $c = $wk[$key] ?? null;
+                $cells[] = ($c !== null && ($c['spend'] ?? 0.0) > 0.0) ? round($c['revenue'] / $c['spend'], 2) : null;
+            }
+            $rows[] = ['label' => $it['label'], 'format' => 'ratio', 'cells' => $cells, 'total' => $it['roas']];
         }
 
         return [
             'key'    => $this->key(),
             'status' => 'ok',
             'range'  => true,
-            'rangeCollapse' => RangeCollapse::table(
-                $rangeLabel,
-                $compareLabel,
-                ['Country', 'ROAS · ' . $rangeLabel, 'ROAS · ' . $compareLabel, 'Δ YoY'],
+            'rangeCollapse' => RangeCollapse::weekly(
+                'Country',
+                array_column($weeks, 'label'),
                 $rows,
+                null, // ROAS can't be summed — no totals footer
+                'Week-on-week ROAS by country',
+                WeekSplit::note($weeks) . ' Total column is range ROAS (revenue ÷ spend), not a sum.',
             ),
         ];
     }

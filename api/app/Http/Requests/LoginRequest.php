@@ -19,7 +19,8 @@ class LoginRequest extends FormRequest
         return [
             'email'    => ['required', 'email', 'max:190'],
             'password' => ['required', 'string', 'min:8'],
-            'mfa_code' => ['nullable', 'string', 'size:6'],
+            // MFA is a separate two-step challenge (mfa_required + pending_token
+            // → POST /auth/mfa/verify), never an inline field on login.
         ];
     }
 }

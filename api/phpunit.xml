@@ -22,8 +22,10 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
         <env name="DB_CONNECTION" value="sqlite"/>
-        <!-- Tests exercise MFA enforcement as BUILT (D-009); prod keeps the flag off until NTP is fixed. -->
+        <!-- MFA enforcement is on in prod (D-009); NtpTime handles the clock drift. -->
         <env name="HELM_REQUIRE_ADMIN_MFA" value="true"/>
+        <!-- Never make a real NTP UDP call from the test suite — offset falls back to 0 (system clock). -->
+        <env name="HELM_MFA_NTP" value="false"/>
         <env name="DB_DATABASE" value=":memory:"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

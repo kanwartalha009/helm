@@ -186,6 +186,10 @@ class MomM2Test extends TestCase
         $brand = $this->makeBrand();
         $month = $this->monthStart()->format('Y-m');
 
+        // A team member WITH access to the brand can now add/edit the shared
+        // commentary + To-Do (Kanwar, 2026-07-20 — "team member A adds a comment,
+        // team B and C can view and edit"). Collaborative notes, not the
+        // admin/manager-only brand `update` gate.
         $tm = User::factory()->create(['role' => 'team_member']);
         $brand->users()->attach($tm->id);
         Sanctum::actingAs($tm);
@@ -195,8 +199,25 @@ class MomM2Test extends TestCase
             ->assertJsonPath('commentary', null);
 
         $this->putJson("/api/brands/{$brand->slug}/reports/mom/sections/S-EX/commentary", [
-            'month' => $month, 'commentary' => 'Strong month', 'todo' => [['text' => 'Follow up with Bosco']],
-        ])->assertForbidden();
+            'month' => $month, 'commentary' => 'Team A note', 'todo' => [['text' => 'Follow up with Bosco']],
+        ])->assertOk();
+
+        // A team member with NO access to the brand still can't comment — denied
+        // whether by the `comment` policy (403) or the Brand access scope hiding
+        // the brand from route binding (404); either way, not a success.
+        Sanctum::actingAs(User::factory()->create(['role' => 'team_member']));
+        $denied = $this->putJson("/api/brands/{$brand->slug}/reports/mom/sections/S-EX/commentary", [
+            'month' => $month, 'commentary' => 'Nope',
+        ]);
+        $this->assertContains($denied->getStatusCode(), [403, 404], 'a no-access user must be denied');
+
+        // Team B (another assigned member) sees Team A's shared, DB-backed note.
+        $teamB = User::factory()->create(['role' => 'team_member']);
+        $brand->users()->attach($teamB->id);
+        Sanctum::actingAs($teamB);
+        $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S-EX/commentary?month={$month}")
+            ->assertOk()
+            ->assertJsonPath('commentary', 'Team A note');
 
         Sanctum::actingAs(User::factory()->create(['role' => 'master_admin']));
         $this->putJson("/api/brands/{$brand->slug}/reports/mom/sections/S-EX/commentary", [

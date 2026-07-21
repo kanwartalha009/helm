@@ -61,6 +61,101 @@ final class RangeCollapse
     }
 
     /**
+     * Week-on-week matrix (Kanwar, 2026-07-20): one column per ISO week across
+     * the custom range plus a Total column. Uses the SAME payload shape as the
+     * collapse (columns + {v,f} rows + optional footer) so the existing
+     * RangeCollapseTable renders it with no new frontend code. Rows carry their
+     * own format so a mixed matrix (revenue money-rows + a ROAS ratio-row) is
+     * fine; the footer is passed in by the caller (a sum for all-money group
+     * matrices, null where a footer would be meaningless — you can't sum ROAS).
+     *
+     * @param array<int, string> $weekLabels one header per week, in order
+     * @param array<int, array{label: string, format: string, cells: array<int, float|int|null>, total: float|int|null}> $rows
+     * @param array<int, array{v: mixed, f: string}>|null $footer
+     */
+    public static function weekly(string $firstColLabel, array $weekLabels, array $rows, ?array $footer, string $title, ?string $note = null): array
+    {
+        $columns = array_merge([$firstColLabel], $weekLabels, ['Total']);
+
+        $outRows = [];
+        foreach ($rows as $r) {
+            $cells = [self::cell($r['label'], 'text')];
+            foreach ($r['cells'] as $v) {
+                $cells[] = self::cell($v, $r['format']);
+            }
+            $cells[] = self::cell($r['total'], $r['format']);
+            $outRows[] = $cells;
+        }
+
+        return [
+            'title'        => $title,
+            'rangeLabel'   => null,
+            'compareLabel' => null,
+            'columns'      => $columns,
+            'rows'         => $outRows,
+            'footer'       => $footer,
+            'note'         => $note,
+        ];
+    }
+
+    /**
+     * Build a per-week + grand totals footer for an all-money group matrix
+     * (revenue by tier/country/category/product) — sums each week column and the
+     * Total column across the given money rows.
+     *
+     * @param array<int, array{label: string, format: string, cells: array<int, float|int|null>, total: float|int|null}> $rows
+     * @return array<int, array{v: mixed, f: string}>
+     */
+    public static function weeklyMoneyFooter(array $rows): array
+    {
+        $weekCount = $rows === [] ? 0 : count($rows[0]['cells']);
+        $weekTotals = array_fill(0, $weekCount, 0.0);
+        $grand = 0.0;
+
+        foreach ($rows as $r) {
+            foreach ($r['cells'] as $i => $v) {
+                if (is_numeric($v)) {
+                    $weekTotals[$i] += (float) $v;
+                }
+            }
+            if (is_numeric($r['total'])) {
+                $grand += (float) $r['total'];
+            }
+        }
+
+        $footer = [self::cell('Total', 'text')];
+        foreach ($weekTotals as $t) {
+            $footer[] = self::cell(round($t, 2), 'money');
+        }
+        $footer[] = self::cell(round($grand, 2), 'money');
+
+        return $footer;
+    }
+
+    /**
+     * Assemble an all-money week-on-week matrix from groups (tiers, countries,
+     * categories, products): each group is one money row of weekly revenue, a
+     * summed footer, sorted by range total (biggest first). The one shared path
+     * S4/S5/S7/S8 use for their weekly view.
+     *
+     * @param array<int, string> $weekLabels
+     * @param array<int, array{label: string, weekly: array<int, float|int|null>, total: float|int|null}> $groups
+     */
+    public static function weeklyRevenueByGroup(string $firstColLabel, array $weekLabels, array $groups, string $title, ?string $note = null): array
+    {
+        usort($groups, static fn (array $a, array $b): int => (float) ($b['total'] ?? 0) <=> (float) ($a['total'] ?? 0));
+
+        $rows = [];
+        foreach ($groups as $g) {
+            $rows[] = ['label' => $g['label'], 'format' => 'money', 'cells' => $g['weekly'], 'total' => $g['total']];
+        }
+
+        $footer = self::weeklyMoneyFooter($rows);
+
+        return self::weekly($firstColLabel, $weekLabels, $rows, $footer, $title, $note);
+    }
+
+    /**
      * Revenue-by-group collapse (tiers, countries, categories, products): each
      * group's revenue over the range vs the same range last year, its Δ YoY and
      * its share of the range total. Sorted by range revenue, biggest first.
