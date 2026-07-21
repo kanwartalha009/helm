@@ -132,7 +132,18 @@ export function useSaveMomCommentary(slug: string | undefined, key: string) {
       const { data } = await api.put(`/brands/${slug}/reports/mom/sections/${key}/commentary`, body);
       return data;
     },
-    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ['mom-commentary', slug, key, vars.month] }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['mom-commentary', slug, key, vars.month] });
+      // Confirm the save landed — without this the button just silently
+      // re-enables and the note looks like it didn't save (Kanwar, 2026-07-21).
+      toast.success('Note saved', 'It’ll be here when you come back.');
+    },
+    onError: (err: any) => {
+      toast.error(
+        'Couldn’t save note',
+        err?.response?.data?.message ?? err?.message ?? 'Please try again.',
+      );
+    },
   });
 }
 

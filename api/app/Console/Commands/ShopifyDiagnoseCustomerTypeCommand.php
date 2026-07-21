@@ -65,37 +65,61 @@ class ShopifyDiagnoseCustomerTypeCommand extends Command
         $this->line('(level-2 protected data). An "access denied" below is a SCOPE problem, not bad syntax.');
         $this->newLine();
 
-        // A — sanity: confirm units_sold + revenue return at all (no breakdown).
-        $this->probe($client, 'A. Sanity — units_sold + revenue, no breakdown',
-            "FROM sales SHOW units_sold, net_sales, total_sales SINCE {$since} UNTIL today {$ch}");
+        // ── Why this rewrite (Kanwar, 2026-07-21): the client sees Shopify's OWN
+        // Analytics UI split total_sales by "New or returning customer" (New
+        // €134,179.01 / Returning €49,847.02), so the data provably EXISTS. Our
+        // first probe wrongly concluded it didn't — because every customer-type
+        // query it fired also SHOW'd `units_sold`, an UNPROVEN metric name. If
+        // `units_sold` is what Shopify rejected, the whole query fails with
+        // parseErrors and we blame the DIMENSION by mistake.
+        //
+        // customersByMonthRange() proves net_sales + total_sales are valid `sales`
+        // metrics. So every split probe below carries ONLY those two proven-good
+        // metrics — any parseError now is unambiguously about the DIMENSION name,
+        // never a metric. We sweep the realistic candidate identifiers; the winner
+        // is the one that returns EMPTY parseErrors AND two rows carrying real
+        // net_sales. Whatever name wins is exactly what we wire into RevenueFetcher.
 
-        // B — the target: split every metric by customer_type in one query.
-        $this->probe($client, 'B. TARGET — GROUP BY customer_type',
-            "FROM sales SHOW customer_type, net_sales, total_sales, units_sold, orders GROUP BY customer_type SINCE {$since} UNTIL today {$ch}");
+        // A — sanity floor: the two metrics we KNOW are valid, no breakdown.
+        // If even THIS parseErrors, the problem is scope/channel, not any dimension.
+        $this->probe($client, 'A. Sanity — net_sales + total_sales, no breakdown (must pass)',
+            "FROM sales SHOW net_sales, total_sales SINCE {$since} UNTIL today {$ch}");
 
-        // C–D — likely alternate dimension names for the same split.
-        $this->probe($client, 'C. Alternate — GROUP BY returning_customer',
-            "FROM sales SHOW returning_customer, net_sales, units_sold, orders GROUP BY returning_customer SINCE {$since} UNTIL today {$ch}");
+        // B..H — candidate dimension names, each with ONLY proven-good metrics so
+        // a failure can ONLY mean the dimension identifier is wrong.
+        $candidates = [
+            'B. customer_type'                 => 'customer_type',
+            'C. first_time_vs_returning'       => 'first_time_vs_returning',
+            'D. new_vs_returning'              => 'new_vs_returning',
+            'E. new_or_returning_customer'     => 'new_or_returning_customer',
+            'F. returning_customer'            => 'returning_customer',
+            'G. customer_order_index_type'     => 'customer_order_index_type',
+            'H. is_first_time_customer'        => 'is_first_time_customer',
+        ];
+        foreach ($candidates as $label => $dim) {
+            $this->probe($client, "{$label} — GROUP BY {$dim}",
+                "FROM sales SHOW net_sales, total_sales GROUP BY {$dim} SINCE {$since} UNTIL today {$ch}");
+        }
 
-        $this->probe($client, 'D. Alternate — GROUP BY customer_type WITHOUT channel filter',
-            "FROM sales SHOW customer_type, net_sales, units_sold GROUP BY customer_type SINCE {$since} UNTIL today");
+        // I — winner sanity WITHOUT the channel filter, in case the split only
+        // resolves store-wide (some dimensions don't compose with sales_channel).
+        $this->probe($client, 'I. customer_type — no channel filter',
+            "FROM sales SHOW net_sales, total_sales GROUP BY customer_type SINCE {$since} UNTIL today");
 
-        // E — metric-only (no split): confirms which returning/new fields `sales` exposes.
-        $this->probe($client, 'E. Metrics on sales — returning_customers / returning_customer_rate',
-            "FROM sales SHOW net_sales, orders, customers, returning_customers, returning_customer_rate SINCE {$since} UNTIL today {$ch}");
+        // J — orders dataset, in case the split lives there instead of `sales`.
+        $this->probe($client, 'J. FROM orders — GROUP BY customer_type',
+            "FROM orders SHOW net_sales GROUP BY customer_type SINCE {$since} UNTIL today");
 
-        // F — orders dataset, in case the split lives there.
-        $this->probe($client, 'F. FROM orders — GROUP BY customer_type',
-            "FROM orders SHOW customer_type, net_sales, ordered_item_quantity, orders GROUP BY customer_type SINCE {$since} UNTIL today");
-
-        // G — customers dataset new/returning counts (known-good; the floor if B–F fail).
-        $this->probe($client, 'G. FROM customers — new/returning counts (counts only)',
+        // K — counts-only floor (known-good today; what we currently estimate from).
+        $this->probe($client, 'K. FROM customers — new/returning counts (current estimate source)',
             "FROM customers SHOW new_customers, returning_customers SINCE {$since} UNTIL today");
 
         $this->newLine();
-        $this->line('Verdict: the winner is the candidate with EMPTY parseErrors AND two rows');
-        $this->line('(first-time / returning) each carrying net_sales + units. If only G works,');
-        $this->line('Shopify won\'t split revenue by customer type → build the order-level fallback.');
+        $this->line('VERDICT: the winner is the FIRST candidate (B–J) with EMPTY parseErrors AND');
+        $this->line('two rows each carrying a real net_sales value. Paste its query + rows back and');
+        $this->line('that exact dimension name gets wired into RevenueFetcher to replace the estimate.');
+        $this->line('If EVERY split (B–J) parseErrors but K passes, Shopify genuinely exposes only');
+        $this->line('counts on this plan → the estimate stays and we document why.');
 
         return self::SUCCESS;
     }
