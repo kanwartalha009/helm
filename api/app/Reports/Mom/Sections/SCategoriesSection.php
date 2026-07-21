@@ -178,7 +178,7 @@ final class SCategoriesSection implements MomSection
             'range'  => true,
             'rangeCollapse' => RangeCollapse::weeklyRevenueByGroup(
                 'Segment',
-                array_column($weeks, 'label'),
+                $weeks,
                 $groups,
                 $title,
                 WeekSplit::note($weeks),

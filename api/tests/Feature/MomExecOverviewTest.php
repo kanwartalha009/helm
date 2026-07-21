@@ -278,6 +278,14 @@ class MomExecOverviewTest extends TestCase
         $this->assertSame('Metric', $columns[0]);
         $this->assertSame('Total', $columns[3]);
 
+        // Weekly headers carry the ISO week-of-year for the "W23 / 1–7 Jun" header.
+        // Jun 1 2026 is a Monday in ISO week 23; the second week is 24.
+        $this->assertTrue($res->json('rangeCollapse.weekly'));
+        $weekHeaders = $res->json('rangeCollapse.weekHeaders');
+        $this->assertCount(2, $weekHeaders);
+        $this->assertSame(23, $weekHeaders[0]['week']);
+        $this->assertSame(24, $weekHeaders[1]['week']);
+
         // Revenue row: [label, wk1=700, wk2=0, total=700].
         $revenueRow = collect($res->json('rangeCollapse.rows'))->first(fn ($r) => $r[0]['v'] === 'Revenue');
         $this->assertNotNull($revenueRow);

@@ -69,12 +69,18 @@ final class RangeCollapse
      * fine; the footer is passed in by the caller (a sum for all-money group
      * matrices, null where a footer would be meaningless — you can't sum ROAS).
      *
-     * @param array<int, string> $weekLabels one header per week, in order
+     * @param array<int, array{label: string, week?: int}> $weeks one entry per week column, in order (label + ISO week number)
      * @param array<int, array{label: string, format: string, cells: array<int, float|int|null>, total: float|int|null}> $rows
      * @param array<int, array{v: mixed, f: string}>|null $footer
      */
-    public static function weekly(string $firstColLabel, array $weekLabels, array $rows, ?array $footer, string $title, ?string $note = null): array
+    public static function weekly(string $firstColLabel, array $weeks, array $rows, ?array $footer, string $title, ?string $note = null): array
     {
+        $weekLabels  = array_map(static fn (array $w): string => (string) ($w['label'] ?? ''), $weeks);
+        $weekHeaders = array_map(static fn (array $w): array => [
+            'week'  => isset($w['week']) ? (int) $w['week'] : null,
+            'label' => (string) ($w['label'] ?? ''),
+        ], $weeks);
+
         $columns = array_merge([$firstColLabel], $weekLabels, ['Total']);
 
         $outRows = [];
@@ -91,6 +97,11 @@ final class RangeCollapse
             'title'        => $title,
             'rangeLabel'   => null,
             'compareLabel' => null,
+            // `weekly` + `weekHeaders` tell RangeCollapseTable to render two-line
+            // "W18 / 1–3 May" headers and heat-colour each week cell week-over-week
+            // (like the month matrices). `columns` stays as a flat-string fallback.
+            'weekly'       => true,
+            'weekHeaders'  => $weekHeaders,
             'columns'      => $columns,
             'rows'         => $outRows,
             'footer'       => $footer,
@@ -138,10 +149,10 @@ final class RangeCollapse
      * summed footer, sorted by range total (biggest first). The one shared path
      * S4/S5/S7/S8 use for their weekly view.
      *
-     * @param array<int, string> $weekLabels
+     * @param array<int, array{label: string, week?: int}> $weeks
      * @param array<int, array{label: string, weekly: array<int, float|int|null>, total: float|int|null}> $groups
      */
-    public static function weeklyRevenueByGroup(string $firstColLabel, array $weekLabels, array $groups, string $title, ?string $note = null): array
+    public static function weeklyRevenueByGroup(string $firstColLabel, array $weeks, array $groups, string $title, ?string $note = null): array
     {
         usort($groups, static fn (array $a, array $b): int => (float) ($b['total'] ?? 0) <=> (float) ($a['total'] ?? 0));
 
@@ -152,7 +163,7 @@ final class RangeCollapse
 
         $footer = self::weeklyMoneyFooter($rows);
 
-        return self::weekly($firstColLabel, $weekLabels, $rows, $footer, $title, $note);
+        return self::weekly($firstColLabel, $weeks, $rows, $footer, $title, $note);
     }
 
     /**

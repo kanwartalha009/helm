@@ -177,7 +177,7 @@ final class STierRevenueSection implements MomSection
             'range'  => true,
             'rangeCollapse' => RangeCollapse::weeklyRevenueByGroup(
                 'Tier',
-                array_column($weeks, 'label'),
+                $weeks,
                 $groups,
                 'Week-on-week revenue by tier',
                 WeekSplit::note($weeks),

@@ -208,7 +208,7 @@ final class SCountryRoasSection implements MomSection
             'range'  => true,
             'rangeCollapse' => RangeCollapse::weekly(
                 'Country',
-                array_column($weeks, 'label'),
+                $weeks,
                 $rows,
                 null, // ROAS can't be summed — no totals footer
                 'Week-on-week ROAS by country',

@@ -211,7 +211,7 @@ final class SCountryRevenueSection implements MomSection
             'range'  => true,
             'rangeCollapse' => RangeCollapse::weeklyRevenueByGroup(
                 'Country',
-                array_column($weeks, 'label'),
+                $weeks,
                 $groups,
                 'Week-on-week revenue by country',
                 WeekSplit::note($weeks),

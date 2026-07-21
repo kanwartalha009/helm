@@ -376,7 +376,7 @@ final class SFinancialMatrixSection implements MomSection
             'range'  => true,
             'rangeCollapse' => RangeCollapse::weekly(
                 'Metric',
-                array_column($weeks, 'label'),
+                $weeks,
                 $rows,
                 null, // rows are mixed formats (money/ratio/count) — no single summable footer
                 'Week-on-week performance',

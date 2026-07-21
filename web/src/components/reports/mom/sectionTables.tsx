@@ -1,7 +1,7 @@
 import { formatMoney, formatRoas } from '@/lib/formatters';
 import { DeltaChip } from './charts';
 import { HeatTable, type HeatColumn } from './HeatTable';
-import { gradeColumn, heatFromDeltaPct, heatVsBenchmark, type HeatGrade } from './heat';
+import { gradeColumn, heatCellStyle, heatFromDeltaPct, heatVsBenchmark, type HeatGrade } from './heat';
 
 /** % change a→b, null-safe (shared by the month-by-month matrices). */
 const pctChange = (a: number | null | undefined, b: number | null | undefined): number | null =>
@@ -493,7 +493,26 @@ export function RangeCollapseTable({ data, currency }: { data: any; currency: st
   const rows: { v: any; f: string }[][] = Array.isArray(data?.rows) ? data.rows : [];
   const footer: { v: any; f: string }[] | null = Array.isArray(data?.footer) ? data.footer : null;
 
-  const cellNode = (c: { v: any; f: string }, key: React.Key) => {
+  // Weekly matrix (Kanwar, 2026-07-21): two-line "W18 / 1–3 May" headers and
+  // week-over-week heat colouring on the week cells, matching the month
+  // matrices' language. `weekHeaders` holds one {week,label} per week column;
+  // the week cells sit at row indices 1..(len-2) (index 0 = label, last = Total).
+  const weekly = data?.weekly === true && Array.isArray(data?.weekHeaders);
+  const weekHeaders: { week: number | null; label: string }[] = weekly ? data.weekHeaders : [];
+  const lastIdx = (r: { v: any; f: string }[]) => r.length - 1; // the Total column
+
+  const pctChange = (cur: any, prev: any): number | null =>
+    cur == null || prev == null || Number(prev) === 0 ? null : ((Number(cur) - Number(prev)) / Number(prev)) * 100;
+
+  // Per-cell heat grade for weekly mode: colour a week cell by its % change vs
+  // the previous week in the same row (green up / red down), like the month
+  // matrices. The first week and the Total column stay unshaded.
+  const gradeFor = (row: { v: any; f: string }[], ci: number): HeatGrade => {
+    if (!weekly || ci < 2 || ci >= lastIdx(row)) return '';
+    return heatFromDeltaPct(pctChange(row[ci]?.v, row[ci - 1]?.v));
+  };
+
+  const cellNode = (c: { v: any; f: string }, key: React.Key, grade: HeatGrade = '') => {
     const v = c?.v ?? null;
     if (c?.f === 'delta') {
       return (
@@ -511,7 +530,16 @@ export function RangeCollapseTable({ data, currency }: { data: any; currency: st
     else text = String(v);
     const isText = c?.f === 'text';
     return (
-      <td key={key} style={{ padding: '6px 10px', textAlign: isText ? 'left' : 'right', whiteSpace: 'nowrap', fontWeight: isText ? 500 : 400 }}>
+      <td
+        key={key}
+        style={{
+          padding: '6px 10px',
+          textAlign: isText ? 'left' : 'right',
+          whiteSpace: 'nowrap',
+          fontWeight: isText ? 500 : 400,
+          ...heatCellStyle(grade),
+        }}
+      >
         {text}
       </td>
     );
@@ -527,17 +555,42 @@ export function RangeCollapseTable({ data, currency }: { data: any; currency: st
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border, #E7E9F0)' }}>
-              {columns.map((c, i) => (
-                <th key={i} style={{ padding: '6px 10px', textAlign: i === 0 ? 'left' : 'right', fontWeight: 600, color: 'var(--text-muted, #6b7280)', whiteSpace: 'nowrap' }}>
-                  {c}
-                </th>
-              ))}
+              {columns.map((c, i) => {
+                // In weekly mode, columns 1..n are weeks → render "W18" big with
+                // the date range beneath; column 0 (segment) and the last (Total)
+                // stay single-line.
+                const wk = weekly && i >= 1 && i <= weekHeaders.length ? weekHeaders[i - 1] : null;
+                return (
+                  <th
+                    key={i}
+                    style={{
+                      padding: '6px 10px',
+                      textAlign: i === 0 ? 'left' : 'right',
+                      fontWeight: 600,
+                      color: 'var(--text-muted, #6b7280)',
+                      whiteSpace: 'nowrap',
+                      verticalAlign: 'bottom',
+                    }}
+                  >
+                    {wk ? (
+                      <div style={{ lineHeight: 1.15 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text, #111827)' }}>
+                          {wk.week != null ? `W${wk.week}` : wk.label}
+                        </div>
+                        <div style={{ fontSize: 10, fontWeight: 400 }}>{wk.label}</div>
+                      </div>
+                    ) : (
+                      c
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {rows.map((r, ri) => (
               <tr key={ri} style={{ borderBottom: '1px solid var(--border, #F1F2F6)' }}>
-                {r.map((c, ci) => cellNode(c, ci))}
+                {r.map((c, ci) => cellNode(c, ci, gradeFor(r, ci)))}
               </tr>
             ))}
           </tbody>

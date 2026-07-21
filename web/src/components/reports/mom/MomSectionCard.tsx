@@ -103,10 +103,16 @@ function MetricSectionCard({
   const hasMonthsControl = ['S1', 'S4', 'S5', 'S6', 'S7', 'S8', 'S13', 'S17'].includes(section.key);
   const hasBenchmarkControl = section.key === 'S6';
   const hasPlatformControl = ['S14', 'S15'].includes(section.key);
+  // In custom-range (week-on-week) mode the trailing-month-window selector
+  // (Full year / 3mo / 6mo…) and the ROAS benchmark don't apply — the range is
+  // fixed by the from/to dates — so hide them (Kanwar, 2026-07-21).
+  const isRange = filters.period === 'custom' && !!filters.from && !!filters.to;
+  const showMonthsControl = hasMonthsControl && !isRange;
+  const showBenchmarkControl = hasBenchmarkControl && !isRange;
   const extraParams = (() => {
     const p: Record<string, string> = {};
-    if (hasMonthsControl && monthsWindow) p.months = monthsWindow;
-    if (hasBenchmarkControl && benchmark) p.benchmark = benchmark;
+    if (showMonthsControl && monthsWindow) p.months = monthsWindow;
+    if (showBenchmarkControl && benchmark) p.benchmark = benchmark;
     if (hasPlatformControl && platform) p.platform = platform;
     return Object.keys(p).length ? p : undefined;
   })();
@@ -145,10 +151,10 @@ function MetricSectionCard({
     <Card style={{ padding: 18 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <SectionHeader label={section.label} sub={data?.status && data.status !== 'ok' ? statusNote(data) : undefined} />
-        {(hasMonthsControl || hasBenchmarkControl || showPlatformControl) && (
+        {(showMonthsControl || showBenchmarkControl || showPlatformControl) && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            {hasMonthsControl && <Segmented options={MONTHS_OPTIONS} value={monthsWindow} onChange={setMonthsWindow} />}
-            {hasBenchmarkControl && (
+            {showMonthsControl && <Segmented options={MONTHS_OPTIONS} value={monthsWindow} onChange={setMonthsWindow} />}
+            {showBenchmarkControl && (
               <>
                 <span className="muted text-sm">Benchmark</span>
                 <Segmented options={BENCHMARK_OPTIONS} value={benchmark} onChange={setBenchmark} />

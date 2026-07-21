@@ -48,6 +48,9 @@ final class WeekSplit
                 'start' => $cursor->toDateString(),
                 'end'   => $bucketEnd->toDateString(),
                 'label' => self::label($cursor, $bucketEnd),
+                // ISO-8601 week-of-year (Mon-based); a clamped partial week keeps
+                // the number of the ISO week it belongs to. Shown as "W18".
+                'week'  => (int) $cursor->format('W'),
             ];
 
             $cursor = $bucketEnd->addDay();
