@@ -39,6 +39,50 @@ final class AdProductClassifyTest extends TestCase
         $this->assertSame(AdProductFetcher::RESERVED_OTHER, AdProductFetcher::classify(''));
     }
 
+    public function test_reconcile_tops_up_other_to_the_campaign_truth(): void
+    {
+        // Incident fix (Kanwar, 2026-07-22): level=ad is ~35% short on Advantage+/
+        // partnership/dark spend, which has no ad row. reconcileToCampaign adds the
+        // per-day remainder to __other so the product table reconciles to the
+        // campaign truth — money shown honestly, never dropped or faked onto a product.
+        $rows = [
+            ['date' => '2026-07-01', 'key' => 'amboise-studs', 'spend' => 600.0, 'ads' => 2, 'currency' => 'EUR'],
+            ['date' => '2026-07-01', 'key' => '__other',       'spend' => 100.0, 'ads' => 1, 'currency' => 'EUR'],
+            ['date' => '2026-07-02', 'key' => 'amboise-studs', 'spend' => 500.0, 'ads' => 1, 'currency' => 'EUR'],
+        ];
+        // Day 1 campaign truth 1000 (attributed 700 → +300 to __other); day 2 truth
+        // 800 (attributed 500, no __other row → append 300); day 3 truth with no rows.
+        $campaignByDay = ['2026-07-01' => 1000.0, '2026-07-02' => 800.0, '2026-07-03' => 250.0];
+
+        $out = AdProductFetcher::reconcileToCampaign($rows, $campaignByDay, 'EUR');
+
+        // Each day's rows now sum to the campaign truth.
+        $sum = static function (array $rows, string $day): float {
+            return array_sum(array_map(
+                static fn ($r) => $r['date'] === $day ? (float) $r['spend'] : 0.0,
+                $rows,
+            ));
+        };
+        $this->assertEqualsWithDelta(1000.0, $sum($out, '2026-07-01'), 0.001);
+        $this->assertEqualsWithDelta(800.0, $sum($out, '2026-07-02'), 0.001);
+        $this->assertEqualsWithDelta(250.0, $sum($out, '2026-07-03'), 0.001); // appended __other only
+
+        // The existing product row is untouched — only __other absorbs the remainder.
+        $amboiseD1 = array_values(array_filter($out, static fn ($r) => $r['date'] === '2026-07-01' && $r['key'] === 'amboise-studs'));
+        $this->assertEqualsWithDelta(600.0, $amboiseD1[0]['spend'], 0.001);
+        $otherD1 = array_values(array_filter($out, static fn ($r) => $r['date'] === '2026-07-01' && $r['key'] === '__other'));
+        $this->assertEqualsWithDelta(400.0, $otherD1[0]['spend'], 0.001); // 100 + 300
+
+        // A day where ad-level already meets/exceeds campaign is left alone.
+        $noTouch = AdProductFetcher::reconcileToCampaign(
+            [['date' => '2026-07-04', 'key' => 'x', 'spend' => 900.0, 'ads' => 1, 'currency' => 'EUR']],
+            ['2026-07-04' => 850.0],
+            'EUR',
+        );
+        $this->assertCount(1, $noTouch); // no __other appended
+        $this->assertEqualsWithDelta(900.0, $noTouch[0]['spend'], 0.001);
+    }
+
     public function test_extract_url_reads_the_confirmed_creative_field_paths(): void
     {
         // Regression guard on extractUrl's field precedence (video CTA → link_data

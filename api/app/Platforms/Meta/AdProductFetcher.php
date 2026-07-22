@@ -55,8 +55,21 @@ class AdProductFetcher
 
         // day => key => ['spend' => float, 'ads' => array<adId,true>]
         $agg = [];
+        // day => campaign-level spend (the reconciling truth). recon:ads-spend
+        // confirmed campaign spend == account spend within 0.5%. Used to top up
+        // __other so the product table captures the ~35% of Meta spend that has
+        // NO ad-level row to attribute (Advantage+ / partnership / dark posts).
+        $campaignByDay = [];
 
         foreach ($accountIds as $accountId) {
+            // Campaign-level truth FIRST — before the ad-level continue below —
+            // because an account whose spend is entirely partnership/dark returns
+            // no ad-level rows at all, yet its campaign spend is real and must
+            // still land in the product table's __other, never be dropped.
+            foreach ($this->campaignSpendByDay($accountId, $from, $to) as $day => $sp) {
+                $campaignByDay[$day] = ($campaignByDay[$day] ?? 0.0) + $sp;
+            }
+
             // Pull spend ONE DAY AT A TIME, FOLLOWING PAGINATION.
             //
             // ══ WHY paged(), NOT get() WITH limit:500 ══
@@ -134,7 +147,89 @@ class AdProductFetcher
             }
         }
 
+        // Reconcile the product table to the campaign truth: any per-day spend the
+        // ad-level pull couldn't see (partnership/dark = no ad rows; Advantage+/
+        // dynamic = partial) is added to __other, so Σ(product rows) == account
+        // spend. The money is shown honestly as "not product-specific", never
+        // dropped and never faked onto a product (Kanwar, 2026-07-22 incident).
+        return self::reconcileToCampaign($out, $campaignByDay, $ccy);
+    }
+
+    /**
+     * Campaign-level spend per day for one account over the range (one call,
+     * time_increment=1). This is the reconciling truth — recon:ads-spend measured
+     * campaign spend == account spend to the cent, while the level=ad pull runs
+     * ~35% short on accounts heavy with Advantage+ / partnership / dark-post ads.
+     * Degrades to [] on failure (no top-up rather than a wrong one).
+     *
+     * @return array<string, float> date (Y-m-d) => spend
+     */
+    private function campaignSpendByDay(string $accountId, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        try {
+            $rows = $this->client->paged($accountId . '/insights', [
+                'level'          => 'campaign',
+                'fields'         => 'spend',
+                'time_range'     => json_encode(['since' => $from->toDateString(), 'until' => $to->toDateString()]),
+                'time_increment' => 1,
+                'limit'          => 500,
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('meta.ad_product.campaign_insights_failed', ['account' => $accountId, 'error' => $e->getMessage()]);
+
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $r) {
+            // With time_increment=1 each row carries its day in date_start.
+            $day = substr((string) ($r['date_start'] ?? ''), 0, 10);
+            $sp  = (float) ($r['spend'] ?? 0);
+            if ($day !== '' && $sp > 0) {
+                $out[$day] = ($out[$day] ?? 0.0) + $sp;
+            }
+        }
+
         return $out;
+    }
+
+    /**
+     * Top up the __other bucket per day so the product rows reconcile to the
+     * campaign-level truth. For each day whose campaign spend exceeds the summed
+     * attributed spend, the positive remainder is added to that day's __other row
+     * (created if absent). A day where the ad level already ≥ campaign is left
+     * alone (never subtract). Pure — unit-tested without any Meta call.
+     *
+     * @param array<int, array{date:string, key:string, spend:float, ads:int, currency:string}> $rows
+     * @param array<string, float> $campaignByDay
+     * @return array<int, array{date:string, key:string, spend:float, ads:int, currency:string}>
+     */
+    public static function reconcileToCampaign(array $rows, array $campaignByDay, string $ccy): array
+    {
+        $sumByDay      = [];
+        $otherIdxByDay = [];
+        foreach ($rows as $i => $r) {
+            $day = (string) $r['date'];
+            $sumByDay[$day] = ($sumByDay[$day] ?? 0.0) + (float) $r['spend'];
+            if ($r['key'] === self::RESERVED_OTHER) {
+                $otherIdxByDay[$day] = $i;
+            }
+        }
+
+        foreach ($campaignByDay as $day => $campaignSpend) {
+            $day  = (string) $day;
+            $diff = round((float) $campaignSpend - ($sumByDay[$day] ?? 0.0), 2);
+            if ($diff <= 0.01) {
+                continue; // ad-level already reconciles (or exceeds) — nothing to add
+            }
+            if (isset($otherIdxByDay[$day])) {
+                $rows[$otherIdxByDay[$day]]['spend'] = round((float) $rows[$otherIdxByDay[$day]]['spend'] + $diff, 2);
+            } else {
+                $rows[] = ['date' => $day, 'key' => self::RESERVED_OTHER, 'spend' => $diff, 'ads' => 0, 'currency' => $ccy];
+            }
+        }
+
+        return $rows;
     }
 
     /**
