@@ -1,11 +1,18 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/shell/AppLayout';
 import { Avatar, Banner, Button, Card, Dot, Modal, Input, PageHeader, Tag } from '@/components/ui';
 import { useAuditLogs } from '@/hooks/useApiData';
 import { useCurrentUser } from '@/hooks/useSettings';
-import { mfaDisable, mfaRegenerateRecoveryCodes } from '@/lib/auth';
+import {
+  mfaDisable,
+  mfaRegenerateRecoveryCodes,
+  listTrustedDevices,
+  revokeTrustedDevice,
+  revokeAllTrustedDevices,
+  type TrustedDevice,
+} from '@/lib/auth';
 import { toast } from '@/stores/toastStore';
 
 const ROLE_LABEL: Record<string, string> = {
@@ -143,6 +150,7 @@ export function ProfilePage() {
               <RecoveryCodesButton />
             </div>
           )}
+          {user.mfaEnabled && <TrustedDevicesRow />}
           <div className="list-row">
             <div className="list-row-main">
               <div className="list-row-title">Last sign-in</div>
@@ -205,6 +213,94 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
     >
       <div style={{ width: 140, fontSize: 13, color: 'var(--text-muted)' }}>{label}</div>
       <div style={{ flex: 1, fontSize: 14, color: 'var(--text)' }}>{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Trusted devices (Kanwar, 2026-07-22) — the browsers currently allowed to skip
+ * the 2FA code, with when each was last used and when its trust expires. Each can
+ * be revoked (forces a code on that browser's next login), plus a "Sign out of
+ * all" for the "this wasn't me" case. Renders inline in the sign-in security card.
+ */
+function TrustedDevicesRow() {
+  const qc = useQueryClient();
+  const { data: devices, isLoading } = useQuery({
+    queryKey: ['auth', 'trusted-devices'],
+    queryFn: listTrustedDevices,
+    staleTime: 60_000,
+  });
+  const [busyId, setBusyId] = useState<number | 'all' | null>(null);
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ['auth', 'trusted-devices'] });
+
+  const revokeOne = async (d: TrustedDevice) => {
+    setBusyId(d.id);
+    try {
+      await revokeTrustedDevice(d.id);
+      toast.success('Device removed', `${d.label ?? 'That browser'} will ask for a code next time.`);
+      refresh();
+    } catch (err: any) {
+      toast.error('Couldn’t remove device', err?.response?.data?.message ?? err?.message ?? 'Please try again.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const revokeAll = async () => {
+    setBusyId('all');
+    try {
+      await revokeAllTrustedDevices();
+      toast.success('All devices signed out', 'Every browser will ask for a code next login.');
+      refresh();
+    } catch (err: any) {
+      toast.error('Couldn’t sign out devices', err?.response?.data?.message ?? err?.message ?? 'Please try again.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const list = devices ?? [];
+
+  return (
+    <div className="list-row" style={{ alignItems: 'flex-start' }}>
+      <div className="list-row-main" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <div className="list-row-title">Trusted devices</div>
+          {list.length > 0 && (
+            <Button size="sm" variant="ghost" type="button" disabled={busyId === 'all'} onClick={revokeAll}>
+              {busyId === 'all' ? 'Signing out…' : 'Sign out of all'}
+            </Button>
+          )}
+        </div>
+        {isLoading ? (
+          <div className="list-row-sub">Loading…</div>
+        ) : list.length === 0 ? (
+          <div className="list-row-sub">
+            No trusted devices. Tick “Trust this device” at sign-in to skip the code for 14 days on that browser.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+            {list.map((d) => (
+              <div
+                key={d.id}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 13 }}
+              >
+                <div>
+                  <div style={{ fontWeight: 500 }}>{d.label ?? 'Unknown device'}</div>
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    {d.lastUsedAt ? `Last used ${new Date(d.lastUsedAt).toLocaleString()}` : 'Not used yet'}
+                    {' · '}Trusted until {new Date(d.expiresAt).toLocaleDateString()}
+                  </div>
+                </div>
+                <Button size="sm" variant="ghost" type="button" disabled={busyId === d.id} onClick={() => revokeOne(d)}>
+                  {busyId === d.id ? 'Removing…' : 'Remove'}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

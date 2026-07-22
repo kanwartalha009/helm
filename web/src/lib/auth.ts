@@ -5,16 +5,41 @@ import { api } from './api';
 import type { User } from '@/types/domain';
 
 const TOKEN_KEY = 'helm.auth.token';
+// Per-browser trusted-device token (Kanwar, 2026-07-22). Saved after a "Trust
+// this device" MFA challenge and replayed on future logins so this browser skips
+// the 2FA code for 14 days. Deliberately NOT cleared on logout — the whole point
+// is that signing back in on the same browser skips the code. It's cleared only
+// when the user revokes the device (server-side the row is gone, so a stale local
+// token simply falls through to a normal challenge).
+const TRUSTED_KEY = 'helm.mfa.trusted_device';
+
+export function getTrustedDeviceToken(): string | null {
+  return localStorage.getItem(TRUSTED_KEY);
+}
+
+export function clearTrustedDeviceToken(): void {
+  localStorage.removeItem(TRUSTED_KEY);
+}
 
 export interface LoginResponse {
   user?: User;
   token?: string;
   mfa_required?: boolean;
   pending_token?: string;
+  // True when this browser's trusted-device token let the user skip the code.
+  trusted_device?: boolean;
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
-  const { data } = await api.post<LoginResponse>('/auth/login', { email, password });
+  // Replay this browser's trusted-device token (if any) so an MFA-enrolled user
+  // skips the code here. An absent/expired/foreign token is simply ignored by
+  // the backend and the normal challenge kicks in.
+  const trusted = getTrustedDeviceToken() ?? undefined;
+  const { data } = await api.post<LoginResponse>('/auth/login', {
+    email,
+    password,
+    ...(trusted ? { trusted_device_token: trusted } : {}),
+  });
   // Only persist the token when MFA wasn't required. If MFA is required the
   // backend returned mfa_required + pending_token (and no Sanctum token yet).
   if (data.token && !data.mfa_required) {
@@ -28,12 +53,18 @@ export interface MfaVerifyChallengeResponse {
   token: string;
   // True when the user signed in with a single-use recovery code.
   recoveryUsed?: boolean;
+  // Present only when the user ticked "Trust this device" — the opaque token to
+  // save for future logins on this browser.
+  trusted_device_token?: string | null;
 }
 
 export async function verifyMfaChallenge(input: {
   pending_token: string;
   // A 6-digit TOTP OR a single-use recovery code — the backend detects which.
   code: string;
+  // When true the backend mints a trusted-device token so this browser skips
+  // the code for 14 days.
+  remember_device?: boolean;
 }): Promise<MfaVerifyChallengeResponse> {
   // Public login-challenge endpoint (distinct from the authenticated
   // enrollment /auth/mfa/verify) — the pending_token is the bearer of trust.
@@ -41,7 +72,34 @@ export async function verifyMfaChallenge(input: {
   if (data.token) {
     localStorage.setItem(TOKEN_KEY, data.token);
   }
+  if (data.trusted_device_token) {
+    localStorage.setItem(TRUSTED_KEY, data.trusted_device_token);
+  }
   return data;
+}
+
+export interface TrustedDevice {
+  id: number;
+  label: string | null;
+  lastIp: string | null;
+  lastUsedAt: string | null;
+  expiresAt: string;
+  createdAt: string | null;
+}
+
+export async function listTrustedDevices(): Promise<TrustedDevice[]> {
+  const { data } = await api.get<{ devices: TrustedDevice[] }>('/auth/trusted-devices');
+  return data.devices;
+}
+
+export async function revokeTrustedDevice(id: number): Promise<void> {
+  await api.delete(`/auth/trusted-devices/${id}`);
+}
+
+export async function revokeAllTrustedDevices(): Promise<void> {
+  await api.delete('/auth/trusted-devices');
+  // This browser's own token (if it was one of them) is now dead server-side.
+  clearTrustedDeviceToken();
 }
 
 export interface MfaSetupResponse {

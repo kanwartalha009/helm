@@ -100,6 +100,12 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function (): void {
         // Regenerate single-use recovery codes (password-gated). Returns the
         // new plaintext set once.
         Route::post('mfa/recovery-codes', [AuthController::class, 'mfaRecoveryCodes']);
+        // Trusted devices (Kanwar, 2026-07-22) — browsers that skip the 2FA code
+        // for 14 days. List them, revoke one, or revoke all (the "this wasn't me"
+        // button) from the profile's sign-in security section.
+        Route::get('trusted-devices',              [AuthController::class, 'trustedDevices']);
+        Route::delete('trusted-devices/{device}',  [AuthController::class, 'revokeTrustedDevice'])->whereNumber('device');
+        Route::delete('trusted-devices',           [AuthController::class, 'revokeAllTrustedDevices']);
     });
 
     // Workspace settings — General tab (master_admin only).

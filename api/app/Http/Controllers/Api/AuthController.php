@@ -9,6 +9,7 @@ use App\Http\Requests\ChangePasswordRequest;
 use App\Http\Requests\LoginRequest;
 use App\Http\Resources\UserResource;
 use App\Models\AuditLog;
+use App\Models\MfaTrustedDevice;
 use App\Models\User;
 use App\Models\WorkspaceSetting;
 use App\Support\NtpTime;
@@ -53,6 +54,35 @@ class AuthController extends Controller
         // SPA routes to /mfa/verify. /mfa/verify takes the pending_token +
         // a TOTP code and issues the real Sanctum token on success.
         if ($user->mfa_secret) {
+            // Trusted device (Kanwar, 2026-07-22): if THIS browser was trusted
+            // within the window, the password alone is enough — skip the code.
+            // The token is bound to this user_id, so a token for someone else (or
+            // an expired one) simply falls through to the normal challenge.
+            $device = $this->matchTrustedDevice($user, $request->input('trusted_device_token'));
+            if ($device !== null) {
+                $device->forceFill(['last_used_at' => now(), 'last_ip' => $request->ip()])->save();
+
+                $user->forceFill(['last_login_at' => now(), 'last_login_ip' => $request->ip()])->save();
+
+                AuditLog::create([
+                    'actor_user_id' => $user->id,
+                    'action'        => 'auth.mfa.trusted_device_used',
+                    'target_type'   => 'user',
+                    'target_id'     => $user->id,
+                    'metadata'      => ['device' => $device->label],
+                    'ip'            => $request->ip(),
+                    'user_agent'    => $request->userAgent(),
+                ]);
+
+                $token = $user->createToken('helm-spa')->plainTextToken;
+
+                return response()->json([
+                    'user'  => new UserResource($user->fresh()),
+                    'token' => $token,
+                    'trusted_device' => true,
+                ]);
+            }
+
             $pending = Str::random(64);
             Cache::put('helm.mfa.pending.' . $pending, $user->id, now()->addMinutes(5));
             return response()->json([
@@ -221,6 +251,11 @@ class AuthController extends Controller
         $user->tokens()
             ->when($currentTokenId, fn ($q) => $q->where('id', '!=', $currentTokenId))
             ->delete();
+
+        // A password change invalidates every trusted device — a new password
+        // means the old "this browser is safe" assumption no longer holds, so
+        // every device is re-challenged for a code on its next login.
+        $user->trustedDevices()->delete();
 
         AuditLog::create([
             'actor_user_id' => $user->id,
@@ -422,6 +457,9 @@ class AuthController extends Controller
             // below decides which. Wider than size:6 so recovery codes fit.
             'code'          => ['required', 'string', 'max:32'],
             'pending_token' => ['sometimes', 'string'],
+            // "Trust this device" — when true, a successful login-challenge mints
+            // a trusted-device token so this browser skips the code for 14 days.
+            'remember_device' => ['sometimes', 'boolean'],
         ]);
 
         $code = trim($data['code']);
@@ -477,12 +515,23 @@ class AuthController extends Controller
                 'user_agent'    => $request->userAgent(),
             ]);
 
+            // "Trust this device" — mint a 14-day trusted-device token so this
+            // browser skips the code next time. Only the hash is stored; the raw
+            // token is returned once for the browser to save (Kanwar, 2026-07-22).
+            $trustedToken = null;
+            if ($request->boolean('remember_device')) {
+                $trustedToken = $this->issueTrustedDevice($user, $request);
+            }
+
             $token = $user->createToken('helm-spa')->plainTextToken;
             return response()->json([
                 'user'  => new UserResource($user->fresh()),
                 'token' => $token,
                 // So the SPA can warn "you have N recovery codes left" after a recovery login.
                 'recoveryUsed' => $viaRecovery,
+                // Present only when the user asked to trust this device — the SPA
+                // saves it and replays it on future logins. Null/absent otherwise.
+                'trusted_device_token' => $trustedToken,
             ]);
         }
 
@@ -654,6 +703,9 @@ class AuthController extends Controller
         }
 
         $user->update(['mfa_secret' => null, 'mfa_recovery_codes' => null]);
+        // Turning MFA off makes trusted devices meaningless — clear them so a
+        // re-enrollment later starts from a clean slate (no stale trusted rows).
+        $user->trustedDevices()->delete();
 
         AuditLog::create([
             'actor_user_id' => $user->id,
@@ -669,6 +721,142 @@ class AuthController extends Controller
             'enabled' => false,
             'user'    => new UserResource($user->fresh()),
         ]);
+    }
+
+    /**
+     * GET /api/auth/trusted-devices
+     *
+     * The browsers this user has trusted so 2FA is skipped there (Kanwar,
+     * 2026-07-22). Expired rows are pruned first so the list only shows devices
+     * that are actually still skipping the code. Never exposes the token hash.
+     */
+    public function trustedDevices(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user, 401);
+
+        $user->trustedDevices()->where('expires_at', '<=', now())->delete();
+
+        $devices = $user->trustedDevices()
+            ->orderByDesc('last_used_at')
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(static fn (MfaTrustedDevice $d): array => [
+                'id'         => $d->id,
+                'label'      => $d->label,
+                'lastIp'     => $d->last_ip,
+                'lastUsedAt' => optional($d->last_used_at)->toIso8601String(),
+                'expiresAt'  => $d->expires_at->toIso8601String(),
+                'createdAt'  => $d->created_at?->toIso8601String(),
+            ]);
+
+        return response()->json(['devices' => $devices]);
+    }
+
+    /**
+     * DELETE /api/auth/trusted-devices/{device}
+     *
+     * Revoke ONE trusted device — its next login on that browser asks for a code
+     * again. Scoped to the caller's own devices (a 404 for anyone else's id, so
+     * the endpoint never confirms another user's device exists).
+     */
+    public function revokeTrustedDevice(Request $request, int $device): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user, 401);
+
+        $deleted = $user->trustedDevices()->whereKey($device)->delete();
+        if ($deleted === 0) {
+            return response()->json(['message' => 'Trusted device not found.'], 404);
+        }
+
+        AuditLog::create([
+            'actor_user_id' => $user->id,
+            'action'        => 'auth.mfa.trusted_device_revoked',
+            'target_type'   => 'user',
+            'target_id'     => $user->id,
+            'metadata'      => ['device_id' => $device],
+            'ip'            => $request->ip(),
+            'user_agent'    => $request->userAgent(),
+        ]);
+
+        return response()->json(null, 204);
+    }
+
+    /**
+     * DELETE /api/auth/trusted-devices
+     *
+     * Revoke ALL trusted devices at once — the "this wasn't me / sign every
+     * browser back into 2FA" button. Every device is re-challenged next login.
+     */
+    public function revokeAllTrustedDevices(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user, 401);
+
+        $count = $user->trustedDevices()->delete();
+
+        AuditLog::create([
+            'actor_user_id' => $user->id,
+            'action'        => 'auth.mfa.trusted_devices_cleared',
+            'target_type'   => 'user',
+            'target_id'     => $user->id,
+            'metadata'      => ['count' => $count],
+            'ip'            => $request->ip(),
+            'user_agent'    => $request->userAgent(),
+        ]);
+
+        return response()->json(['cleared' => $count]);
+    }
+
+    /**
+     * Resolve a raw trusted-device token to THIS user's live device row, or null.
+     * Null when the token is empty, unknown, belongs to another user, or expired
+     * — every one of which falls through to the normal code challenge. Expiry is
+     * enforced in the query, so a lapsed device never skips the code.
+     */
+    private function matchTrustedDevice(User $user, ?string $rawToken): ?MfaTrustedDevice
+    {
+        $rawToken = is_string($rawToken) ? trim($rawToken) : '';
+        if ($rawToken === '') {
+            return null;
+        }
+
+        return $user->trustedDevices()
+            ->where('token_hash', MfaTrustedDevice::hash($rawToken))
+            ->where('expires_at', '>', now())
+            ->first();
+    }
+
+    /**
+     * Mint a new trusted-device row for this user and return the RAW token (the
+     * only time it exists outside the browser). Only the hash is persisted, with
+     * a fixed 14-day expiry and a human label from the user agent.
+     */
+    private function issueTrustedDevice(User $user, Request $request): string
+    {
+        $raw = MfaTrustedDevice::newRawToken();
+
+        MfaTrustedDevice::create([
+            'user_id'      => $user->id,
+            'token_hash'   => MfaTrustedDevice::hash($raw),
+            'label'        => MfaTrustedDevice::labelFromUserAgent($request->userAgent()),
+            'last_ip'      => $request->ip(),
+            'last_used_at' => now(),
+            'expires_at'   => now()->addDays(MfaTrustedDevice::TRUST_DAYS),
+        ]);
+
+        AuditLog::create([
+            'actor_user_id' => $user->id,
+            'action'        => 'auth.mfa.trusted_device_added',
+            'target_type'   => 'user',
+            'target_id'     => $user->id,
+            'metadata'      => ['days' => MfaTrustedDevice::TRUST_DAYS],
+            'ip'            => $request->ip(),
+            'user_agent'    => $request->userAgent(),
+        ]);
+
+        return $raw;
     }
 
     /**

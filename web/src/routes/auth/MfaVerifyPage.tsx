@@ -23,6 +23,9 @@ export function MfaVerifyPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingToken, setPendingToken] = useState<string | null>(null);
+  // "Trust this device for 14 days" — default ON so most users stop getting
+  // asked every login (Kanwar, 2026-07-22). Uncheck on a shared/public computer.
+  const [rememberDevice, setRememberDevice] = useState(true);
 
   useEffect(() => {
     const token = sessionStorage.getItem('helm.mfa.pending');
@@ -48,7 +51,7 @@ export function MfaVerifyPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await verifyMfaChallenge({ pending_token: pendingToken, code: code.trim() });
+      const res = await verifyMfaChallenge({ pending_token: pendingToken, code: code.trim(), remember_device: rememberDevice });
       sessionStorage.removeItem('helm.mfa.pending');
       if (res.recoveryUsed) {
         const left = res.user.mfaRecoveryCodesRemaining ?? 0;
@@ -133,6 +136,22 @@ export function MfaVerifyPage() {
               }}
             />
           )}
+          <label
+            style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}
+          >
+            <input
+              type="checkbox"
+              checked={rememberDevice}
+              onChange={(e) => setRememberDevice(e.target.checked)}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              Trust this device for 14 days
+              <span className="muted" style={{ display: 'block', fontSize: 11 }}>
+                Skip the code on this browser next time. Leave off on a shared or public computer.
+              </span>
+            </span>
+          </label>
           <Button
             type="submit"
             variant="primary"

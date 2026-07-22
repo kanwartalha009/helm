@@ -67,6 +67,12 @@ class User extends Authenticatable
         return $this->hasMany(AuditLog::class, 'actor_user_id');
     }
 
+    /** Browsers this user has trusted so 2FA is skipped there for a fixed window. */
+    public function trustedDevices(): HasMany
+    {
+        return $this->hasMany(MfaTrustedDevice::class);
+    }
+
     /**
      * Many-to-many to brands, scoped by the brand_user_access pivot. Used by
      * the UserResource + EnsureUserCanAccessBrand middleware to enforce that

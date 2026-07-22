@@ -200,6 +200,125 @@ class MfaTest extends TestCase
         $this->assertNull($user->mfa_recovery_codes);
     }
 
+    public function test_trusting_a_device_skips_the_code_on_the_next_login(): void
+    {
+        // Kanwar, 2026-07-22 — "keep browser device history so we don't need the
+        // code every login". A challenge with remember_device=true mints a
+        // trusted-device token; replaying it on the next login skips the code.
+        $g = new Google2FA();
+        $secret = $g->generateSecretKey(32);
+        $user = $this->user(['mfa_secret' => $secret]);
+
+        $pending = $this->postJson('/api/auth/login', ['email' => $user->email, 'password' => self::PASSWORD])->json('pending_token');
+        $trusted = $this->postJson('/api/auth/mfa/challenge', [
+            'pending_token'   => $pending,
+            'code'            => $this->totp($secret),
+            'remember_device' => true,
+        ])->assertOk()->json('trusted_device_token');
+
+        $this->assertNotEmpty($trusted);
+        $this->assertDatabaseCount('mfa_trusted_devices', 1);
+        // Stored hashed, never raw.
+        $this->assertDatabaseMissing('mfa_trusted_devices', ['token_hash' => $trusted]);
+
+        // Next login WITH the token → straight in, no challenge, real token issued.
+        $this->postJson('/api/auth/login', [
+            'email'                => $user->email,
+            'password'             => self::PASSWORD,
+            'trusted_device_token' => $trusted,
+        ])
+            ->assertOk()
+            ->assertJsonPath('trusted_device', true)
+            ->assertJsonStructure(['user', 'token'])
+            ->assertJsonMissingPath('mfa_required');
+    }
+
+    public function test_a_login_without_remember_still_challenges_next_time(): void
+    {
+        $g = new Google2FA();
+        $secret = $g->generateSecretKey(32);
+        $user = $this->user(['mfa_secret' => $secret]);
+
+        $pending = $this->postJson('/api/auth/login', ['email' => $user->email, 'password' => self::PASSWORD])->json('pending_token');
+        $res = $this->postJson('/api/auth/mfa/challenge', ['pending_token' => $pending, 'code' => $this->totp($secret)])
+            ->assertOk();
+        $this->assertNull($res->json('trusted_device_token'));
+        $this->assertDatabaseCount('mfa_trusted_devices', 0);
+
+        // No token to present → normal challenge again.
+        $this->postJson('/api/auth/login', ['email' => $user->email, 'password' => self::PASSWORD])
+            ->assertOk()->assertJsonPath('mfa_required', true);
+    }
+
+    public function test_an_expired_or_foreign_trusted_token_does_not_skip_the_code(): void
+    {
+        $g = new Google2FA();
+        $user  = $this->user(['mfa_secret' => $g->generateSecretKey(32)]);
+        $other = $this->user(['mfa_secret' => $g->generateSecretKey(32), 'email' => 'other@helm.test']);
+
+        // An EXPIRED device for the real user.
+        $expiredRaw = \App\Models\MfaTrustedDevice::newRawToken();
+        \App\Models\MfaTrustedDevice::create([
+            'user_id' => $user->id, 'token_hash' => \App\Models\MfaTrustedDevice::hash($expiredRaw),
+            'label' => 'Old', 'expires_at' => now()->subDay(),
+        ]);
+        // A LIVE device that belongs to someone else.
+        $foreignRaw = \App\Models\MfaTrustedDevice::newRawToken();
+        \App\Models\MfaTrustedDevice::create([
+            'user_id' => $other->id, 'token_hash' => \App\Models\MfaTrustedDevice::hash($foreignRaw),
+            'label' => 'Theirs', 'expires_at' => now()->addDays(14),
+        ]);
+
+        foreach ([$expiredRaw, $foreignRaw, 'totally-made-up'] as $tok) {
+            $this->postJson('/api/auth/login', [
+                'email' => $user->email, 'password' => self::PASSWORD, 'trusted_device_token' => $tok,
+            ])->assertOk()->assertJsonPath('mfa_required', true);
+        }
+    }
+
+    public function test_changing_the_password_revokes_trusted_devices(): void
+    {
+        $g = new Google2FA();
+        $user = $this->user(['mfa_secret' => $g->generateSecretKey(32)]);
+        \App\Models\MfaTrustedDevice::create([
+            'user_id' => $user->id, 'token_hash' => \App\Models\MfaTrustedDevice::hash('x'),
+            'label' => 'Chrome on macOS', 'expires_at' => now()->addDays(14),
+        ]);
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/auth/password', [
+            'current_password'          => self::PASSWORD,
+            'new_password'              => 'a-brand-new-passphrase',
+            'new_password_confirmation' => 'a-brand-new-passphrase',
+        ])->assertOk();
+
+        $this->assertDatabaseCount('mfa_trusted_devices', 0);
+    }
+
+    public function test_user_can_list_and_revoke_their_trusted_devices(): void
+    {
+        $g = new Google2FA();
+        $user = $this->user(['mfa_secret' => $g->generateSecretKey(32)]);
+        $live = \App\Models\MfaTrustedDevice::create([
+            'user_id' => $user->id, 'token_hash' => \App\Models\MfaTrustedDevice::hash('live'),
+            'label' => 'Chrome on macOS', 'last_used_at' => now(), 'expires_at' => now()->addDays(14),
+        ]);
+        // An expired row is pruned by the list call, never shown as still trusted.
+        \App\Models\MfaTrustedDevice::create([
+            'user_id' => $user->id, 'token_hash' => \App\Models\MfaTrustedDevice::hash('dead'),
+            'label' => 'Old', 'expires_at' => now()->subDay(),
+        ]);
+        Sanctum::actingAs($user);
+
+        $list = $this->getJson('/api/auth/trusted-devices')->assertOk()->json('devices');
+        $this->assertCount(1, $list);
+        $this->assertSame('Chrome on macOS', $list[0]['label']);
+        $this->assertArrayNotHasKey('token_hash', $list[0]); // never leak the hash
+
+        $this->deleteJson("/api/auth/trusted-devices/{$live->id}")->assertNoContent();
+        $this->assertDatabaseCount('mfa_trusted_devices', 0);
+    }
+
     public function test_setup_uses_the_white_label_agency_name_as_the_totp_issuer(): void
     {
         \App\Models\WorkspaceSetting::setValue('report_branding', ['agency_name' => 'Acme Ads']);
