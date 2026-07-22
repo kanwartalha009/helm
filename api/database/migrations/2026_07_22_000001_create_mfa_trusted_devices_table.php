@@ -33,8 +33,12 @@ return new class extends Migration
             $table->string('last_ip', 45)->nullable();
             $table->timestamp('last_used_at')->nullable();
             // Fixed trust window (14 days) from when the device was trusted; after
-            // this the browser is challenged for a code again.
-            $table->timestamp('expires_at')->index();
+            // this the browser is challenged for a code again. NULLABLE on purpose:
+            // MySQL (strict mode, explicit_defaults_for_timestamp off) rejects a
+            // second `timestamp NOT NULL` with no default ("Invalid default value")
+            // — SQLite ignores that, so it only bites on prod. We always set this
+            // in code, and the `expires_at > now()` check naturally excludes NULLs.
+            $table->timestamp('expires_at')->nullable()->index();
             $table->timestamps();
 
             $table->index(['user_id', 'expires_at']);
