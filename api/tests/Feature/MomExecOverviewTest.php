@@ -396,6 +396,28 @@ class MomExecOverviewTest extends TestCase
         $this->assertEquals(80.0, $bags['share']);
     }
 
+    public function test_month_only_sections_hide_themselves_under_a_custom_range(): void
+    {
+        // Kanwar, 2026-07-22 — month-only sections (prior-year lookback S12,
+        // audience new-vs-existing spend S13, landing spend x sellers S17) have no
+        // week-on-week view, so in custom-range mode they return hidden=true and
+        // the card renders NOTHING instead of a confusing "No complete month
+        // selected". In month mode they behave exactly as before.
+        $this->actingMasterAdmin();
+        $brand = $this->makeBrand();
+
+        foreach (['S12', 'S13', 'S17'] as $key) {
+            $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/{$key}?period=custom&from=2026-06-01&to=2026-06-14&compare=last_year")
+                ->assertOk()
+                ->assertJsonPath('hidden', true);
+        }
+
+        // Month mode is unaffected — no hidden flag (the section renders normally,
+        // here as an honest no_data since this bare brand has nothing synced).
+        $monthRes = $this->getJson("/api/brands/{$brand->slug}/reports/mom/sections/S12?month=2026-06")->assertOk();
+        $this->assertNull($monthRes->json('hidden'));
+    }
+
     public function test_country_revenue_splits_into_week_on_week_matrix_under_a_custom_range(): void
     {
         // Kanwar, 2026-07-21 — S5 country revenue MoM under a custom range now

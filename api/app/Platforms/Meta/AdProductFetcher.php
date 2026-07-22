@@ -141,6 +141,15 @@ class AdProductFetcher
      * ad_id => product key (handle | __collection | __other), reading creatives
      * only for the given ids, batched with pacing to respect the rate limit.
      *
+     * H1 fix (Kanwar, 2026-07-22 — Bruna amboise incident): the creative read now
+     * ALSO requests `effective_object_story_spec`. Paid-Partnership / whitelisted /
+     * dark-post ads (the bulk of Bruna's amboise spend) run from a CREATOR's page,
+     * so their OWN `object_story_spec` comes back empty and their landing URL was
+     * lost → the spend fell to `__other`. `effective_object_story_spec` is Meta's
+     * RESOLVED story for the ad (creator posts included), which is where the link
+     * actually lives. Additive: normal ads still resolve via object_story_spec
+     * exactly as before; this only adds a fallback for the ads that had nothing.
+     *
      * @param array<int, string> $adIds
      * @return array<string, string>
      */
@@ -151,7 +160,10 @@ class AdProductFetcher
             try {
                 $batch = $this->client->get('', [
                     'ids'    => implode(',', $chunk),
-                    'fields' => 'id,creative{object_story_spec{link_data{link,call_to_action},video_data{call_to_action},template_data{link}},asset_feed_spec{link_urls},link_url,template_url}',
+                    'fields' => 'id,creative{'
+                        . 'object_story_spec{link_data{link,call_to_action},video_data{call_to_action},template_data{link}},'
+                        . 'effective_object_story_spec{link_data{link,call_to_action},video_data{call_to_action},template_data{link}},'
+                        . 'asset_feed_spec{link_urls},link_url,template_url}',
                 ]);
             } catch (Throwable $e) {
                 Log::warning('meta.ad_product.creatives_failed', ['error' => $e->getMessage(), 'count' => count($chunk)]);
@@ -194,18 +206,33 @@ class AdProductFetcher
      * Best-effort landing URL from a creative, across ad types (confirmed field
      * paths from the live probe). Returns '' when none is present.
      *
+     * Checks object_story_spec FIRST (normal ads — unchanged behaviour), then
+     * effective_object_story_spec (H1: partnership / whitelisted / dark-post ads,
+     * whose own object_story_spec is empty), then the asset feed and top-level
+     * link fields. First non-empty wins.
+     *
      * @param array<string, mixed> $c
      */
     public static function extractUrl(array $c): string
     {
         $oss  = (array) ($c['object_story_spec'] ?? []);
+        $eoss = (array) ($c['effective_object_story_spec'] ?? []);
         $feed = (array) ($c['asset_feed_spec'] ?? []);
 
+        // The landing link inside one story spec (object_story_spec OR its
+        // effective twin), in the priority order the live probe confirmed per ad
+        // type. Null-safe across missing intermediate keys.
+        $fromStory = static function (array $s): ?string {
+            return $s['video_data']['call_to_action']['value']['link'] // most common (video ads)
+                ?? $s['link_data']['link']
+                ?? $s['link_data']['call_to_action']['value']['link']
+                ?? $s['template_data']['link']
+                ?? null;
+        };
+
         $candidates = [
-            $oss['video_data']['call_to_action']['value']['link'] ?? null, // most common (video ads)
-            $oss['link_data']['link'] ?? null,
-            $oss['link_data']['call_to_action']['value']['link'] ?? null,
-            $oss['template_data']['link'] ?? null,
+            $fromStory($oss),                              // normal ads (unchanged)
+            $fromStory($eoss),                             // H1: partnership / whitelisted / dark posts
             $feed['link_urls'][0]['website_url'] ?? null,
             $c['link_url'] ?? null,
             $c['template_url'] ?? null,

@@ -45,6 +45,14 @@ final class SLandingSpendVsSellersSection implements MomSection
     public function build(Brand $brand, ReportFilters $filters): array
     {
         $tz = $brand->timezone ?: 'UTC';
+        // No week-on-week view for this section yet (its landing-spend-vs-sellers
+        // matrix is built per whole month), so hide the card in custom-range mode
+        // rather than show "No complete month selected" (Kanwar, 2026-07-22).
+        // `hidden` makes MomSectionCard render nothing.
+        if ($filters->isCustomRange()) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'hidden' => true];
+        }
+
         $window = $filters->monthWindow($tz);
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];

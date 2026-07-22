@@ -30,6 +30,15 @@ final class SPriorYearLookbackSection implements MomSection
     public function build(Brand $brand, ReportFilters $filters): array
     {
         $tz = $brand->timezone ?: 'UTC';
+        // This section is inherently month-based (it compares the report month's
+        // next month against the same month a year earlier), so it has no
+        // week-on-week equivalent. In custom-range mode hide the card entirely
+        // rather than show a confusing "No complete month selected" (Kanwar,
+        // 2026-07-22). `hidden` makes MomSectionCard render nothing.
+        if ($filters->isCustomRange()) {
+            return ['key' => $this->key(), 'status' => 'no_data', 'hidden' => true];
+        }
+
         $window = $filters->monthWindow($tz);
         if ($window === null) {
             return ['key' => $this->key(), 'status' => 'no_data', 'note' => 'No complete month selected.'];
