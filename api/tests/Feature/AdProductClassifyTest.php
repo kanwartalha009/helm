@@ -39,66 +39,23 @@ final class AdProductClassifyTest extends TestCase
         $this->assertSame(AdProductFetcher::RESERVED_OTHER, AdProductFetcher::classify(''));
     }
 
-    // ── H1 fix (Kanwar, 2026-07-22 — Bruna amboise incident) ──────────────────
-    // Partnership / whitelisted / dark-post ads run from a creator's page, so
-    // their OWN object_story_spec is empty and the link lives in
-    // effective_object_story_spec. extractUrl must fall through to it; before the
-    // fix these ads returned '' → __other, under-counting the product.
-
-    public function test_normal_ad_resolves_via_object_story_spec_unchanged(): void
+    public function test_extract_url_reads_the_confirmed_creative_field_paths(): void
     {
-        // A plain video ad with its own object_story_spec — the pre-fix path.
-        $creative = [
-            'object_story_spec' => [
-                'video_data' => ['call_to_action' => ['value' => ['link' => 'https://bruna.com/products/amboise-stud']]],
-            ],
-        ];
-        $this->assertSame('https://bruna.com/products/amboise-stud', AdProductFetcher::extractUrl($creative));
-        $this->assertSame('amboise-stud', AdProductFetcher::classify(AdProductFetcher::extractUrl($creative)));
-    }
-
-    public function test_partnership_ad_resolves_via_effective_object_story_spec(): void
-    {
-        // The incident shape: object_story_spec EMPTY (creator-owned post), the
-        // real landing link only in effective_object_story_spec.link_data.
-        $partnership = [
-            'object_story_spec'           => [],
-            'effective_object_story_spec' => [
-                'link_data' => ['link' => 'https://bruna.com/de/products/amboise-stud?utm=paid'],
-            ],
-        ];
-        $url = AdProductFetcher::extractUrl($partnership);
-        $this->assertSame('https://bruna.com/de/products/amboise-stud?utm=paid', $url);
-        // Locale prefix stripped, query dropped → the product row, NOT __other.
-        $this->assertSame('amboise-stud', AdProductFetcher::classify($url));
-    }
-
-    public function test_object_story_spec_still_wins_over_the_effective_twin(): void
-    {
-        // When BOTH are present the ad's own spec is authoritative (no regression).
-        $creative = [
-            'object_story_spec'           => ['link_data' => ['link' => 'https://bruna.com/products/real-target']],
-            'effective_object_story_spec' => ['link_data' => ['link' => 'https://bruna.com/products/other']],
-        ];
-        $this->assertSame('https://bruna.com/products/real-target', AdProductFetcher::extractUrl($creative));
-    }
-
-    public function test_partnership_video_cta_link_in_effective_spec(): void
-    {
-        // Partnership VIDEO ad — link under effective_object_story_spec.video_data.
-        $creative = [
-            'effective_object_story_spec' => [
-                'video_data' => ['call_to_action' => ['value' => ['link' => 'https://bruna.com/products/amboise-stud']]],
-            ],
-        ];
-        $this->assertSame('amboise-stud', AdProductFetcher::classify(AdProductFetcher::extractUrl($creative)));
-    }
-
-    public function test_genuinely_linkless_creative_still_falls_to_other(): void
-    {
-        // A creative with neither spec populated stays unattributed — but the
-        // caller counts it in __other (never dropped); here we just prove '' → __other.
-        $this->assertSame('', AdProductFetcher::extractUrl(['object_story_spec' => [], 'effective_object_story_spec' => []]));
-        $this->assertSame(AdProductFetcher::RESERVED_OTHER, AdProductFetcher::classify(''));
+        // Regression guard on extractUrl's field precedence (video CTA → link_data
+        // → template → asset feed → top-level). effective_object_story_spec is NOT
+        // read: it is not a field on the adcreative node (Meta error 100), and
+        // requesting it 400s the whole batch — proven live 2026-07-22.
+        $this->assertSame('https://s.com/products/a', AdProductFetcher::extractUrl([
+            'object_story_spec' => ['video_data' => ['call_to_action' => ['value' => ['link' => 'https://s.com/products/a']]]],
+        ]));
+        $this->assertSame('https://s.com/products/b', AdProductFetcher::extractUrl([
+            'object_story_spec' => ['link_data' => ['link' => 'https://s.com/products/b']],
+        ]));
+        $this->assertSame('https://s.com/products/c', AdProductFetcher::extractUrl([
+            'asset_feed_spec' => ['link_urls' => [['website_url' => 'https://s.com/products/c']]],
+        ]));
+        $this->assertSame('https://s.com/products/d', AdProductFetcher::extractUrl(['link_url' => 'https://s.com/products/d']));
+        // A creative with no readable link → '' (caller buckets it into __other).
+        $this->assertSame('', AdProductFetcher::extractUrl(['object_story_spec' => []]));
     }
 }

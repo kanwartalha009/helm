@@ -28,17 +28,17 @@ final class ReconAdsSpendCommand extends Command
     protected $signature = 'recon:ads-spend '
         . '{brand? : slug or id — omit to sweep every brand with an ad platform} '
         . '{--days=7 : window length, ending yesterday} '
-        . '{--from= : explicit start Y-m-d (overrides --days)} '
-        . '{--to= : explicit end Y-m-d (defaults to yesterday)} '
+        . '{--since= : explicit start Y-m-d (overrides --days)} '
+        . '{--until= : explicit end Y-m-d (defaults to yesterday)} '
         . '{--strict : exit non-zero if any pair is red (>5% drift)}';
 
     protected $description = 'Reconcile ads roll-up tables (product/campaign/creative/adset) vs their source of truth; flag drift.';
 
     public function handle(AdsSpendRecon $recon): int
     {
-        $to   = $this->option('to') ? CarbonImmutable::parse((string) $this->option('to')) : CarbonImmutable::yesterday();
-        $from = $this->option('from')
-            ? CarbonImmutable::parse((string) $this->option('from'))
+        $to   = $this->option('until') ? CarbonImmutable::parse((string) $this->option('until')) : CarbonImmutable::yesterday();
+        $from = $this->option('since')
+            ? CarbonImmutable::parse((string) $this->option('since'))
             : $to->subDays(max(1, (int) $this->option('days')) - 1);
         $fromStr = $from->toDateString();
         $toStr   = $to->toDateString();
